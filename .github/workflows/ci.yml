@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: lint + unit + integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest PyYAML ruff
+      - name: Ruff lint
+        run: ruff check .
+      - name: Unit tests
+        run: pytest -q
+      - name: Vendored integrity (offline, against the lock)
+        run: python scripts/vendor.py --check
+
+  vendor-verify:
+    name: supply-chain re-download verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install PyYAML
+      - name: Re-download every card and verify sha256 against the lock
+        run: python scripts/vendor.py
+      - name: Assert the committed vendored tree is exactly reproducible
+        run: git diff --exit-code -- custom_components
