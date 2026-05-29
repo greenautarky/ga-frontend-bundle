@@ -114,17 +114,36 @@ satisfied.
 - **loaded signal:** `ga_frontend_bundle` appears in `/api/config` `components`,
   and `GET /ga_frontend_bundle_static/<card>/<file>.js` returns 200.
 
-## 7. Ownership split
+## 7. Test coverage (what already exists vs. what's yours)
+
+Already written + green (additive, in `ha-operating-system/tests/ga_tests`, held for ping):
+- **Build / image-landing** (`run_build_tests.sh`, after BLD-FE-02): `BLD-FB-01..04` —
+  component present in rootfs-overlay, domain correct, **no `config_flow`**, and
+  `cards.json` ⇄ vendored files agree (no missing/orphan cards). Run locally: all pass.
+- **Device suite** (`ga_frontend_bundle/test.sh`, added to `run_all.sh` lists):
+  `FB-01..10` — placed, manifest/domain, no config_flow, cards.json + files,
+  enable-list key present, static path serves 200, **all cards serve**, **all
+  card modules injected into the index** (`add_extra_js_url` proof), no setup
+  failure. **Ran on KIB-SON-0: 10/10 pass.**
+- Repo CI (`ga-frontend-bundle`): ruff + 21 unit tests + offline integrity +
+  supply-chain re-download verify.
+
+Still yours: the **`provision_verify` loaded-check** (3d) inside `ga_manager` —
+the device suite + build tests live in the OS repo; the converge-side self-check
+is the one piece in `ga_manager`.
+
+## 8. Ownership split
 | Area | Owner |
 |---|---|
 | `ga-frontend-bundle` repo (integration, `bundle.lock`, `vendor.py`, tests, CI, docs) | **me** |
 | `ga_frontend_bundle/` dir in `rootfs-overlay` (additive new dir) | **me** |
+| OS build test `BLD-FB-*` + device suite `FB-*` (`ha-operating-system`, additive, held) | **me** |
 | `converge.py` place-generalization + enable-list (3a–3c) | **you** |
 | `provision_verify` loaded-check incl. this domain (3d) | **you** |
 | `ga-fleet-bundle.yaml` + `bundle_expectation.py` drift key (§4) | coordinate (held) |
-| canary validation on KIB-SON-0 (I'll simulate place+activate manually first) | **me** |
+| canary validation on KIB-SON-0 (place+activate + run `FB-*` suite) | **me — done, 10/10** |
 
-## 8. Coordination
+## 9. Coordination
 Everything additive. The placement generalization is the single shared converge
 step — you land it once for both components. I will not touch `converge.py`. I'm
 holding the §4 shared-repo edits and will ping before any push to `ga_manager` /
