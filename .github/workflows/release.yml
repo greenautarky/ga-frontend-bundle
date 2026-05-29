@@ -1,0 +1,89 @@
+name: Release
+
+# Publishes a versioned, self-contained bundle artifact built FROM the committed
+# vendored files (not fetched from upstream here). The artifact is the unit the
+# later "fleet-push" carrier pulls to update devices independently of the OS
+# build: fleet-manager pulls ghcr.io/greenautarky/ga-frontend-bundle:<version>
+# and converge places it into /config/custom_components/. See
+# docs/CONVERGE-HANDOFF.md and ga-ihost-docs/FRONTEND-BUNDLE.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (default: bundle.lock.yaml bundle_version)"
+        required: false
+
+permissions:
+  contents: write   # create the GitHub Release
+  packages: write   # push the OCI artifact to GHCR
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install PyYAML
+
+      - name: Resolve version + assert it matches the lock
+        id: ver
+        run: |
+          LOCK_VER=$(python -c "import yaml;print(yaml.safe_load(open('bundle.lock.yaml'))['bundle_version'])")
+          if [ "${{ github.event_name }}" = "push" ]; then
+            REQ="${GITHUB_REF_NAME#v}"
+          else
+            REQ="${{ github.event.inputs.version }}"
+            [ -z "$REQ" ] && REQ="$LOCK_VER"
+          fi
+          if [ "$REQ" != "$LOCK_VER" ]; then
+            echo "::error::requested version ($REQ) != bundle.lock.yaml bundle_version ($LOCK_VER) — bump the lock"
+            exit 1
+          fi
+          echo "version=$LOCK_VER" >> "$GITHUB_OUTPUT"
+          echo "Publishing v$LOCK_VER"
+
+      - name: Integrity gate — committed files match the lock
+        run: python scripts/vendor.py --check
+
+      - name: Package the placement artifact
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          # Tarball root is the component dir, so a consumer extracts straight
+          # into /config/custom_components/ (tar xzf - -C .../custom_components).
+          tar czf "ga-frontend-bundle-${V}.tar.gz" -C custom_components ga_frontend_bundle
+          sha256sum "ga-frontend-bundle-${V}.tar.gz" bundle.lock.yaml > SHA256SUMS
+          echo "--- SHA256SUMS ---"; cat SHA256SUMS
+
+      - name: Install oras
+        uses: oras-project/setup-oras@v1
+
+      - name: Push OCI artifact to GHCR
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          REPO="ghcr.io/greenautarky/ga-frontend-bundle"
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          oras push "${REPO}:${V}" \
+            --annotation "org.opencontainers.image.source=https://github.com/greenautarky/ga-frontend-bundle" \
+            --annotation "org.opencontainers.image.version=${V}" \
+            "ga-frontend-bundle-${V}.tar.gz:application/gzip" \
+            "bundle.lock.yaml:application/yaml" \
+            "SHA256SUMS:text/plain"
+          oras tag "${REPO}:${V}" latest
+
+      - name: Create / update the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          NOTES="GA frontend card bundle v${V} (de-HACS). Placement artifact: ga-frontend-bundle-${V}.tar.gz — extract into /config/custom_components/. Also at ghcr.io/greenautarky/ga-frontend-bundle:${V}. See bundle.lock.yaml + NOTICE.md."
+          gh release create "v${V}" --title "v${V}" --notes "$NOTES" \
+            "ga-frontend-bundle-${V}.tar.gz" "SHA256SUMS" "bundle.lock.yaml" "NOTICE.md" \
+          || gh release upload "v${V}" \
+            "ga-frontend-bundle-${V}.tar.gz" "SHA256SUMS" "bundle.lock.yaml" "NOTICE.md" --clobber
