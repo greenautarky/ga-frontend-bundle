@@ -96,6 +96,14 @@ once the repo's `bundle.lock` is finalised. This is in a shared repo — I'm hol
 it; let's sync before either of us pushes `ga_manager` / `ha-operating-system` /
 `ga-ihost-docs`.
 
+### Fleet-push artifact (for the later carrier)
+The decoupled-update unit now exists: each release publishes
+`ghcr.io/greenautarky/ga-frontend-bundle:<version>` (+ a GitHub Release tarball),
+built from the committed files. When fleet-push lands, `fleet-manager` pulls that
+pinned version and converge places it — the device never contacts upstream card
+repos. The tarball root is the component dir (extract into `/config/custom_components/`).
+`versions.frontend_bundle` in `ga-fleet-bundle.yaml` should equal this version.
+
 ## 5. Activation timing / restart
 No new Core restart needed. `ga_frontend_bundle` loads on the **same natural
 first-boot Core restart** that already loads the placed components + the MQTT

@@ -63,6 +63,22 @@ converge contract for the onboarding/converge owner is in
 [docs/CONVERGE-HANDOFF.md](docs/CONVERGE-HANDOFF.md); the shared OS-side reference
 is `ga-ihost-docs/VENDORED-INTEGRATION-DELIVERY.md`.
 
+## Releasing & distribution
+
+On a `v*` tag (or manual `workflow_dispatch`), `.github/workflows/release.yml`
+builds a self-contained placement artifact **from the committed vendored files**
+(gated by `vendor.py --check`) and publishes it two ways:
+
+- **GHCR OCI artifact:** `ghcr.io/greenautarky/ga-frontend-bundle:<version>` (+ `:latest`).
+- **GitHub Release:** `ga-frontend-bundle-<version>.tar.gz` + `SHA256SUMS` + `bundle.lock.yaml` + `NOTICE.md`.
+
+The tarball root is the component dir, so a consumer extracts it straight into
+`/config/custom_components/`. This artifact is the unit the **fleet-push carrier**
+(future) uses to update devices independently of the OS build: `fleet-manager`
+pulls the pinned version from GHCR and `converge` places it — the device never
+contacts the 14 upstream card repos. To cut a release: bump `bundle_version`
+(after `vendor.py --update`), commit, tag `vX.Y.Z`.
+
 ## Development
 
 ```bash
