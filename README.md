@@ -33,6 +33,10 @@ sha256, and [NOTICE.md](NOTICE.md) for upstream attribution):
 | kiosk-mode | 13.0.0 | MIT | NemesisRE/kiosk-mode |
 | simple-thermostat | 2.5.0 | MIT | nervetattoo/simple-thermostat |
 
+> Intentionally **excluded** (present in the old HACS bundle dir but no longer
+> used): `bar-card`, `better-thermostat-ui-card`, `config-template-card`,
+> `scheduler-card`. Do not re-add without confirming they're needed.
+
 ## How it works
 
 ```
