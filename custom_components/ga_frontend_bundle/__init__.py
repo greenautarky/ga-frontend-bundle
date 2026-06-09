@@ -26,12 +26,22 @@ from pathlib import Path
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .bundle import card_url, load_cards
 from .const import COMMUNITY_DIRNAME, DOMAIN, STATIC_URL_BASE
 
 _LOGGER = logging.getLogger(__name__)
+
+# HA Core 2025.11.x silently skips async_setup for yaml-only integrations
+# that don't declare a CONFIG_SCHEMA (= introduced quietly in 2024.x).
+# The sibling integration greenautarky_onboarding doesn't trip this
+# because its manifest sets "config_flow": true (different code path).
+# `cv.empty_config_schema(DOMAIN)` is the HA-canonical "I accept the bare
+# `<domain>:` form, no other keys" pattern — matches every yaml-only
+# integration in HA Core itself (cf. core's system_log, etc.).
+CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:

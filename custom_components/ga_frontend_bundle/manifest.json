@@ -1,7 +1,7 @@
 {
   "domain": "ga_frontend_bundle",
   "name": "GA Frontend Bundle",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "codeowners": ["@greenautarky"],
   "dependencies": ["http", "frontend"],
   "documentation": "https://github.com/greenautarky/ga-frontend-bundle",

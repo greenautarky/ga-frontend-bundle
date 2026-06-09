@@ -6,7 +6,7 @@
 
 [project]
 name = "ga-frontend-bundle"
-version = "1.0.0"
+version = "1.0.1"
 description = "GreenAutarky de-HACS Lovelace card bundle: a vendored HA custom integration that serves a pinned set of frontend cards."
 requires-python = ">=3.12"
 license = { text = "MIT" }
