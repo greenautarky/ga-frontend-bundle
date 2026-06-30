@@ -32,3 +32,10 @@ Re-using HA's native Settings for a Non-Admin would need a **frontend fork**
 (Non-Admins cannot see Settings at all). The custom card works out of the box on
 a dashboard with no fork. Gating native Settings stays a possible later path (see
 ADR-0006) but is deferred.
+
+## Tests (required on implementation)
+
+Ship with tests: the card is a thin client, so cover that it only calls the
+in-Core scoped API and renders state from it; assignment-matrix interactions;
+that a non-master / unauthorized session gets no privileged affordance (UI gating
+is convenience — the server enforces). See ADR-0006 §Testing requirements.
