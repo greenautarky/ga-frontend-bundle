@@ -84,6 +84,9 @@ class GaMasterCard extends HTMLElement {
         ga-master-card .area-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
         ga-master-card label.dash { display:block; font-weight:400; margin:2px 0; }
         ga-master-card code { font-weight:700; }
+        ga-master-card .badge { font-size:.72em; font-weight:600; padding:1px 6px; border-radius:8px; background: rgba(244,67,54,.15); color: var(--error-color,#c0392b); vertical-align:middle; }
+        ga-master-card .actions { margin-top:4px; display:flex; gap:4px; flex-wrap:wrap; }
+        ga-master-card .actions mwc-button.rm { --mdc-theme-primary: var(--error-color,#c0392b); }
       </style>`;
     this._root = this;
 
@@ -124,6 +127,7 @@ class GaMasterCard extends HTMLElement {
     const rows = s.sub_users
       .map((u) => {
         const assigned = u.dashboards || [];
+        const active = u.active !== false; // default true if field absent
         const checks = s.dashboards.length
           ? s.dashboards
               .map((d) => {
@@ -132,7 +136,13 @@ class GaMasterCard extends HTMLElement {
               })
               .join("")
           : '<span class="muted">Keine Dashboards.</span>';
-        return `<tr><td><b>${u.name || "?"}</b><br><span class="muted">${u.username || ""}</span></td><td>${checks}</td></tr>`;
+        const badge = active ? "" : ' <span class="badge">gesperrt</span>';
+        const toggle = active ? "Sperren" : "Entsperren";
+        return `<tr><td><b>${u.name || "?"}</b>${badge}<br><span class="muted">${u.username || ""}</span>
+            <div class="actions">
+              <mwc-button dense class="tgl" data-uid="${u.user_id}" data-enable="${active ? "0" : "1"}">${toggle}</mwc-button>
+              <mwc-button dense class="rm" data-uid="${u.user_id}" data-name="${(u.name || u.username || "").replace(/"/g, "")}">Entfernen</mwc-button>
+            </div></td><td>${checks}</td></tr>`;
       })
       .join("");
     host.innerHTML = `<table><tbody>${rows}</tbody></table>`;
@@ -148,6 +158,40 @@ class GaMasterCard extends HTMLElement {
           this._flash("ok", "Dashboard-Zuweisung gespeichert.");
         } catch (e) {
           cb.checked = !cb.checked;
+          this._flash("err", this._errText(e));
+        }
+      });
+    });
+
+    // Enable/disable a sub-user's login.
+    host.querySelectorAll("mwc-button.tgl").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const enable = btn.dataset.enable === "1";
+        try {
+          await this._api("POST", API + "/set_enabled", {
+            sub_user_id: btn.dataset.uid,
+            enabled: enable,
+          });
+          this._flash("ok", enable ? "Nutzer entsperrt." : "Nutzer gesperrt.");
+          this._load();
+        } catch (e) {
+          this._flash("err", this._errText(e));
+        }
+      });
+    });
+
+    // Permanently remove a sub-user (with a confirm).
+    host.querySelectorAll("mwc-button.rm").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const name = btn.dataset.name || "diesen Nutzer";
+        if (!window.confirm(`„${name}" wirklich dauerhaft entfernen? Das Konto wird gelöscht.`)) {
+          return;
+        }
+        try {
+          await this._api("POST", API + "/remove", { sub_user_id: btn.dataset.uid });
+          this._flash("ok", "Nutzer entfernt.");
+          this._load();
+        } catch (e) {
           this._flash("err", this._errText(e));
         }
       });
