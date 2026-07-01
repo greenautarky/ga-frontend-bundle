@@ -57,7 +57,7 @@ class GaMasterCard extends HTMLElement {
           <div class="msg"></div>
 
           <h4>Neuen Nutzer einladen</h4>
-          <mwc-button raised class="invite">Einladungs-PIN erzeugen</mwc-button>
+          <button class="btn primary invite">Einladungs-PIN erzeugen</button>
           <div class="invite-out"></div>
 
           <h4>Nutzer &amp; Dashboards</h4>
@@ -67,7 +67,7 @@ class GaMasterCard extends HTMLElement {
           <div class="area-row">
             <select class="area-sel"></select>
             <input class="area-name" type="text" placeholder="Neuer Name" />
-            <mwc-button class="area-btn">Umbenennen</mwc-button>
+            <button class="btn area-btn">Umbenennen</button>
           </div>
         </div>
       </ha-card>
@@ -85,8 +85,12 @@ class GaMasterCard extends HTMLElement {
         ga-master-card label.dash { display:block; font-weight:400; margin:2px 0; }
         ga-master-card code { font-weight:700; }
         ga-master-card .badge { font-size:.72em; font-weight:600; padding:1px 6px; border-radius:8px; background: rgba(244,67,54,.15); color: var(--error-color,#c0392b); vertical-align:middle; }
-        ga-master-card .actions { margin-top:4px; display:flex; gap:4px; flex-wrap:wrap; }
-        ga-master-card .actions mwc-button.rm { --mdc-theme-primary: var(--error-color,#c0392b); }
+        ga-master-card .actions { margin-top:4px; display:flex; gap:6px; flex-wrap:wrap; }
+        ga-master-card .btn { font-family:inherit; font-size:.9em; font-weight:600; padding:8px 14px; border:none; border-radius:20px; cursor:pointer; background: var(--secondary-background-color,#e8e8e8); color: var(--primary-text-color,#212121); }
+        ga-master-card .btn:hover { filter:brightness(.97); }
+        ga-master-card .btn.primary { background: var(--primary-color,#03a9f4); color:#fff; }
+        ga-master-card .btn.small { padding:5px 12px; font-size:.82em; }
+        ga-master-card .btn.danger { background: rgba(244,67,54,.12); color: var(--error-color,#c0392b); }
       </style>`;
     this._root = this;
 
@@ -140,8 +144,8 @@ class GaMasterCard extends HTMLElement {
         const toggle = active ? "Sperren" : "Entsperren";
         return `<tr><td><b>${u.name || "?"}</b>${badge}<br><span class="muted">${u.username || ""}</span>
             <div class="actions">
-              <mwc-button dense class="tgl" data-uid="${u.user_id}" data-enable="${active ? "0" : "1"}">${toggle}</mwc-button>
-              <mwc-button dense class="rm" data-uid="${u.user_id}" data-name="${(u.name || u.username || "").replace(/"/g, "")}">Entfernen</mwc-button>
+              <button class="btn small tgl" data-uid="${u.user_id}" data-enable="${active ? "0" : "1"}">${toggle}</button>
+              <button class="btn small danger rm" data-uid="${u.user_id}" data-name="${(u.name || u.username || "").replace(/"/g, "")}">Entfernen</button>
             </div></td><td>${checks}</td></tr>`;
       })
       .join("");
