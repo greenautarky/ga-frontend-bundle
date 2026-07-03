@@ -12,6 +12,18 @@ import json
 import pytest
 from conftest import PKG
 
+# test_first_party_injected needs the Home Assistant test harness (the ``hass`` +
+# ``enable_custom_integrations`` fixtures). CI installs only pytest/PyYAML/ruff,
+# and fixtures resolve BEFORE the function body — so an in-body importorskip is
+# too late (errors as "fixture 'hass' not found"). Skip that ONE test when the
+# harness is absent; the pure-asset tests still run.
+try:
+    import pytest_homeassistant_custom_component  # noqa: F401
+
+    _HAS_HA_TEST_HARNESS = True
+except ImportError:
+    _HAS_HA_TEST_HARNESS = False
+
 FIRST_PARTY = PKG / "first_party"
 MASTER_CARD = FIRST_PARTY / "ga-master-card" / "ga-master-card.js"
 
@@ -43,8 +55,11 @@ def test_load_cards_finds_first_party(bundle_module):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    not _HAS_HA_TEST_HARNESS,
+    reason="needs pytest-homeassistant-custom-component (HA test harness); not in CI",
+)
 async def test_first_party_injected(hass, enable_custom_integrations):
-    pytest.importorskip("homeassistant")
     from homeassistant.setup import async_setup_component
 
     from custom_components.ga_frontend_bundle.const import (
