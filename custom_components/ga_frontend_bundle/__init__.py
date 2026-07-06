@@ -30,7 +30,13 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .bundle import card_url, load_cards
-from .const import COMMUNITY_DIRNAME, DOMAIN, STATIC_URL_BASE
+from .const import (
+    COMMUNITY_DIRNAME,
+    DOMAIN,
+    FIRST_PARTY_DIRNAME,
+    FIRST_PARTY_URL_BASE,
+    STATIC_URL_BASE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,32 +50,27 @@ _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 
-async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the GA frontend bundle (yaml-activated, idempotent)."""
-    if DOMAIN in hass.data:
-        return True
-    hass.data[DOMAIN] = {}
+async def _serve_inject(
+    hass: HomeAssistant, directory: Path, url_base: str
+) -> tuple[list[dict[str, str]], int]:
+    """Load cards from ``directory``, serve them statically at ``url_base``, and
+    inject each as a frontend JS module. Returns ``(cards, injected)``.
 
-    community_dir = Path(__file__).parent / COMMUNITY_DIRNAME
+    Blocking dir scan runs in the executor. Missing dir → ``([], 0)``.
+    """
     # iterdir()/glob()/is_file() are blocking — run the scan in the executor.
-    cards = await hass.async_add_executor_job(load_cards, community_dir)
+    cards = await hass.async_add_executor_job(load_cards, directory)
     if not cards:
-        _LOGGER.error(
-            "%s: no vendored cards under %s — bundle is empty. Did "
-            "scripts/vendor.py run before packaging? Not blocking HA start.",
-            DOMAIN,
-            community_dir,
-        )
-        return True
+        return [], 0
 
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(STATIC_URL_BASE, str(community_dir), True)]
+        [StaticPathConfig(url_base, str(directory), True)]
     )
 
     injected = 0
     for card in cards:
         try:
-            add_extra_js_url(hass, card_url(STATIC_URL_BASE, card))
+            add_extra_js_url(hass, card_url(url_base, card))
         except KeyError:
             # add_extra_js_url indexes hass.data["frontend_extra_module_url"],
             # which only exists once `frontend` has set up. We declare frontend
@@ -80,13 +81,50 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             )
             continue
         injected += 1
+    return cards, injected
 
-    hass.data[DOMAIN] = {"cards": cards, "injected": injected}
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up the GA frontend bundle (yaml-activated, idempotent)."""
+    if DOMAIN in hass.data:
+        return True
+    hass.data[DOMAIN] = {}
+
+    pkg = Path(__file__).parent
+
+    # Vendored community cards (the de-HACS set, pinned in bundle.lock.yaml).
+    community_dir = pkg / COMMUNITY_DIRNAME
+    cards, injected = await _serve_inject(hass, community_dir, STATIC_URL_BASE)
+    if not cards:
+        _LOGGER.error(
+            "%s: no vendored cards under %s — bundle is empty. Did "
+            "scripts/vendor.py run before packaging? Not blocking HA start.",
+            DOMAIN,
+            community_dir,
+        )
+
+    # First-party GA cards (authored here, e.g. ga-master-card / ADR-0006).
+    # Separate dir + URL base so the vendor lock/integrity checks never touch
+    # them; same load/serve/inject mechanism.
+    first_party_dir = pkg / FIRST_PARTY_DIRNAME
+    fp_cards, fp_injected = await _serve_inject(
+        hass, first_party_dir, FIRST_PARTY_URL_BASE
+    )
+
+    hass.data[DOMAIN] = {
+        "cards": cards,
+        "injected": injected,
+        "first_party_cards": fp_cards,
+        "first_party_injected": fp_injected,
+    }
     _LOGGER.info(
-        "%s: serving %d cards at %s, injected %d frontend modules",
+        "%s: community %d cards (injected %d) at %s; first-party %d (injected %d) at %s",
         DOMAIN,
         len(cards),
-        STATIC_URL_BASE,
         injected,
+        STATIC_URL_BASE,
+        len(fp_cards),
+        fp_injected,
+        FIRST_PARTY_URL_BASE,
     )
     return True
