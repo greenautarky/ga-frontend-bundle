@@ -168,7 +168,7 @@ class GaMasterCard extends HTMLElement {
     });
 
     // Enable/disable a sub-user's login.
-    host.querySelectorAll("mwc-button.tgl").forEach((btn) => {
+    host.querySelectorAll("button.tgl").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const enable = btn.dataset.enable === "1";
         try {
@@ -185,7 +185,7 @@ class GaMasterCard extends HTMLElement {
     });
 
     // Permanently remove a sub-user (with a confirm).
-    host.querySelectorAll("mwc-button.rm").forEach((btn) => {
+    host.querySelectorAll("button.rm").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const name = btn.dataset.name || "diesen Nutzer";
         if (!window.confirm(`„${name}" wirklich dauerhaft entfernen? Das Konto wird gelöscht.`)) {
