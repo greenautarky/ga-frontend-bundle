@@ -11,6 +11,8 @@ they are checked against the shipped source instead of trusted.
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 from conftest import PKG
 
@@ -92,10 +94,57 @@ def test_load_cards_finds_the_strategy(bundle_module):
 async def test_strategy_is_injected(hass, enable_custom_integrations):
     from homeassistant.setup import async_setup_component
 
-    from custom_components.ga_frontend_bundle.const import FIRST_PARTY_URL_BASE
+    base = _const().FIRST_PARTY_URL_BASE
 
     assert await async_setup_component(hass, "ga_frontend_bundle", {})
     await hass.async_block_till_done()
 
     extra = hass.data.get("frontend_extra_module_url", set())
-    assert f"{FIRST_PARTY_URL_BASE}/ga-home-strategy/ga-home-strategy.js" in extra
+    assert f"{base}/ga-home-strategy/ga-home-strategy.js" in extra
+
+
+# ─── the 5-second race: a strategy MUST be a Lovelace resource ────────────
+
+
+def _const():
+    """Load const.py standalone — importing the package would pull in homeassistant."""
+    spec = importlib.util.spec_from_file_location("ga_fb_const", PKG / "const.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_strategy_is_declared_as_a_strategy_asset():
+    """Injection alone loses HA's 5 s registration race — see const.STRATEGY_ASSET_IDS."""
+    assert "ga-home-strategy" in _const().STRATEGY_ASSET_IDS
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not _HAS_HA_TEST_HARNESS,
+    reason="needs pytest-homeassistant-custom-component (HA test harness); not in CI",
+)
+async def test_strategy_is_registered_as_a_lovelace_resource(hass, enable_custom_integrations):
+    """The regression guard for the K0 failure (2026-07-13).
+
+    The module WAS being fetched, but `add_extra_js_url` races the app bootstrap and
+    HA only waits 5 s for the element: non-admin sessions on the canary got
+    "Timeout waiting for strategy element ll-strategy-dashboard-ga-home". The panel
+    loads its RESOURCES before resolving `strategy:`, so the strategy must be one.
+    """
+    from homeassistant.components.lovelace.const import LOVELACE_DATA
+    from homeassistant.setup import async_setup_component
+
+    base = _const().FIRST_PARTY_URL_BASE
+
+    assert await async_setup_component(hass, "lovelace", {})
+    assert await async_setup_component(hass, "ga_frontend_bundle", {})
+    hass.bus.async_fire("homeassistant_started")
+    await hass.async_block_till_done()
+
+    resources = hass.data[LOVELACE_DATA].resources
+    urls = {item["url"] for item in resources.async_items()}
+    assert f"{base}/ga-home-strategy/ga-home-strategy.js" in urls
+
+    # …and only the strategy: cards resolve lazily and must not bloat the resources.
+    assert not any("ga-master-card" in u for u in urls)
