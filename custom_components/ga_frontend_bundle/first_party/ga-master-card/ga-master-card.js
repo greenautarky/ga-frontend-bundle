@@ -4,7 +4,8 @@
  * First-party Lovelace card (vanilla JS, no build step). Lets a flagged
  * Master-User manage their Sub-Users from a dashboard:
  *   - generate one-time invite PINs
- *   - assign/unassign dashboards (the [sub-user x dashboard] matrix)
+ *   - grant/revoke ROOMS (the [sub-user x room] matrix) — the sub-user's dashboard
+ *     is GENERATED from them by the ga-home strategy; no dashboard is handed out
  *   - rename rooms (areas)
  *
  * It is a THIN CLIENT: every action calls the in-Core greenautarky_onboarding
@@ -60,7 +61,8 @@ class GaMasterCard extends HTMLElement {
           <button class="btn primary invite">Einladungs-PIN erzeugen</button>
           <div class="invite-out"></div>
 
-          <h4>Nutzer &amp; Dashboards</h4>
+          <h4>Nutzer &amp; Räume</h4>
+          <div class="muted">Wähle je Nutzer die Räume, die er sehen darf — sein Dashboard wird daraus erzeugt.</div>
           <div class="users">Lade…</div>
 
           <h4>Raum umbenennen</h4>
@@ -122,7 +124,8 @@ class GaMasterCard extends HTMLElement {
     const sel = this._root.querySelector(".area-sel");
     sel.innerHTML = s.areas.map((a) => `<option value="${a.area_id}">${a.name}</option>`).join("");
 
-    // users x dashboards
+    // users x ROOMS — the master grants rooms; the dashboard is generated from them
+    // by the ga-home strategy. There is no per-user dashboard to hand out anymore.
     const host = this._root.querySelector(".users");
     if (!s.sub_users.length) {
       host.innerHTML = '<div class="muted">Noch keine Unter-Nutzer. Lade jemanden ein.</div>';
@@ -130,16 +133,16 @@ class GaMasterCard extends HTMLElement {
     }
     const rows = s.sub_users
       .map((u) => {
-        const assigned = u.dashboards || [];
+        const assigned = u.rooms || [];
         const active = u.active !== false; // default true if field absent
-        const checks = s.dashboards.length
-          ? s.dashboards
-              .map((d) => {
-                const on = assigned.indexOf(d.url_path) >= 0 ? " checked" : "";
-                return `<label class="dash"><input type="checkbox" data-uid="${u.user_id}" data-url="${d.url_path}"${on}> ${d.title}</label>`;
+        const checks = s.areas.length
+          ? s.areas
+              .map((a) => {
+                const on = assigned.indexOf(a.area_id) >= 0 ? " checked" : "";
+                return `<label class="dash"><input type="checkbox" data-uid="${u.user_id}" data-area="${a.area_id}"${on}> ${a.name}</label>`;
               })
               .join("")
-          : '<span class="muted">Keine Dashboards.</span>';
+          : '<span class="muted">Keine Räume angelegt.</span>';
         const badge = active ? "" : ' <span class="badge">gesperrt</span>';
         const toggle = active ? "Sperren" : "Entsperren";
         return `<tr><td><b>${u.name || "?"}</b>${badge}<br><span class="muted">${u.username || ""}</span>
@@ -154,12 +157,12 @@ class GaMasterCard extends HTMLElement {
     host.querySelectorAll('input[type=checkbox]').forEach((cb) => {
       cb.addEventListener("change", async () => {
         try {
-          await this._api("POST", API + "/assign_dashboard", {
+          await this._api("POST", API + "/assign_room", {
             sub_user_id: cb.dataset.uid,
-            url_path: cb.dataset.url,
+            area_id: cb.dataset.area,
             assigned: cb.checked,
           });
-          this._flash("ok", "Dashboard-Zuweisung gespeichert.");
+          this._flash("ok", "Raum-Freigabe gespeichert.");
         } catch (e) {
           cb.checked = !cb.checked;
           this._flash("err", this._errText(e));
