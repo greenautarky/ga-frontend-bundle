@@ -50,10 +50,6 @@
       "file": "template-entity-row.js"
     },
     {
-      "id": "kiosk-mode",
-      "file": "kiosk-mode.js"
-    },
-    {
       "id": "simple-thermostat",
       "file": "simple-thermostat.js"
     }

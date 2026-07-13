@@ -46,34 +46,118 @@ async function myScope(hass) {
 const areaOfEntity = (e, deviceArea) =>
   e.area_id || (e.device_id ? deviceArea[e.device_id] : null);
 
-/** Cards for a set of entity_ids — the same shape whether it is a room or the house. */
-function cardsFor(entityIds, hass) {
+/** Sensors of a given device_class inside a set of entity_ids. */
+function sensorsOf(entityIds, hass, deviceClass) {
+  return entityIds.filter((e) => {
+    if (!e.startsWith("sensor.")) return false;
+    const st = hass.states[e];
+    return st && st.attributes.device_class === deviceClass;
+  });
+}
+
+/** The house's weather entity, if the tenant has one. */
+function weatherEntity(hass) {
+  return Object.keys(hass.states).find((e) => e.startsWith("weather."));
+}
+
+/**
+ * The room view — CORE CARDS ONLY.
+ *
+ * Deliberately no community cards. The MyVibe layout leaned on mushroom +
+ * simple-thermostat + button-card + card-mod; `simple-thermostat` is already broken
+ * on our HA version (renders an error card, 0 elements — measured on K0), and every
+ * vendored card is one more thing that can break a customer's dashboard on an HA
+ * update. Modern HA covers what those cards were for:
+ *
+ *   simple-thermostat's KI/MANUEL/AUS  →  `tile` + `climate-hvac-modes` feature
+ *   mushroom chips header              →  `heading` card with badges
+ *   layout-card / card-mod             →  `sections` view
+ *   apexcharts daily range             →  core `statistics-graph`
+ *
+ * If the GA face needs more than core cards give, the answer is ONE first-party
+ * card we own (like ga-master-card) — not a stack of third-party ones.
+ */
+function roomSections(roomName, entityIds, hass) {
   const inDomain = (d) => entityIds.filter((e) => e.startsWith(d + "."));
+  const climate = inDomain("climate");
+  const temps = sensorsOf(entityIds, hass, "temperature");
+  const hums = sensorsOf(entityIds, hass, "humidity");
+  const batts = sensorsOf(entityIds, hass, "battery");
+  const switches = inDomain("switch");
+  const lights = inDomain("light");
+
+  const badges = [];
+  for (const e of temps.slice(0, 1)) badges.push({ type: "entity", entity: e });
+  for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e });
+
+  const sections = [];
+
+  // Heating — the dial plus the mode control MyVibe called KI / MANUEL / AUS.
+  if (climate.length) {
+    const cards = [
+      { type: "heading", heading: "Heizung", heading_style: "title", badges },
+    ];
+    for (const entity of climate) {
+      cards.push({ type: "thermostat", entity, features: [{ type: "climate-hvac-modes",
+        hvac_modes: ["auto", "heat", "off"], style: "icons" }] });
+      cards.push({ type: "tile", entity, features_position: "bottom", vertical: false,
+        features: [
+          { type: "climate-hvac-modes", hvac_modes: ["auto", "heat", "off"], style: "dropdown" },
+          { type: "target-temperature" },
+        ] });
+    }
+    sections.push({ type: "grid", cards });
+  }
+
+  // Climate history — MyVibe's "Daily Temperature / Humidity Range".
+  const history = [];
+  if (temps.length) {
+    history.push({ type: "statistics-graph", title: "Temperatur (24 h)", entities: temps,
+      stat_types: ["min", "mean", "max"], days_to_show: 1, period: "hour" });
+  }
+  if (hums.length) {
+    history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit (24 h)", entities: hums,
+      stat_types: ["min", "mean", "max"], days_to_show: 1, period: "hour" });
+  }
+  if (history.length) {
+    sections.push({ type: "grid", cards: [
+      { type: "heading", heading: "Verlauf", heading_style: "title" }, ...history] });
+  }
+
+  // Everything else in the room, as tiles (light, switches, battery).
+  const rest = [...lights, ...switches, ...batts];
+  if (rest.length) {
+    sections.push({ type: "grid", cards: [
+      { type: "heading", heading: "Geräte", heading_style: "title" },
+      ...rest.map((entity) => ({ type: "tile", entity })),
+    ] });
+  }
+
+  if (!sections.length) {
+    sections.push({ type: "grid", cards: [
+      { type: "markdown", content: "_Für diesen Raum sind noch keine Geräte eingerichtet._" }] });
+  }
+  return sections;
+}
+
+/** Cards for entities without a room (house-wide user only). */
+function plainCards(entityIds, hass) {
   const cards = [];
+  const inDomain = (d) => entityIds.filter((e) => e.startsWith(d + "."));
 
   const climate = inDomain("climate");
   if (climate.length) {
-    cards.push({
-      type: "grid",
-      columns: climate.length > 2 ? 2 : 1,
-      square: false,
-      cards: climate.map((e) => ({ type: "thermostat", entity: e })),
-    });
+    cards.push({ type: "grid", columns: climate.length > 2 ? 2 : 1, square: false,
+      cards: climate.map((e) => ({ type: "thermostat", entity: e })) });
   }
-
-  const lights = inDomain("light");
-  if (lights.length) cards.push({ type: "entities", title: "Licht", entities: lights });
-
-  const measured = inDomain("sensor").filter((e) => {
-    const st = hass.states[e];
-    const dc = st && st.attributes.device_class;
-    return dc === "temperature" || dc === "humidity" || dc === "battery";
-  });
+  const measured = [
+    ...sensorsOf(entityIds, hass, "temperature"),
+    ...sensorsOf(entityIds, hass, "humidity"),
+    ...sensorsOf(entityIds, hass, "battery"),
+  ];
   if (measured.length) cards.push({ type: "entities", title: "Messwerte", entities: measured });
-
-  const switches = inDomain("switch");
-  if (switches.length) cards.push({ type: "entities", title: "Schalter", entities: switches });
-
+  const rest = [...inDomain("light"), ...inDomain("switch")];
+  if (rest.length) cards.push({ type: "entities", title: "Schalter", entities: rest });
   return cards;
 }
 
@@ -150,7 +234,7 @@ class GaHomeDashboardStrategy extends HTMLElement {
     // FALLBACK — the device has no rooms (or nothing is assigned to one): render the
     // house by device class rather than an empty room list.
     if (!scoped && !rooms.length) {
-      const cards = cardsFor(visible.map((e) => e.entity_id), hass);
+      const cards = plainCards(visible.map((e) => e.entity_id), hass);
       const hint = {
         type: "markdown",
         content:
@@ -177,10 +261,12 @@ class GaHomeDashboardStrategy extends HTMLElement {
     }
 
     const views = rooms.map((a) => ({
+      type: "sections",
       title: a.name,
       path: a.area_id,
       icon: ROOM_ICON,
-      cards: cardsFor(perArea[a.area_id], hass),
+      max_columns: 3,
+      sections: roomSections(a.name, perArea[a.area_id], hass),
     }));
 
     // The whole-house user (master / admin / unmanaged device) gets an overview
@@ -218,7 +304,7 @@ class GaHomeDashboardStrategy extends HTMLElement {
       }
 
       if (roomless.length) {
-        const cards = cardsFor(roomless, hass);
+        const cards = plainCards(roomless, hass);
         if (cards.length) {
           views.push({
             title: "Ohne Raum",
