@@ -118,6 +118,15 @@ function roomSections(roomName, entityIds, hass) {
     sections.push({ type: "grid", cards });
   }
 
+  // Weekly plan — our own card, our own backend, executed via climate.set_temperature
+  // (so it works with ANY thermostat, not just the Zigbee TRV we happen to ship).
+  for (const entity of climate) {
+    sections.push({ type: "grid", cards: [
+      { type: "heading", heading: "Heizplan", heading_style: "title" },
+      { type: "custom:ga-heating-card", entity, title: roomName },
+    ] });
+  }
+
   // Climate history — MyVibe's "Daily Temperature / Humidity Range".
   const history = [];
   if (temps.length) {
