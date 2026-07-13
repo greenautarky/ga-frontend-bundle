@@ -78,10 +78,15 @@ function weatherEntity(hass) {
  * card we own (like ga-master-card) — not a stack of third-party ones.
  */
 function roomSections(roomName, entityIds, hass) {
-  const inDomain = (d) => entityIds.filter((e) => e.startsWith(d + "."));
+  const cat = hass.__gaCat || {};
+  const isPrimary = (e) => !cat[e];                      // no entity_category = resident-facing
+  const primary = entityIds.filter(isPrimary);
+  const inDomain = (d) => primary.filter((e) => e.startsWith(d + "."));
+
   const climate = inDomain("climate");
-  const temps = sensorsOf(entityIds, hass, "temperature");
-  const hums = sensorsOf(entityIds, hass, "humidity");
+  const temps = sensorsOf(primary, hass, "temperature");
+  const hums = sensorsOf(primary, hass, "humidity");
+  // Battery is `diagnostic` — useful to glance at, not something to operate: badge only.
   const batts = sensorsOf(entityIds, hass, "battery");
   const switches = inDomain("switch");
   const lights = inDomain("light");
@@ -89,6 +94,7 @@ function roomSections(roomName, entityIds, hass) {
   const badges = [];
   for (const e of temps.slice(0, 1)) badges.push({ type: "entity", entity: e });
   for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e });
+  for (const e of batts.slice(0, 1)) badges.push({ type: "entity", entity: e });
 
   const sections = [];
 
@@ -98,13 +104,16 @@ function roomSections(roomName, entityIds, hass) {
       { type: "heading", heading: "Heizung", heading_style: "title", badges },
     ];
     for (const entity of climate) {
-      cards.push({ type: "thermostat", entity, features: [{ type: "climate-hvac-modes",
-        hvac_modes: ["auto", "heat", "off"], style: "icons" }] });
-      cards.push({ type: "tile", entity, features_position: "bottom", vertical: false,
+      // The dial carries the mode control as a card FEATURE — that is what replaced
+      // simple-thermostat's KI / MANUEL / AUS row. A second tile for the same entity
+      // would just say the same thing twice.
+      cards.push({
+        type: "thermostat",
+        entity,
         features: [
-          { type: "climate-hvac-modes", hvac_modes: ["auto", "heat", "off"], style: "dropdown" },
-          { type: "target-temperature" },
-        ] });
+          { type: "climate-hvac-modes", hvac_modes: ["auto", "heat", "off"], style: "icons" },
+        ],
+      });
     }
     sections.push({ type: "grid", cards });
   }
@@ -124,8 +133,9 @@ function roomSections(roomName, entityIds, hass) {
       { type: "heading", heading: "Verlauf", heading_style: "title" }, ...history] });
   }
 
-  // Everything else in the room, as tiles (light, switches, battery).
-  const rest = [...lights, ...switches, ...batts];
+  // Everything else a resident operates, as tiles. Config knobs (open-window,
+  // child-lock, valve degrees …) and diagnostics never appear here.
+  const rest = [...lights, ...switches];
   if (rest.length) {
     sections.push({ type: "grid", cards: [
       { type: "heading", heading: "Geräte", heading_style: "title" },
@@ -210,6 +220,15 @@ class GaHomeDashboardStrategy extends HTMLElement {
     ]);
     const deviceArea = {};
     for (const d of devices) deviceArea[d.id] = d.area_id;
+
+    // HA already classifies what is a knob and what is a feature: `entity_category`
+    // is "config" (child-lock, open-window, valve degrees, weekly-schedule texts …)
+    // or "diagnostic" (battery, linkquality, valve voltages). Only entities WITHOUT a
+    // category are the ones a resident actually operates. We show those — no
+    // hand-maintained blocklist, and it stays right when a device firmware adds knobs.
+    const catOf = {};
+    for (const e of entities) catOf[e.entity_id] = e.entity_category || null;
+    hass.__gaCat = catOf;
 
     const visible = entities.filter((e) => !e.hidden_by && !e.disabled_by);
     const scoped = me.scope === "rooms";
