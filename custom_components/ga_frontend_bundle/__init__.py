@@ -71,6 +71,17 @@ async def _serve_inject(
 
     injected = 0
     for card in cards:
+        if card["id"] in STRATEGY_ASSET_IDS:
+            # NEVER inject a strategy. `add_extra_js_url` modules execute during the
+            # frontend's bootstrap — and HA installs the scoped custom-element
+            # registry polyfill *after* that. A strategy that registers too early
+            # lands in the pre-swap registry: `customElements.define()` succeeds,
+            # `customElements.get()` afterwards returns nothing, and the dashboard
+            # renders "Timeout waiting for strategy element" (proven on K0,
+            # 2026-07-13: defined at t=101 ms, invisible thereafter).
+            # Lovelace RESOURCES are imported by the panel, long after the swap —
+            # which is why HA's docs say strategies must be loaded as resources.
+            continue
         try:
             add_extra_js_url(hass, card_url(url_base, card))
         except KeyError:
@@ -161,9 +172,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             community_dir,
         )
 
-    # First-party GA cards (authored here, e.g. ga-master-card / ADR-0006).
-    # Separate dir + URL base so the vendor lock/integrity checks never touch
-    # them; same load/serve/inject mechanism.
+    # First-party GA assets (authored here: ga-master-card, ga-home-strategy).
+    # Separate dir + URL base so the vendor lock/integrity checks never touch them.
     first_party_dir = pkg / FIRST_PARTY_DIRNAME
     fp_cards, fp_injected = await _serve_inject(
         hass, first_party_dir, FIRST_PARTY_URL_BASE

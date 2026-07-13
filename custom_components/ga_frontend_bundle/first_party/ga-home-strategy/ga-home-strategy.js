@@ -203,6 +203,20 @@ class GaHomeDashboardStrategy extends HTMLElement {
         ],
       });
 
+      // The master gets his household management right in the dashboard. HA cannot
+      // gate a SIDEBAR panel per user (only `require_admin`), but the strategy knows
+      // exactly who is looking — so the management view simply is not generated for
+      // anyone else. (The card's endpoints are master-gated server-side anyway; this
+      // is the UI half of that, not the security half.)
+      if (me.reason === "master") {
+        views.push({
+          title: "Verwalten",
+          path: "verwalten",
+          icon: "mdi:account-cog",
+          cards: [{ type: "custom:ga-master-card" }],
+        });
+      }
+
       if (roomless.length) {
         const cards = cardsFor(roomless, hass);
         if (cards.length) {
