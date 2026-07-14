@@ -23,7 +23,6 @@ Exact download URLs and sha256 hashes are recorded in
 | plotly-graph-card | 3.3.5 | see upstream repo | https://github.com/dbuezas/lovelace-plotly-graph-card |
 | state-switch | 1.9.6 | MIT | https://github.com/thomasloven/lovelace-state-switch |
 | template-entity-row | 1.4.1 | MIT | https://github.com/thomasloven/lovelace-template-entity-row |
-| kiosk-mode | 13.0.0 | MIT | https://github.com/NemesisRE/kiosk-mode |
 | simple-thermostat | 2.5.0 | MIT | https://github.com/nervetattoo/simple-thermostat |
 
 `plotly-graph-card`: GitHub's license classifier did not auto-detect an SPDX id

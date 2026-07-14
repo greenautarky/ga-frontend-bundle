@@ -1,5 +1,5 @@
 {
-  "bundle_version": "1.0.1",
+  "bundle_version": "1.1.0",
   "cards": [
     {
       "id": "card-mod",
@@ -48,10 +48,6 @@
     {
       "id": "template-entity-row",
       "file": "template-entity-row.js"
-    },
-    {
-      "id": "kiosk-mode",
-      "file": "kiosk-mode.js"
     },
     {
       "id": "simple-thermostat",

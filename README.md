@@ -30,7 +30,6 @@ sha256, and [NOTICE.md](NOTICE.md) for upstream attribution):
 | plotly-graph-card | 3.3.5 | see upstream | dbuezas/lovelace-plotly-graph-card |
 | state-switch | 1.9.6 | MIT | thomasloven/lovelace-state-switch |
 | template-entity-row | 1.4.1 | MIT | thomasloven/lovelace-template-entity-row |
-| kiosk-mode | 13.0.0 | MIT | NemesisRE/kiosk-mode |
 | simple-thermostat | 2.5.0 | MIT | nervetattoo/simple-thermostat |
 
 > Intentionally **excluded** (present in the old HACS bundle dir but no longer

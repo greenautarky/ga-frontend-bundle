@@ -13,7 +13,7 @@
 # `id`:      stable slug = on-disk subdir under custom_components/.../community/
 # `file`:    served filename (and on-disk filename)
 
-bundle_version: 1.0.2
+bundle_version: 1.1.0
 cards:
 - id: card-mod
   repo: thomasloven/lovelace-card-mod
@@ -111,14 +111,6 @@ cards:
   url: https://raw.githubusercontent.com/thomasloven/lovelace-template-entity-row/v1.4.1/template-entity-row.js
   file: template-entity-row.js
   sha256: a5dfe98aa34354018f2024f42ad402e83abf9620991513456a8dd7970a975e20
-- id: kiosk-mode
-  repo: NemesisRE/kiosk-mode
-  version: 13.0.0
-  license: MIT
-  source: release
-  url: https://github.com/NemesisRE/kiosk-mode/releases/download/v13.0.0/kiosk-mode.js
-  file: kiosk-mode.js
-  sha256: 5e55763ec6f809fc7727ce8c88c2998ffd9e2d9fbcd22d2c69d6c2d85508a5bd
 - id: simple-thermostat
   repo: nervetattoo/simple-thermostat
   version: 2.5.0

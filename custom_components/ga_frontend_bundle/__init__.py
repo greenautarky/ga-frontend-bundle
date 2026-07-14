@@ -25,7 +25,8 @@ from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, Event, HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
@@ -36,6 +37,7 @@ from .const import (
     FIRST_PARTY_DIRNAME,
     FIRST_PARTY_URL_BASE,
     STATIC_URL_BASE,
+    STRATEGY_ASSET_IDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,6 +71,17 @@ async def _serve_inject(
 
     injected = 0
     for card in cards:
+        if card["id"] in STRATEGY_ASSET_IDS:
+            # NEVER inject a strategy. `add_extra_js_url` modules execute during the
+            # frontend's bootstrap — and HA installs the scoped custom-element
+            # registry polyfill *after* that. A strategy that registers too early
+            # lands in the pre-swap registry: `customElements.define()` succeeds,
+            # `customElements.get()` afterwards returns nothing, and the dashboard
+            # renders "Timeout waiting for strategy element" (proven on K0,
+            # 2026-07-13: defined at t=101 ms, invisible thereafter).
+            # Lovelace RESOURCES are imported by the panel, long after the swap —
+            # which is why HA's docs say strategies must be loaded as resources.
+            continue
         try:
             add_extra_js_url(hass, card_url(url_base, card))
         except KeyError:
@@ -82,6 +95,62 @@ async def _serve_inject(
             continue
         injected += 1
     return cards, injected
+
+
+async def _register_strategy_resources(
+    hass: HomeAssistant, cards: list[dict[str, str]]
+) -> int:
+    """Register strategy assets as Lovelace RESOURCES (not just injected modules).
+
+    Injection via ``add_extra_js_url`` races the app bootstrap. The Lovelace panel,
+    by contrast, loads its **resources** and only then resolves the dashboard's
+    ``strategy:`` block — so a strategy shipped as a resource is guaranteed to be
+    defined before HA looks for it. HA waits just 5 s for the element and then
+    renders "Timeout waiting for strategy element …"; on a canary over the mesh that
+    race is lost regularly (K0, 2026-07-13). Cards do not care — they are resolved
+    lazily, when a card is rendered.
+
+    Same URL as the injected module, so the browser's ES-module registry executes the
+    file exactly once regardless of which path pulled it in. Idempotent.
+    """
+    strategies = [c for c in cards if c["id"] in STRATEGY_ASSET_IDS]
+    if not strategies:
+        return 0
+
+    try:
+        from homeassistant.components.lovelace.const import LOVELACE_DATA
+    except ImportError:  # pragma: no cover - lovelace is always there on GA OS
+        return 0
+
+    data = hass.data.get(LOVELACE_DATA)
+    resources = getattr(data, "resources", None)
+    if resources is None:
+        _LOGGER.warning(
+            "%s: lovelace resources unavailable — strategies may lose the 5 s "
+            "registration race and render a timeout card",
+            DOMAIN,
+        )
+        return 0
+
+    if not resources.loaded:
+        await resources.async_load()
+
+    known = {item.get("url") for item in resources.async_items()}
+    added = 0
+    for card in strategies:
+        url = card_url(FIRST_PARTY_URL_BASE, card)
+        if url in known:
+            continue
+        try:
+            await resources.async_create_item({"res_type": "module", "url": url})
+        except Exception as err:  # a broken resource store must not break HA start
+            _LOGGER.warning(
+                "%s: could not register strategy resource %s: %r", DOMAIN, url, err
+            )
+            continue
+        added += 1
+        _LOGGER.info("%s: registered strategy resource %s", DOMAIN, url)
+    return added
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -103,13 +172,22 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             community_dir,
         )
 
-    # First-party GA cards (authored here, e.g. ga-master-card / ADR-0006).
-    # Separate dir + URL base so the vendor lock/integrity checks never touch
-    # them; same load/serve/inject mechanism.
+    # First-party GA assets (authored here: ga-master-card, ga-home-strategy).
+    # Separate dir + URL base so the vendor lock/integrity checks never touch them.
     first_party_dir = pkg / FIRST_PARTY_DIRNAME
     fp_cards, fp_injected = await _serve_inject(
         hass, first_party_dir, FIRST_PARTY_URL_BASE
     )
+
+    # Strategies additionally need to be Lovelace resources — see the docstring.
+    # Deferred to EVENT_HOMEASSISTANT_STARTED: lovelace sets up after us.
+    async def _strategies_started(_event: Event | None = None) -> None:
+        await _register_strategy_resources(hass, fp_cards)
+
+    if hass.state is CoreState.running:
+        hass.async_create_task(_strategies_started())
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _strategies_started)
 
     hass.data[DOMAIN] = {
         "cards": cards,
