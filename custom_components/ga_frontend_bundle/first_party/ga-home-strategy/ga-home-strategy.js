@@ -20,14 +20,42 @@
  * A blank dashboard is only ever correct for a real sub-user who was granted
  * nothing — never for a device we simply have not configured yet.
  *
- * ⚠️ HONEST LIMIT: this is PRESENTATION scoping. HA still serves every entity to
- * any authenticated non-admin over the WebSocket API (render_template / history /
- * the registry lists are not permission-checked). Real isolation would need
- * auth-group entity policies on top. Do not sell it as tenant isolation.
+ * ⚠️ SCOPE NOTE: this file is only the PRESENTATION half. Real per-user entity
+ * isolation exists since greenautarky-onboarding 1.4.0 (Stage A: native HA
+ * permission groups) + 1.6.0 (Stage B: leak_guard closes render_template /
+ * history / registry-list side channels) — opt-in via `entity_scoping_enabled`,
+ * default OFF. With the flag off this remains presentation scoping only.
  */
 
 const ROOM_ICON = "mdi:door-open";
 const HOUSE_ICON = "mdi:home-heart";
+
+/**
+ * Strategy options — set in the dashboard config:
+ *   `strategy: { type: "custom:ga-home", hide_household: true, ... }`
+ *
+ * Defaults are the product look piloted on KIB-SON-00000050 (2026-07-21):
+ *   text_tabs         true      room NAMES as tab text (a row of identical door
+ *                               icons distinguishes nothing)
+ *   single_thermostat true      TRVs in one room are coupled — show ONE control
+ *                               (and one heating plan), not one per valve
+ *   thermostat_style  "myvibe"  the Steuerung card the residents already know
+ *                               (simple-thermostat: big value + AUS/MANUEL/KI);
+ *                               "core" = HA thermostat dial + hvac-mode feature row
+ *   hide_household    false     drop the "Haushalt" overview view (pilot devices
+ *                               with a hand-built overview don't need a second one)
+ *   hide_roomless     false     drop the "Ohne Raum" view
+ */
+function gaOptions(config) {
+  const c = config || {};
+  return {
+    textTabs: c.text_tabs !== false,
+    singleThermostat: c.single_thermostat !== false,
+    thermostatStyle: c.thermostat_style === "core" ? "core" : "myvibe",
+    hideHousehold: !!c.hide_household,
+    hideRoomless: !!c.hide_roomless,
+  };
+}
 
 /** Ask the server WHO this user is and WHAT he may see. Never guess client-side. */
 async function myScope(hass) {
@@ -77,13 +105,16 @@ function weatherEntity(hass) {
  * If the GA face needs more than core cards give, the answer is ONE first-party
  * card we own (like ga-master-card) — not a stack of third-party ones.
  */
-function roomSections(roomName, entityIds, hass) {
+function roomSections(roomName, entityIds, hass, opt) {
   const cat = hass.__gaCat || {};
   const isPrimary = (e) => !cat[e];                      // no entity_category = resident-facing
   const primary = entityIds.filter(isPrimary);
   const inDomain = (d) => primary.filter((e) => e.startsWith(d + "."));
 
-  const climate = inDomain("climate");
+  // Coupled TRVs (two valves on the radiators of one room) mirror each other —
+  // rendering both just shows the same state twice and doubles the Heizplan.
+  const climateAll = inDomain("climate");
+  const climate = opt.singleThermostat ? climateAll.slice(0, 1) : climateAll;
   const temps = sensorsOf(primary, hass, "temperature");
   const hums = sensorsOf(primary, hass, "humidity");
   // Battery is `diagnostic` — useful to glance at, not something to operate: badge only.
@@ -91,10 +122,11 @@ function roomSections(roomName, entityIds, hass) {
   const switches = inDomain("switch");
   const lights = inDomain("light");
 
+  // Named badges — the raw entities carry IEEE-address names on fleet devices.
   const badges = [];
-  for (const e of temps.slice(0, 1)) badges.push({ type: "entity", entity: e });
-  for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e });
-  for (const e of batts.slice(0, 1)) badges.push({ type: "entity", entity: e });
+  for (const e of temps.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Temperatur" });
+  for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Luftfeuchtigkeit" });
+  for (const e of batts.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Batterie" });
 
   const sections = [];
 
@@ -104,16 +136,35 @@ function roomSections(roomName, entityIds, hass) {
       { type: "heading", heading: "Heizung", heading_style: "title", badges },
     ];
     for (const entity of climate) {
-      // The dial carries the mode control as a card FEATURE — that is what replaced
-      // simple-thermostat's KI / MANUEL / AUS row. A second tile for the same entity
-      // would just say the same thing twice.
-      cards.push({
-        type: "thermostat",
-        entity,
-        features: [
-          { type: "climate-hvac-modes", hvac_modes: ["auto", "heat", "off"], style: "icons" },
-        ],
-      });
+      if (opt.thermostatStyle === "myvibe") {
+        // The Steuerung card the MyVibe dashboards trained residents on: big value
+        // with +/- and an explicit AUS / MANUEL / KI mode row. simple-thermostat is
+        // vendored in this bundle (2.5.0) and verified rendering on Core 2025.11.3
+        // (KIB-SON-00000050 pilot, 2026-07-21).
+        cards.push({
+          type: "custom:simple-thermostat",
+          entity,
+          header: { name: "Steuerung" },
+          hide: { temperature: true, state: true },
+          layout: { mode: { icons: true, names: true, headings: false } },
+          control: { hvac: {
+            auto: { name: "KI", icon: "mdi:brain" },
+            heat: { name: "MANUEL", icon: "mdi:hand-back-left" },
+            off: { name: "AUS" },
+          } },
+          card_mod: { style: "h3.current--value { font-size: 35px; }" },
+          tap_action: { action: "none" },
+        });
+      } else {
+        // "core": the dial carries the mode control as a card FEATURE.
+        cards.push({
+          type: "thermostat",
+          entity,
+          features: [
+            { type: "climate-hvac-modes", hvac_modes: ["auto", "heat", "off"], style: "icons" },
+          ],
+        });
+      }
     }
     sections.push({ type: "grid", cards });
   }
@@ -213,6 +264,7 @@ function emptyView(name) {
 
 class GaHomeDashboardStrategy extends HTMLElement {
   static async generate(config, hass) {
+    const opt = gaOptions(config);
     const me = await myScope(hass);
     const userName = (hass.user && hass.user.name) || "";
 
@@ -292,18 +344,19 @@ class GaHomeDashboardStrategy extends HTMLElement {
       type: "sections",
       title: a.name,
       path: a.area_id,
-      icon: ROOM_ICON,
+      // With text_tabs the tab shows the room NAME; an icon would replace it.
+      ...(opt.textTabs ? {} : { icon: ROOM_ICON }),
       max_columns: 3,
-      sections: roomSections(a.name, perArea[a.area_id], hass),
+      sections: roomSections(a.name, perArea[a.area_id], hass, opt),
     }));
 
     // The whole-house user (master / admin / unmanaged device) gets an overview
     // first, plus anything that has no room yet — so nothing is ever invisible to him.
     if (!scoped) {
-      views.unshift({
+      if (!opt.hideHousehold) views.unshift({
         title: "Haushalt",
         path: "haushalt",
-        icon: HOUSE_ICON,
+        ...(opt.textTabs ? {} : { icon: HOUSE_ICON }),
         cards: [
           {
             type: "markdown",
@@ -326,18 +379,18 @@ class GaHomeDashboardStrategy extends HTMLElement {
         views.push({
           title: "Verwalten",
           path: "verwalten",
-          icon: "mdi:account-cog",
+          ...(opt.textTabs ? {} : { icon: "mdi:account-cog" }),
           cards: [{ type: "custom:ga-master-card" }],
         });
       }
 
-      if (roomless.length) {
+      if (!opt.hideRoomless && roomless.length) {
         const cards = plainCards(roomless, hass);
         if (cards.length) {
           views.push({
             title: "Ohne Raum",
             path: "ohne-raum",
-            icon: "mdi:help-circle-outline",
+            ...(opt.textTabs ? {} : { icon: "mdi:help-circle-outline" }),
             cards: [
               {
                 type: "markdown",

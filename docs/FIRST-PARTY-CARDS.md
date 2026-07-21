@@ -29,3 +29,32 @@ with its own styled `<button>`s (no `mwc-button` dependency). Canary-verified.
 
 See **ADR-0009** (this card) and **ADR-0006** (the plane + endpoints) in
 `ga-ihost-docs`, and Odoo task #427 / subtask #443.
+
+## ga-home-strategy — the generated per-user home dashboard
+
+`custom:ga-home` (a dashboard **strategy**, not a card). The whole household uses
+ONE dashboard whose stored config is nothing but
+`{"strategy": {"type": "custom:ga-home"}}`; views are generated in the browser on
+every load from the rooms the server grants the logged-in user
+(`GET /api/greenautarky_onboarding/my_rooms`). See KB #152 for the architecture.
+
+### Options (1.2.0)
+
+Set in the dashboard config: `strategy: { type: "custom:ga-home", <option>: … }`.
+Defaults are the look piloted live on KIB-SON-00000050 (2026-07-21):
+
+| option | default | effect |
+|---|---|---|
+| `text_tabs` | `true` | Views carry **no icon**, so HA renders the room **name** in the tab bar. A row of identical door icons distinguishes nothing; names do. `false` restores the icons. |
+| `single_thermostat` | `true` | TRVs in one room are **coupled** (they mirror each other) — render **one** Steuerung card and **one** Heizplan per room instead of one per valve. |
+| `thermostat_style` | `"myvibe"` | The Steuerung card residents know from the MyVibe dashboards: `simple-thermostat` (vendored, 2.5.0) with the big value and an explicit **AUS / MANUEL / KI** mode row (KI = auto, MANUEL = heat). `"core"` renders HA's thermostat dial with an hvac-mode feature row instead. |
+| `hide_household` | `false` | Drop the "Haushalt" overview view. For pilot devices that keep their hand-built overview dashboard next to GA Home. |
+| `hide_roomless` | `false` | Drop the "Ohne Raum" view (devices without an area). |
+
+Room badges (temperature / humidity / battery) are labeled **Temperatur /
+Luftfeuchtigkeit / Batterie** — the raw entities carry IEEE-address names on
+fleet devices.
+
+Origin: piloted additively on Ramin's device (KIB-SON-00000050) next to his
+original dashboards — old and new design stay switchable via the sidebar; the
+device pins nothing, this bundle is the single source of the new look.
