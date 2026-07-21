@@ -148,3 +148,50 @@ async def test_strategy_is_registered_as_a_lovelace_resource(hass, enable_custom
 
     # …and only the strategy: cards resolve lazily and must not bloat the resources.
     assert not any("ga-master-card" in u for u in urls)
+
+
+# ─── 1.2.0 — MyVibe look options (KIB-SON-00000050 pilot, 2026-07-21) ─────
+
+
+def test_options_have_safe_defaults():
+    """Options are read defensively; absent config must not throw."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert "function gaOptions(config)" in src
+    assert "const c = config || {};" in src
+    # new-look defaults ON, view-hiding OFF
+    assert "textTabs: c.text_tabs !== false" in src
+    assert "singleThermostat: c.single_thermostat !== false" in src
+    assert "hideHousehold: !!c.hide_household" in src
+    assert "hideRoomless: !!c.hide_roomless" in src
+
+
+def test_coupled_trvs_render_one_control():
+    """TRVs in one room mirror each other — one Steuerung, one Heizplan."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert "opt.singleThermostat ? climateAll.slice(0, 1) : climateAll" in src
+
+
+def test_myvibe_thermostat_card_is_the_default():
+    """The Steuerung card residents know: simple-thermostat with AUS/MANUEL/KI.
+
+    simple-thermostat 2.5.0 is vendored in this bundle and verified rendering on
+    Core 2025.11.3 (pilot device). The "core" style stays available as an option.
+    """
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert '"custom:simple-thermostat"' in src
+    assert '{ name: "KI", icon: "mdi:brain" }' in src
+    assert '{ name: "MANUEL", icon: "mdi:hand-back-left" }' in src
+    assert 'c.thermostat_style === "core" ? "core" : "myvibe"' in src
+
+
+def test_text_tabs_drop_view_icons():
+    """With text_tabs (default) a view carries NO icon, so HA renders the title."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert "...(opt.textTabs ? {} : { icon: ROOM_ICON })" in src
+    assert "...(opt.textTabs ? {} : { icon: HOUSE_ICON })" in src
+
+
+def test_household_and_roomless_views_are_hidable():
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert "if (!opt.hideHousehold) views.unshift({" in src
+    assert "if (!opt.hideRoomless && roomless.length)" in src
