@@ -172,15 +172,13 @@ def test_coupled_trvs_render_one_control():
 
 
 def test_myvibe_thermostat_card_is_the_default():
-    """The Steuerung card residents know: simple-thermostat with AUS/MANUEL/KI.
-
-    simple-thermostat 2.5.0 is vendored in this bundle and verified rendering on
-    Core 2025.11.3 (pilot device). The "core" style stays available as an option.
+    """The Steuerung card is the FIRST-PARTY ga-thermostat-card (Odoo #518),
+    which replaced the vendored community simple-thermostat. The "core" style
+    (HA thermostat dial) stays available as an option.
     """
     src = STRATEGY.read_text(encoding="utf-8")
-    assert '"custom:simple-thermostat"' in src
-    assert '{ name: "KI", icon: "mdi:brain" }' in src
-    assert '{ name: "MANUEL", icon: "mdi:hand-back-left" }' in src
+    assert '"custom:ga-thermostat-card"' in src
+    assert '"custom:simple-thermostat"' not in src
     assert 'c.thermostat_style === "core" ? "core" : "myvibe"' in src
 
 

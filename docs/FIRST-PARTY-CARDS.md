@@ -1,3 +1,18 @@
+## ga-thermostat-card (1.3.0, Odoo #518)
+
+The resident **Steuerung** control — big current value, +/- setpoint, and an
+explicit **AUS / MANUEL / KI** mode row — talking straight to `climate.*`
+services (`set_temperature` / `set_hvac_mode`). First-party: it **replaced the
+vendored community `simple-thermostat`** (dropped from the bundle in 1.3.0),
+so the Steuerung look now ships as our own code. `thermostat_style: "core"`
+still selects the plain HA thermostat dial.
+
+```yaml
+type: custom:ga-thermostat-card
+entity: climate.wohnzimmer
+header: Steuerung   # optional
+```
+
 # First-party GA cards
 
 Most cards in this bundle are **vendored** community cards: pinned in
