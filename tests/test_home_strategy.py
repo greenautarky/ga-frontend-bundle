@@ -215,3 +215,12 @@ def test_household_and_roomless_views_are_hidable():
     src = STRATEGY.read_text(encoding="utf-8")
     assert "if (!opt.hideHousehold) views.unshift({" in src
     assert "if (!opt.hideRoomless && roomless.length)" in src
+
+
+def test_only_renders_entities_present_in_state_machine():
+    """A room-scoped sub-user's leak-guard-filtered registry can list entities
+    absent from their scoped hass.states (e.g. update.*); rendering a tile for one
+    reads null and crashes the board. The strategy requires a live state."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert "hass.states[e.entity_id]" in src
+    assert "!e.hidden_by && !e.disabled_by && hass.states[e.entity_id]" in src

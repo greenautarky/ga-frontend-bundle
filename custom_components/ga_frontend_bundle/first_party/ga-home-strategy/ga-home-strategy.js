@@ -316,7 +316,16 @@ class GaHomeDashboardStrategy extends HTMLElement {
     for (const e of entities) catOf[e.entity_id] = e.entity_category || null;
     hass.__gaCat = catOf;
 
-    const visible = entities.filter((e) => !e.hidden_by && !e.disabled_by);
+    // Only render entities the user can actually SEE in their state machine. A
+    // room-scoped sub-user gets a leak-guard-FILTERED entity_registry that can
+    // still list entities absent from their scoped `hass.states` (e.g. a device's
+    // `update.*` config entity) — a tile for one then reads `hass.states[id]` =
+    // null and the whole board crashes ("Cannot read properties of null …",
+    // K0 2026-07-22). Requiring a live state keeps admins unchanged (all present)
+    // and makes the resident (sub-user) board render.
+    const visible = entities.filter(
+      (e) => !e.hidden_by && !e.disabled_by && hass.states[e.entity_id],
+    );
     const scoped = me.scope === "rooms";
     const allowed = new Set(me.areas.map((a) => a.area_id));
 
