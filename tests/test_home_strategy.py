@@ -171,17 +171,28 @@ def test_coupled_trvs_render_one_control():
     assert "opt.singleThermostat ? climateAll.slice(0, 1) : climateAll" in src
 
 
-def test_myvibe_thermostat_card_is_the_default():
+def test_classic_thermostat_card_is_the_default():
     """The default Steuerung card is the FIRST-PARTY ga-thermostat-card (Odoo
-    #518). simple-thermostat is kept vendored as a fallback (coexistence, 1.4.0)
-    and is reachable via thermostat_style "simple"; "core" (HA dial) also stays.
+    #518), variant "classic". "dial" and "setpoint" are the other two looks of
+    the SAME card; "core" (HA dial) and "simple" (vendored fallback) also stay.
     """
     src = STRATEGY.read_text(encoding="utf-8")
     assert '"custom:ga-thermostat-card"' in src
-    # default resolves to myvibe (ga-thermostat-card) unless "core"/"simple" asked
-    assert '["core", "simple"].includes(c.thermostat_style) ? c.thermostat_style : "myvibe"' in src
-    # the myvibe branch is guarded first, so it is the default
-    assert src.index('opt.thermostatStyle === "myvibe"') < src.index('opt.thermostatStyle === "simple"')
+    # unknown / "myvibe" resolve to classic (the default)
+    assert 'c.thermostat_style === "myvibe" ? "classic" : c.thermostat_style' in src
+    assert '["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "classic"' in src
+    # the three first-party looks are one branch that passes `variant`
+    assert '["classic", "dial", "setpoint"].includes(opt.thermostatStyle)' in src
+    assert 'variant: opt.thermostatStyle' in src
+
+
+def test_all_four_thermostat_styles_reachable():
+    """classic/dial/setpoint (our card) + core (HA) + simple (fallback)."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    for token in ('"classic"', '"dial"', '"setpoint"', '"simple"'):
+        assert token in src, token
+    # core = built-in HA thermostat card, renameable title = room name
+    assert 'type: "thermostat"' in src and "name: roomName" in src
 
 
 def test_simple_thermostat_kept_as_fallback():

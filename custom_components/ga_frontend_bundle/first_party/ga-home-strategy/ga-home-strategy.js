@@ -39,9 +39,12 @@ const HOUSE_ICON = "mdi:home-heart";
  *                               icons distinguishes nothing)
  *   single_thermostat true      TRVs in one room are coupled — show ONE control
  *                               (and one heating plan), not one per valve
- *   thermostat_style  "myvibe"  the Steuerung card the residents already know
- *                               (simple-thermostat: big value + AUS/MANUEL/KI);
- *                               "core" = HA thermostat dial + hvac-mode feature row
+ *   thermostat_style  "classic" first-party ga-thermostat-card, three looks:
+ *                               "classic" (default: big value + setpoint +
+ *                               AUS/MANUEL/KI), "dial" (round drag control),
+ *                               "setpoint" (big target). "core" = built-in HA
+ *                               thermostat card; "simple" = vendored simple-
+ *                               thermostat fallback. ("myvibe" = old alias for classic.)
  *   hide_household    false     drop the "Haushalt" overview view (pilot devices
  *                               with a hand-built overview don't need a second one)
  *   hide_roomless     false     drop the "Ohne Raum" view
@@ -51,7 +54,14 @@ function gaOptions(config) {
   return {
     textTabs: c.text_tabs !== false,
     singleThermostat: c.single_thermostat !== false,
-    thermostatStyle: ["core", "simple"].includes(c.thermostat_style) ? c.thermostat_style : "myvibe",
+    thermostatStyle: (() => {
+      // Our first-party ga-thermostat-card ships three looks (classic|dial|
+      // setpoint); "core" = the built-in HA thermostat card; "simple" = the
+      // vendored simple-thermostat fallback. "myvibe" is the old alias for
+      // classic. Anything unknown falls back to classic (the default).
+      const v = c.thermostat_style === "myvibe" ? "classic" : c.thermostat_style;
+      return ["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "classic";
+    })(),
     hideHousehold: !!c.hide_household,
     hideRoomless: !!c.hide_roomless,
   };
@@ -136,14 +146,16 @@ function roomSections(roomName, entityIds, hass, opt) {
       { type: "heading", heading: "Heizung", heading_style: "title", badges },
     ];
     for (const entity of climate) {
-      if (opt.thermostatStyle === "myvibe") {
-        // The Steuerung card residents were trained on: big value + setpoint + an
-        // explicit AUS / MANUEL / KI mode row. FIRST-PARTY ga-thermostat-card
-        // (Odoo #518) — talks straight to climate.* services. The default.
+      if (["classic", "dial", "setpoint"].includes(opt.thermostatStyle)) {
+        // FIRST-PARTY ga-thermostat-card (Odoo #518): one card, three looks
+        // (classic = big value + setpoint + AUS/MANUEL/KI chips [default];
+        // dial = round drag control; setpoint = big target). All talk straight
+        // to climate.* services. The variant is chosen per device via config.
         cards.push({
           type: "custom:ga-thermostat-card",
           entity,
           header: "Steuerung",
+          ...(opt.thermostatStyle === "classic" ? {} : { variant: opt.thermostatStyle }),
         });
       } else if (opt.thermostatStyle === "simple") {
         // Fallback: the vendored community simple-thermostat, kept in the bundle
@@ -165,10 +177,14 @@ function roomSections(roomName, entityIds, hass, opt) {
           tap_action: { action: "none" },
         });
       } else {
-        // "core": the dial carries the mode control as a card FEATURE.
+        // "core": the built-in HA thermostat card. Standard look + standard mode
+        // names (Auto/Heat/Off — not renameable to KI/MANUEL/AUS); the card
+        // title IS renameable, so we pass the room name. The dial carries the
+        // mode control as a card FEATURE.
         cards.push({
           type: "thermostat",
           entity,
+          name: roomName,
           features: [
             { type: "climate-hvac-modes", hvac_modes: ["auto", "heat", "off"], style: "icons" },
           ],
