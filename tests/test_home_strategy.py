@@ -172,14 +172,25 @@ def test_coupled_trvs_render_one_control():
 
 
 def test_myvibe_thermostat_card_is_the_default():
-    """The Steuerung card is the FIRST-PARTY ga-thermostat-card (Odoo #518),
-    which replaced the vendored community simple-thermostat. The "core" style
-    (HA thermostat dial) stays available as an option.
+    """The default Steuerung card is the FIRST-PARTY ga-thermostat-card (Odoo
+    #518). simple-thermostat is kept vendored as a fallback (coexistence, 1.4.0)
+    and is reachable via thermostat_style "simple"; "core" (HA dial) also stays.
     """
     src = STRATEGY.read_text(encoding="utf-8")
     assert '"custom:ga-thermostat-card"' in src
-    assert '"custom:simple-thermostat"' not in src
-    assert 'c.thermostat_style === "core" ? "core" : "myvibe"' in src
+    # default resolves to myvibe (ga-thermostat-card) unless "core"/"simple" asked
+    assert '["core", "simple"].includes(c.thermostat_style) ? c.thermostat_style : "myvibe"' in src
+    # the myvibe branch is guarded first, so it is the default
+    assert src.index('opt.thermostatStyle === "myvibe"') < src.index('opt.thermostatStyle === "simple"')
+
+
+def test_simple_thermostat_kept_as_fallback():
+    """Coexistence (1.4.0): the vendored community simple-thermostat is still in
+    the bundle so hand-built dashboards referencing it keep working, and it is a
+    fallback while the first-party card matures — selectable via "simple"."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert 'opt.thermostatStyle === "simple"' in src
+    assert '"custom:simple-thermostat"' in src
 
 
 def test_text_tabs_drop_view_icons():

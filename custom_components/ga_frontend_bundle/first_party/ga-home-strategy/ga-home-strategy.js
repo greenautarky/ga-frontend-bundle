@@ -51,7 +51,7 @@ function gaOptions(config) {
   return {
     textTabs: c.text_tabs !== false,
     singleThermostat: c.single_thermostat !== false,
-    thermostatStyle: c.thermostat_style === "core" ? "core" : "myvibe",
+    thermostatStyle: ["core", "simple"].includes(c.thermostat_style) ? c.thermostat_style : "myvibe",
     hideHousehold: !!c.hide_household,
     hideRoomless: !!c.hide_roomless,
   };
@@ -139,13 +139,30 @@ function roomSections(roomName, entityIds, hass, opt) {
       if (opt.thermostatStyle === "myvibe") {
         // The Steuerung card residents were trained on: big value + setpoint + an
         // explicit AUS / MANUEL / KI mode row. FIRST-PARTY ga-thermostat-card
-        // (Odoo #518) — talks straight to climate.* services; replaced the
-        // vendored community simple-thermostat, so the bundle carries only our
-        // own code. Verified on the KIB-SON-00000050 pilot look.
+        // (Odoo #518) — talks straight to climate.* services. The default.
         cards.push({
           type: "custom:ga-thermostat-card",
           entity,
           header: "Steuerung",
+        });
+      } else if (opt.thermostatStyle === "simple") {
+        // Fallback: the vendored community simple-thermostat, kept in the bundle
+        // (coexistence, 1.4.0) so hand-built dashboards that still reference
+        // `custom:simple-thermostat` keep working, and as a fallback while the
+        // first-party card matures. Same AUS/MANUEL/KI mapping as ga-thermostat-card.
+        cards.push({
+          type: "custom:simple-thermostat",
+          entity,
+          header: { name: "Steuerung" },
+          hide: { temperature: true, state: true },
+          layout: { mode: { icons: true, names: true, headings: false } },
+          control: { hvac: {
+            auto: { name: "KI", icon: "mdi:brain" },
+            heat: { name: "MANUEL", icon: "mdi:hand-back-left" },
+            off: { name: "AUS" },
+          } },
+          card_mod: { style: "h3.current--value { font-size: 35px; }" },
+          tap_action: { action: "none" },
         });
       } else {
         // "core": the dial carries the mode control as a card FEATURE.
