@@ -44,6 +44,27 @@ def load_cards(community_dir: Path) -> list[dict[str, str]]:
     return [c for c in cards if (community_dir / c["id"] / c["file"]).is_file()]
 
 
-def card_url(base: str, card: dict[str, str]) -> str:
-    """Served URL for a card under the static base path."""
-    return f"{base}/{card['id']}/{card['file']}"
+def card_url(base: str, card: dict[str, str], version: str | None = None) -> str:
+    """Served URL for a card under the static base path.
+
+    A ``?v=<version>`` cache-buster is appended when ``version`` is given so a
+    browser picks up a new card build after a bundle update instead of running
+    the long-cached old module (which otherwise wins the ``customElements.define``
+    race and pins residents to the previous card — verified on K0, 2026-07-22).
+    """
+    url = f"{base}/{card['id']}/{card['file']}"
+    return f"{url}?v={version}" if version else url
+
+
+def bundle_version(pkg_dir: Path) -> str | None:
+    """Read the integration manifest version (synced to bundle.lock by vendor.py).
+
+    Used as the cache-buster for served card/strategy URLs. Returns None if the
+    manifest is missing/unreadable (then URLs are served un-busted, as before).
+    """
+    try:
+        data = json.loads((Path(pkg_dir) / "manifest.json").read_text(encoding="utf-8"))
+        v = data.get("version")
+        return str(v) if v else None
+    except (ValueError, OSError, TypeError, KeyError):
+        return None
