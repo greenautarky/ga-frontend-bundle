@@ -137,23 +137,15 @@ function roomSections(roomName, entityIds, hass, opt) {
     ];
     for (const entity of climate) {
       if (opt.thermostatStyle === "myvibe") {
-        // The Steuerung card the MyVibe dashboards trained residents on: big value
-        // with +/- and an explicit AUS / MANUEL / KI mode row. simple-thermostat is
-        // vendored in this bundle (2.5.0) and verified rendering on Core 2025.11.3
-        // (KIB-SON-00000050 pilot, 2026-07-21).
+        // The Steuerung card residents were trained on: big value + setpoint + an
+        // explicit AUS / MANUEL / KI mode row. FIRST-PARTY ga-thermostat-card
+        // (Odoo #518) — talks straight to climate.* services; replaced the
+        // vendored community simple-thermostat, so the bundle carries only our
+        // own code. Verified on the KIB-SON-00000050 pilot look.
         cards.push({
-          type: "custom:simple-thermostat",
+          type: "custom:ga-thermostat-card",
           entity,
-          header: { name: "Steuerung" },
-          hide: { temperature: true, state: true },
-          layout: { mode: { icons: true, names: true, headings: false } },
-          control: { hvac: {
-            auto: { name: "KI", icon: "mdi:brain" },
-            heat: { name: "MANUEL", icon: "mdi:hand-back-left" },
-            off: { name: "AUS" },
-          } },
-          card_mod: { style: "h3.current--value { font-size: 35px; }" },
-          tap_action: { action: "none" },
+          header: "Steuerung",
         });
       } else {
         // "core": the dial carries the mode control as a card FEATURE.
