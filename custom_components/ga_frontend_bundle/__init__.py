@@ -30,7 +30,7 @@ from homeassistant.core import CoreState, Event, HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .bundle import card_url, load_cards
+from .bundle import bundle_version, card_url, load_cards
 from .const import (
     COMMUNITY_DIRNAME,
     DOMAIN,
@@ -53,7 +53,7 @@ CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 
 async def _serve_inject(
-    hass: HomeAssistant, directory: Path, url_base: str
+    hass: HomeAssistant, directory: Path, url_base: str, version: str | None = None
 ) -> tuple[list[dict[str, str]], int]:
     """Load cards from ``directory``, serve them statically at ``url_base``, and
     inject each as a frontend JS module. Returns ``(cards, injected)``.
@@ -83,7 +83,7 @@ async def _serve_inject(
             # which is why HA's docs say strategies must be loaded as resources.
             continue
         try:
-            add_extra_js_url(hass, card_url(url_base, card))
+            add_extra_js_url(hass, card_url(url_base, card, version))
         except KeyError:
             # add_extra_js_url indexes hass.data["frontend_extra_module_url"],
             # which only exists once `frontend` has set up. We declare frontend
@@ -98,7 +98,7 @@ async def _serve_inject(
 
 
 async def _register_strategy_resources(
-    hass: HomeAssistant, cards: list[dict[str, str]]
+    hass: HomeAssistant, cards: list[dict[str, str]], version: str | None = None
 ) -> int:
     """Register strategy assets as Lovelace RESOURCES (not just injected modules).
 
@@ -135,11 +135,27 @@ async def _register_strategy_resources(
     if not resources.loaded:
         await resources.async_load()
 
-    known = {item.get("url") for item in resources.async_items()}
+    items = list(resources.async_items())
     added = 0
     for card in strategies:
-        url = card_url(FIRST_PARTY_URL_BASE, card)
-        if url in known:
+        path = card_url(FIRST_PARTY_URL_BASE, card)  # unversioned base path
+        url = card_url(FIRST_PARTY_URL_BASE, card, version)  # cache-busted target
+
+        # Drop stale versioned copies of this strategy (same path, different ?v),
+        # otherwise every release leaves an old resource behind and the panel
+        # loads TWO strategy modules — the old one can still win the define race.
+        for item in items:
+            iu = item.get("url") or ""
+            if iu.split("?", 1)[0] == path and iu != url:
+                try:
+                    await resources.async_delete_item(item["id"])
+                    _LOGGER.info("%s: removed stale strategy resource %s", DOMAIN, iu)
+                except Exception as err:  # noqa: BLE001 - never break HA start
+                    _LOGGER.warning(
+                        "%s: could not remove stale resource %s: %r", DOMAIN, iu, err
+                    )
+
+        if any((item.get("url") == url) for item in items):
             continue
         try:
             await resources.async_create_item({"res_type": "module", "url": url})
@@ -161,9 +177,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     pkg = Path(__file__).parent
 
+    # Cache-buster for every served card/strategy URL: the bundle version (synced
+    # to the integration manifest by scripts/vendor.py). Changing it on each
+    # release forces browsers to fetch the new module instead of the long-cached
+    # old one (K0, 2026-07-22).
+    version = await hass.async_add_executor_job(bundle_version, pkg)
+
     # Vendored community cards (the de-HACS set, pinned in bundle.lock.yaml).
     community_dir = pkg / COMMUNITY_DIRNAME
-    cards, injected = await _serve_inject(hass, community_dir, STATIC_URL_BASE)
+    cards, injected = await _serve_inject(hass, community_dir, STATIC_URL_BASE, version)
     if not cards:
         _LOGGER.error(
             "%s: no vendored cards under %s — bundle is empty. Did "
@@ -176,13 +198,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     # Separate dir + URL base so the vendor lock/integrity checks never touch them.
     first_party_dir = pkg / FIRST_PARTY_DIRNAME
     fp_cards, fp_injected = await _serve_inject(
-        hass, first_party_dir, FIRST_PARTY_URL_BASE
+        hass, first_party_dir, FIRST_PARTY_URL_BASE, version
     )
 
     # Strategies additionally need to be Lovelace resources — see the docstring.
     # Deferred to EVENT_HOMEASSISTANT_STARTED: lovelace sets up after us.
     async def _strategies_started(_event: Event | None = None) -> None:
-        await _register_strategy_resources(hass, fp_cards)
+        await _register_strategy_resources(hass, fp_cards, version)
 
     if hass.state is CoreState.running:
         hass.async_create_task(_strategies_started())

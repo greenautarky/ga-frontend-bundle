@@ -50,3 +50,17 @@ def test_load_cards_drops_missing_file(bundle_module, tmp_path):
 
 def test_load_cards_empty_dir(bundle_module, tmp_path):
     assert bundle_module.load_cards(tmp_path) == []
+
+
+def test_card_url_cache_busts_with_version(bundle_module):
+    card = {"id": "ga-thermostat-card", "file": "ga-thermostat-card.js"}
+    assert bundle_module.card_url("/base", card) == "/base/ga-thermostat-card/ga-thermostat-card.js"
+    assert bundle_module.card_url("/base", card, "1.5.1") == (
+        "/base/ga-thermostat-card/ga-thermostat-card.js?v=1.5.1"
+    )
+
+
+def test_bundle_version_reads_manifest(bundle_module, tmp_path):
+    (tmp_path / "manifest.json").write_text(json.dumps({"version": "1.5.1"}))
+    assert bundle_module.bundle_version(tmp_path) == "1.5.1"
+    assert bundle_module.bundle_version(tmp_path / "nope") is None
