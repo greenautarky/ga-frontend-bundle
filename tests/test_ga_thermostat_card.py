@@ -30,3 +30,19 @@ def test_card_has_aus_manuel_ki_modes():
 def test_card_requires_climate_entity():
     src = CARD.read_text(encoding="utf-8")
     assert 'startsWith("climate.")' in src
+
+
+def test_card_supports_three_variants():
+    """One card, three looks (classic|dial|setpoint); unknown falls back to classic."""
+    src = CARD.read_text(encoding="utf-8")
+    assert '["dial", "setpoint"].includes(config.variant) ? config.variant : "classic"' in src
+    for r in ("_renderClassic", "_renderDial", "_renderSetpoint"):
+        assert r in src, r
+
+
+def test_dial_commits_only_on_release():
+    """The dial redraws live but commits set_temperature once on pointerup, so a
+    zigbee TRV is not spammed on every pointermove."""
+    src = CARD.read_text(encoding="utf-8")
+    assert '_dragging' in src
+    assert 'pointerup' in src and 'pointermove' in src
