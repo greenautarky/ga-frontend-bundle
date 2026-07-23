@@ -40,7 +40,7 @@ def test_master_card_defines_element_and_registers():
     assert 'customElements.define("ga-master-card"' in src
     assert "window.customCards" in src
     # thin client → talks only to the in-Core endpoints
-    assert "greenautarky_onboarding/sub_user" in src
+    assert "greenautarky_site/sub_user" in src
 
 
 # ─── pure loader picks it up ──────────────────────────────────────────────

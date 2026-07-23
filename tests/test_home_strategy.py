@@ -5,10 +5,10 @@ computes a ready, already-scoped, states-validated model server-side and this fi
 only renders it. The tests below therefore pin two things:
 
 1. the SEAM — the exact field names the strategy reads out of the
-   ``/api/greenautarky_onboarding/home_model`` response. A field rename on the
+   ``/api/greenautarky_site/home_model`` response. A field rename on the
    server must fail a test here, not silently blank a resident's board
    (feedback_seam_test_at_boundary). The matching producer-side assertion lives in
-   greenautarky-onboarding ``tests/test_rooms.py`` (``test_home_model_*``); together
+   greenautarky-site ``tests/test_rooms.py`` (``test_home_model_*``); together
    they lock the contract from both ends.
 2. the load-bearing render guards that keep a fleet device from going dark.
 
@@ -61,7 +61,7 @@ def test_model_comes_from_the_component_not_the_client():
     registry re-derivation (which crashed for scoped sub-users on null states).
     """
     src = _src()
-    assert 'hass.callApi("get", "greenautarky_onboarding/home_model")' in src
+    assert 'hass.callApi("get", "greenautarky_site/home_model")' in src
 
 
 def test_strategy_never_re_derives_from_the_registries():
@@ -76,7 +76,7 @@ def test_strategy_never_re_derives_from_the_registries():
 def test_seam_room_fields_are_read_verbatim():
     """The per-room contract the server emits — a rename here or there breaks a board.
 
-    Producer side: greenautarky-onboarding ``_build_home_model`` returns each room as
+    Producer side: greenautarky-site ``_build_home_model`` returns each room as
     ``{area_id, name, climate, lights, switches, temps, hums, batts}``. This is the
     consumer side reading the SAME keys. Keep the two in lockstep.
     """
@@ -227,16 +227,18 @@ def test_coupled_trvs_render_one_control():
     assert "opt.singleThermostat ? climateAll.slice(0, 1) : climateAll" in src
 
 
-def test_classic_thermostat_card_is_the_default():
+def test_setpoint_thermostat_card_is_the_fleet_default():
     """The default Steuerung card is the FIRST-PARTY ga-thermostat-card (Odoo
-    #518), variant "classic". "dial"/"setpoint" are the other looks of the SAME
-    card; "core" (HA dial) and "simple" (vendored fallback) also stay.
+    #518), variant "setpoint" ("Sollwert-Fokus") — the fleet default decided by
+    Ramin (KB #162). "classic"/"dial" are the other looks of the SAME card;
+    "core" (HA dial) and "simple" (vendored fallback) also stay. An unset/unknown
+    thermostat_style must resolve to "setpoint", not blank the card.
     """
     src = _src()
     assert '"custom:ga-thermostat-card"' in src
-    # unknown / "myvibe" resolve to classic (the default)
+    # unknown / unset resolve to the fleet default "setpoint"; "myvibe" → classic
     assert 'c.thermostat_style === "myvibe" ? "classic" : c.thermostat_style' in src
-    assert '["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "classic"' in src
+    assert '["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "setpoint"' in src
     # the three first-party looks are one branch that passes `variant`
     assert '["classic", "dial", "setpoint"].includes(style)' in src
     assert "variant: style" in src

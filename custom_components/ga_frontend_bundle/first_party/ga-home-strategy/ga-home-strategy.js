@@ -7,7 +7,7 @@
  * renders it; it never touches the device/entity registries and never re-derives
  * who may see what:
  *
- *   GET /api/greenautarky_onboarding/home_model
+ *   GET /api/greenautarky_site/home_model
  *     → { scope, reason, is_master, user_name, areas_exist,
  *         rooms:   [ { area_id, name, climate[], lights[], switches[],
  *                      temps[], hums[], batts[] }, ... ],
@@ -44,12 +44,15 @@ const HOUSE_ICON = "mdi:home-heart";
  *                               icons distinguishes nothing)
  *   single_thermostat true      TRVs in one room are coupled — show ONE control
  *                               (and one heating plan), not one per valve
- *   thermostat_style  "classic" first-party ga-thermostat-card, three looks:
- *                               "classic" (default: big value + setpoint +
- *                               AUS/MANUEL/KI), "dial" (round drag control),
- *                               "setpoint" (big target). "core" = built-in HA
- *                               thermostat card; "simple" = vendored simple-
- *                               thermostat fallback. ("myvibe" = old alias for classic.)
+ *   thermostat_style  "setpoint" first-party ga-thermostat-card, three looks:
+ *                               "setpoint" (DEFAULT — "Sollwert-Fokus", big
+ *                               target; the fleet default set by Ramin, KB #162
+ *                               / #518), "classic" (big value + setpoint +
+ *                               AUS/MANUEL/KI), "dial" (round drag control).
+ *                               "core" = built-in HA thermostat card; "simple" =
+ *                               vendored simple-thermostat fallback. ("myvibe" =
+ *                               old alias for classic.) Not resident-selectable
+ *                               yet — admin/config only (selector = Odoo #571).
  *   hide_household    false     drop the "Haushalt" overview view (pilot devices
  *                               with a hand-built overview don't need a second one)
  *   hide_roomless     false     drop the "Ohne Raum" view
@@ -63,9 +66,10 @@ function gaOptions(config) {
       // Our first-party ga-thermostat-card ships three looks (classic|dial|
       // setpoint); "core" = the built-in HA thermostat card; "simple" = the
       // vendored simple-thermostat fallback. "myvibe" is the old alias for
-      // classic. Anything unknown falls back to classic (the default).
+      // classic. The FLEET DEFAULT is "setpoint" ("Sollwert-Fokus", Ramin's
+      // decision — KB #162 / #518); anything unset/unknown falls back to it.
       const v = c.thermostat_style === "myvibe" ? "classic" : c.thermostat_style;
-      return ["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "classic";
+      return ["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "setpoint";
     })(),
     hideHousehold: !!c.hide_household,
     hideRoomless: !!c.hide_roomless,
@@ -79,7 +83,7 @@ function gaOptions(config) {
  */
 async function fetchHomeModel(hass) {
   try {
-    return await hass.callApi("get", "greenautarky_onboarding/home_model");
+    return await hass.callApi("get", "greenautarky_site/home_model");
   } catch (err) {
     const status = err && (err.status_code || err.status);
     if (status === 404) return { scope: "nocomponent", reason: "no-component" };

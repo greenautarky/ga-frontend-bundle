@@ -35,7 +35,7 @@ it; `__init__.py` serves + injects it on every dashboard.
 
 | id | element | purpose |
 |---|---|---|
-| `ga-master-card` | `custom:ga-master-card` | Main-user management UI: invite sub-users, assign dashboards, **lock/unlock** + **remove** sub-users, rename rooms. Thin client over the in-Core `greenautarky_onboarding` endpoints (server enforces the main-user flag + parent relation). Uses the `hass` object directly — no token handling. |
+| `ga-master-card` | `custom:ga-master-card` | Main-user management UI: invite sub-users, assign dashboards, **lock/unlock** + **remove** sub-users, rename rooms. Thin client over the in-Core `greenautarky_site` endpoints (server enforces the main-user flag + parent relation). Uses the `hass` object directly — no token handling. |
 
 Why a card (not the served `/greenautarky-master` console): a Lovelace card gets
 the `hass` object from the frontend, so there is no `localStorage` token to find
@@ -51,7 +51,7 @@ See **ADR-0009** (this card) and **ADR-0006** (the plane + endpoints) in
 ONE dashboard whose stored config is nothing but
 `{"strategy": {"type": "custom:ga-home"}}`; views are generated in the browser on
 every load from the rooms the server grants the logged-in user
-(`GET /api/greenautarky_onboarding/my_rooms`). See KB #152 for the architecture.
+(`GET /api/greenautarky_site/my_rooms`). See KB #152 for the architecture.
 
 ### Options (1.2.0)
 
