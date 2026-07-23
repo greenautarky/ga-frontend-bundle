@@ -44,7 +44,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # HA Core 2025.11.x silently skips async_setup for yaml-only integrations
 # that don't declare a CONFIG_SCHEMA (= introduced quietly in 2024.x).
-# The sibling integration greenautarky_onboarding doesn't trip this
+# The sibling integration greenautarky_site doesn't trip this
 # because its manifest sets "config_flow": true (different code path).
 # `cv.empty_config_schema(DOMAIN)` is the HA-canonical "I accept the bare
 # `<domain>:` form, no other keys" pattern — matches every yaml-only

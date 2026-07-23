@@ -45,7 +45,7 @@ No GitHub, no HACS, no network at runtime. Source-of-truth repo:
 ## 3. Shared `converge.py` edits you are landing
 
 ### 3a. Place — generalize `_step_place_component` (the one shared edit)
-Today it's hardcoded to `greenautarky_onboarding` (`COMPONENT_SRC`/`COMPONENT_DST`).
+Today it's hardcoded to `greenautarky_site` (`COMPONENT_SRC`/`COMPONENT_DST`).
 Generalize to loop **all** staged dirs:
 
 ```
@@ -62,11 +62,11 @@ always overwrites `/config`.
 ### 3b. Activate — enable-list must include `ga_frontend_bundle`
 HA will not load it unless `configuration.yaml` has the key. Add the **domain
 string** `ga_frontend_bundle` to the enable-list converge maintains (alongside
-`greenautarky_onboarding`). Ensure-present must be idempotent (grep-guard /
+`greenautarky_site`). Ensure-present must be idempotent (grep-guard /
 ruamel round-trip — your call), e.g. resulting file contains:
 
 ```yaml
-greenautarky_onboarding:
+greenautarky_site:
 ga_frontend_bundle:
 ```
 

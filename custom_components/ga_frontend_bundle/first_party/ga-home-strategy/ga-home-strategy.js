@@ -7,7 +7,7 @@
  * renders it; it never touches the device/entity registries and never re-derives
  * who may see what:
  *
- *   GET /api/greenautarky_onboarding/home_model
+ *   GET /api/greenautarky_site/home_model
  *     → { scope, reason, is_master, user_name, areas_exist,
  *         rooms:   [ { area_id, name, climate[], lights[], switches[],
  *                      temps[], hums[], batts[] }, ... ],
@@ -79,7 +79,7 @@ function gaOptions(config) {
  */
 async function fetchHomeModel(hass) {
   try {
-    return await hass.callApi("get", "greenautarky_onboarding/home_model");
+    return await hass.callApi("get", "greenautarky_site/home_model");
   } catch (err) {
     const status = err && (err.status_code || err.status);
     if (status === 404) return { scope: "nocomponent", reason: "no-component" };

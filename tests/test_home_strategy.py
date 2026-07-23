@@ -5,10 +5,10 @@ computes a ready, already-scoped, states-validated model server-side and this fi
 only renders it. The tests below therefore pin two things:
 
 1. the SEAM — the exact field names the strategy reads out of the
-   ``/api/greenautarky_onboarding/home_model`` response. A field rename on the
+   ``/api/greenautarky_site/home_model`` response. A field rename on the
    server must fail a test here, not silently blank a resident's board
    (feedback_seam_test_at_boundary). The matching producer-side assertion lives in
-   greenautarky-onboarding ``tests/test_rooms.py`` (``test_home_model_*``); together
+   greenautarky-site ``tests/test_rooms.py`` (``test_home_model_*``); together
    they lock the contract from both ends.
 2. the load-bearing render guards that keep a fleet device from going dark.
 
@@ -61,7 +61,7 @@ def test_model_comes_from_the_component_not_the_client():
     registry re-derivation (which crashed for scoped sub-users on null states).
     """
     src = _src()
-    assert 'hass.callApi("get", "greenautarky_onboarding/home_model")' in src
+    assert 'hass.callApi("get", "greenautarky_site/home_model")' in src
 
 
 def test_strategy_never_re_derives_from_the_registries():
@@ -76,7 +76,7 @@ def test_strategy_never_re_derives_from_the_registries():
 def test_seam_room_fields_are_read_verbatim():
     """The per-room contract the server emits — a rename here or there breaks a board.
 
-    Producer side: greenautarky-onboarding ``_build_home_model`` returns each room as
+    Producer side: greenautarky-site ``_build_home_model`` returns each room as
     ``{area_id, name, climate, lights, switches, temps, hums, batts}``. This is the
     consumer side reading the SAME keys. Keep the two in lockstep.
     """

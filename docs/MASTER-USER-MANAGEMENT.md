@@ -13,7 +13,7 @@ frontend (dashboards). A Non-Admin cannot open Settings or add-on Ingress panels
 so the Master's management UI must sit **inside a dashboard**.
 
 **This repo ships the Master front door: a custom Lovelace card / panel.** The
-card calls the in-Core component's (`greenautarky_onboarding`) authenticated
+card calls the in-Core component's (`greenautarky_site`) authenticated
 scoped API for the four Master ops + the dashboard matrix.
 
 ## Planned additions

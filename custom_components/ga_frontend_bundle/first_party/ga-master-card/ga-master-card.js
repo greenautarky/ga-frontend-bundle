@@ -8,7 +8,7 @@
  *     is GENERATED from them by the ga-home strategy; no dashboard is handed out
  *   - rename rooms (areas)
  *
- * It is a THIN CLIENT: every action calls the in-Core greenautarky_onboarding
+ * It is a THIN CLIENT: every action calls the in-Core greenautarky_site
  * endpoints, which enforce the master flag + parent relation server-side.
  * Non-masters get 403 from the API and the card shows the error.
  *
@@ -16,7 +16,7 @@
  *   type: custom:ga-master-card
  */
 
-const API = "greenautarky_onboarding/sub_user";
+const API = "greenautarky_site/sub_user";
 
 class GaMasterCard extends HTMLElement {
   setConfig(config) {
