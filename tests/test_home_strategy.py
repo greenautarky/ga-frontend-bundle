@@ -1,12 +1,18 @@
 """Tests for the ga-home dashboard strategy (room-scoped per-user dashboards).
 
-The strategy is the render half of the room feature: the onboarding component says
-WHICH rooms the logged-in user may see, and this turns that into views. It ships
-like any other first-party asset — drop it into ``first_party/`` and it is served +
-injected on every dashboard.
+Since 1.6.0 (#569) the strategy is PURE PRESENTATION: the onboarding component
+computes a ready, already-scoped, states-validated model server-side and this file
+only renders it. The tests below therefore pin two things:
 
-The guards asserted below are the ones that keep a fleet device from going dark, so
-they are checked against the shipped source instead of trusted.
+1. the SEAM — the exact field names the strategy reads out of the
+   ``/api/greenautarky_onboarding/home_model`` response. A field rename on the
+   server must fail a test here, not silently blank a resident's board
+   (feedback_seam_test_at_boundary). The matching producer-side assertion lives in
+   greenautarky-onboarding ``tests/test_rooms.py`` (``test_home_model_*``); together
+   they lock the contract from both ends.
+2. the load-bearing render guards that keep a fleet device from going dark.
+
+They are checked against the shipped source instead of trusted.
 """
 
 from __future__ import annotations
@@ -27,6 +33,10 @@ FIRST_PARTY = PKG / "first_party"
 STRATEGY = FIRST_PARTY / "ga-home-strategy" / "ga-home-strategy.js"
 
 
+def _src() -> str:
+    return STRATEGY.read_text(encoding="utf-8")
+
+
 # ─── the asset itself ─────────────────────────────────────────────────────
 
 
@@ -36,43 +46,89 @@ def test_strategy_file_present():
 
 def test_registers_modern_strategy_element():
     """HA resolves `custom:ga-home` to exactly this tag (frontend get-strategy.ts)."""
-    src = STRATEGY.read_text(encoding="utf-8")
+    src = _src()
     assert 'customElements.define("ll-strategy-dashboard-ga-home"' in src
     assert "static async generate(config, hass)" in src
 
 
-def test_scope_comes_from_the_component_not_the_client():
-    """The client must never decide who may see what."""
-    src = STRATEGY.read_text(encoding="utf-8")
-    assert 'hass.callApi("get", "greenautarky_onboarding/my_rooms")' in src
+# ─── the seam: the model comes from the server, rendered field-for-field ──
+
+
+def test_model_comes_from_the_component_not_the_client():
+    """The client must never decide who may see what — it fetches the ready model.
+
+    Since #569 that is the server-computed home_model, NOT my_rooms + a client-side
+    registry re-derivation (which crashed for scoped sub-users on null states).
+    """
+    src = _src()
+    assert 'hass.callApi("get", "greenautarky_onboarding/home_model")' in src
+
+
+def test_strategy_never_re_derives_from_the_registries():
+    """The crash class #569 removed: the strategy must NOT pull the device/entity
+    registries or re-apply scope client-side. The server hands a ready model."""
+    src = _src()
+    assert "config/entity_registry/list" not in src
+    assert "config/device_registry/list" not in src
+    assert "__gaCat" not in src
+
+
+def test_seam_room_fields_are_read_verbatim():
+    """The per-room contract the server emits — a rename here or there breaks a board.
+
+    Producer side: greenautarky-onboarding ``_build_home_model`` returns each room as
+    ``{area_id, name, climate, lights, switches, temps, hums, batts}``. This is the
+    consumer side reading the SAME keys. Keep the two in lockstep.
+    """
+    src = _src()
+    for field in ("room.climate", "room.lights", "room.switches",
+                  "room.temps", "room.hums", "room.batts", "room.name"):
+        assert field in src, field
+
+
+def test_seam_top_level_fields_are_read_verbatim():
+    """The top-level model contract: scope / rooms / roomless / is_master / user_name."""
+    src = _src()
+    for field in ("model.scope", "model.rooms", "model.roomless",
+                  "model.is_master", "model.user_name", "model.reason"):
+        assert field in src, field
+
+
+# ─── the render guards that keep a device from going dark ─────────────────
 
 
 def test_missing_component_fails_open():
     """404 = device was never put into household mode → show the house.
 
     A blank dashboard is only ever correct for a real sub-user who was granted
-    nothing. Drop this guard and every device without the component — i.e. most of
-    the fleet today — renders an empty page.
+    nothing. Drop this guard and every device without the component renders empty.
     """
-    src = STRATEGY.read_text(encoding="utf-8")
-    assert 'if (status === 404) return { scope: "all", reason: "no-component"' in src
+    src = _src()
+    assert 'if (status === 404) return { scope: "nocomponent"' in src
+    assert 'model.scope === "nocomponent"' in src
+    assert "function flatFallbackView(name, hass)" in src
 
 
 def test_real_error_does_not_open_the_house():
     """A 500 must produce an error view, not silently reveal every room."""
-    src = STRATEGY.read_text(encoding="utf-8")
+    src = _src()
     assert 'return { scope: "error"' in src
+    assert 'if (model.scope === "error")' in src
 
 
 def test_sub_user_without_rooms_gets_an_empty_state():
-    src = STRATEGY.read_text(encoding="utf-8")
-    assert 'if (me.scope === "rooms" && !me.areas.length)' in src
+    """A real sub-user granted nothing gets an honest empty state — NOT the house."""
+    src = _src()
+    assert "if (scoped && !rooms.length)" in src
+    assert "emptyView(userName)" in src
 
 
 def test_device_without_rooms_still_renders_its_house():
-    """No HA areas (today's fleet) → group by device class, never an empty list."""
-    src = STRATEGY.read_text(encoding="utf-8")
+    """No HA areas (today's fleet): the server puts everything in `roomless` and the
+    strategy renders it flat, never an empty room list."""
+    src = _src()
     assert "if (!scoped && !rooms.length)" in src
+    assert "noRoomsView(userName, model)" in src
 
 
 # ─── the loader picks it up ───────────────────────────────────────────────
@@ -150,12 +206,12 @@ async def test_strategy_is_registered_as_a_lovelace_resource(hass, enable_custom
     assert not any("ga-master-card" in u for u in urls)
 
 
-# ─── 1.2.0 — MyVibe look options (KIB-SON-00000050 pilot, 2026-07-21) ─────
+# ─── options + card looks (KIB-SON-00000050 pilot, 2026-07-21) ────────────
 
 
 def test_options_have_safe_defaults():
     """Options are read defensively; absent config must not throw."""
-    src = STRATEGY.read_text(encoding="utf-8")
+    src = _src()
     assert "function gaOptions(config)" in src
     assert "const c = config || {};" in src
     # new-look defaults ON, view-hiding OFF
@@ -167,28 +223,28 @@ def test_options_have_safe_defaults():
 
 def test_coupled_trvs_render_one_control():
     """TRVs in one room mirror each other — one Steuerung, one Heizplan."""
-    src = STRATEGY.read_text(encoding="utf-8")
+    src = _src()
     assert "opt.singleThermostat ? climateAll.slice(0, 1) : climateAll" in src
 
 
 def test_classic_thermostat_card_is_the_default():
     """The default Steuerung card is the FIRST-PARTY ga-thermostat-card (Odoo
-    #518), variant "classic". "dial" and "setpoint" are the other two looks of
-    the SAME card; "core" (HA dial) and "simple" (vendored fallback) also stay.
+    #518), variant "classic". "dial"/"setpoint" are the other looks of the SAME
+    card; "core" (HA dial) and "simple" (vendored fallback) also stay.
     """
-    src = STRATEGY.read_text(encoding="utf-8")
+    src = _src()
     assert '"custom:ga-thermostat-card"' in src
     # unknown / "myvibe" resolve to classic (the default)
     assert 'c.thermostat_style === "myvibe" ? "classic" : c.thermostat_style' in src
     assert '["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "classic"' in src
     # the three first-party looks are one branch that passes `variant`
-    assert '["classic", "dial", "setpoint"].includes(opt.thermostatStyle)' in src
-    assert 'variant: opt.thermostatStyle' in src
+    assert '["classic", "dial", "setpoint"].includes(style)' in src
+    assert "variant: style" in src
 
 
 def test_all_four_thermostat_styles_reachable():
     """classic/dial/setpoint (our card) + core (HA) + simple (fallback)."""
-    src = STRATEGY.read_text(encoding="utf-8")
+    src = _src()
     for token in ('"classic"', '"dial"', '"setpoint"', '"simple"'):
         assert token in src, token
     # core = built-in HA thermostat card, renameable title = room name
@@ -199,28 +255,21 @@ def test_simple_thermostat_kept_as_fallback():
     """Coexistence (1.4.0): the vendored community simple-thermostat is still in
     the bundle so hand-built dashboards referencing it keep working, and it is a
     fallback while the first-party card matures — selectable via "simple"."""
-    src = STRATEGY.read_text(encoding="utf-8")
-    assert 'opt.thermostatStyle === "simple"' in src
+    src = _src()
+    assert 'style === "simple"' in src
     assert '"custom:simple-thermostat"' in src
 
 
 def test_text_tabs_drop_view_icons():
     """With text_tabs (default) a view carries NO icon, so HA renders the title."""
-    src = STRATEGY.read_text(encoding="utf-8")
+    src = _src()
     assert "...(opt.textTabs ? {} : { icon: ROOM_ICON })" in src
     assert "...(opt.textTabs ? {} : { icon: HOUSE_ICON })" in src
 
 
 def test_household_and_roomless_views_are_hidable():
-    src = STRATEGY.read_text(encoding="utf-8")
-    assert "if (!opt.hideHousehold) views.unshift({" in src
-    assert "if (!opt.hideRoomless && roomless.length)" in src
-
-
-def test_only_renders_entities_present_in_state_machine():
-    """A room-scoped sub-user's leak-guard-filtered registry can list entities
-    absent from their scoped hass.states (e.g. update.*); rendering a tile for one
-    reads null and crashes the board. The strategy requires a live state."""
-    src = STRATEGY.read_text(encoding="utf-8")
-    assert "hass.states[e.entity_id]" in src
-    assert "!e.hidden_by && !e.disabled_by && hass.states[e.entity_id]" in src
+    src = _src()
+    assert "if (!opt.hideHousehold) views.unshift(householdOverview(" in src
+    assert "if (!opt.hideRoomless && model.roomless)" in src
+    # master-only management view is generated only for the master
+    assert "if (model.is_master) views.push(manageView(opt))" in src
