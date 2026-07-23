@@ -227,16 +227,18 @@ def test_coupled_trvs_render_one_control():
     assert "opt.singleThermostat ? climateAll.slice(0, 1) : climateAll" in src
 
 
-def test_classic_thermostat_card_is_the_default():
+def test_setpoint_thermostat_card_is_the_fleet_default():
     """The default Steuerung card is the FIRST-PARTY ga-thermostat-card (Odoo
-    #518), variant "classic". "dial"/"setpoint" are the other looks of the SAME
-    card; "core" (HA dial) and "simple" (vendored fallback) also stay.
+    #518), variant "setpoint" ("Sollwert-Fokus") — the fleet default decided by
+    Ramin (KB #162). "classic"/"dial" are the other looks of the SAME card;
+    "core" (HA dial) and "simple" (vendored fallback) also stay. An unset/unknown
+    thermostat_style must resolve to "setpoint", not blank the card.
     """
     src = _src()
     assert '"custom:ga-thermostat-card"' in src
-    # unknown / "myvibe" resolve to classic (the default)
+    # unknown / unset resolve to the fleet default "setpoint"; "myvibe" → classic
     assert 'c.thermostat_style === "myvibe" ? "classic" : c.thermostat_style' in src
-    assert '["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "classic"' in src
+    assert '["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "setpoint"' in src
     # the three first-party looks are one branch that passes `variant`
     assert '["classic", "dial", "setpoint"].includes(style)' in src
     assert "variant: style" in src
