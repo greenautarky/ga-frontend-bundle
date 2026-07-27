@@ -96,8 +96,9 @@ class GaMasterCard extends HTMLElement {
               <div>
                 <b>Persönliche Daten löschen</b>
                 <div class="muted">Löscht alle Daten dieses Zuhauses — Konten,
-                  Dashboards, Automationen und den gesamten Verlauf. Das Gerät
-                  startet neu und beginnt wieder mit der Ersteinrichtung.</div>
+                  Dashboards, Automationen, Räume und den gesamten Verlauf. Das
+                  Gerät startet neu und beginnt wieder mit der
+                  Ersteinrichtung.</div>
               </div>
               <button class="btn danger site-reset">Alles löschen…</button>
             </div>
@@ -130,6 +131,8 @@ class GaMasterCard extends HTMLElement {
           <p><b>Das lässt sich nicht rückgängig machen.</b> Alle Konten,
              Dashboards, Automationen, Einstellungen und der gesamte
              Messwert-Verlauf dieses Zuhauses werden gelöscht.</p>
+          <p class="muted">Umbenannte Räume heißen danach wieder Wohnzimmer,
+             Küche und Schlafzimmer — genau wie bei der Ersteinrichtung.</p>
           <p class="muted">Das Gerät selbst bleibt eingerichtet und mit dem
              Internet verbunden. Nach dem Löschen startet es neu und zeigt die
              Ersteinrichtung.</p>

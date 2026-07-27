@@ -72,6 +72,16 @@ def test_master_card_site_reset_requires_pin_and_phrase():
     assert "this._phraseOk(siteConfirm.value) && this._pinOk(sitePin.value)" in src
 
 
+def test_master_card_says_rooms_return_to_their_default_names():
+    """A tenant can rename rooms, and the full reset puts the defaults back
+    (greenautarky-site 2.1.0 re-seeds them). The dialog has to say so — a
+    renamed room silently reverting is exactly the kind of surprise that
+    makes people distrust the button."""
+    src = MASTER_CARD.read_text(encoding="utf-8")
+    assert "Umbenannte Räume" in src
+    assert "Wohnzimmer" in src
+
+
 def test_master_card_states_what_the_soft_reset_does_not_delete():
     """The soft reset cannot remove recorder history (it is entity-bound, not
     user-bound). If the copy ever claims otherwise the promise is false."""
