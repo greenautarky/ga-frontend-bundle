@@ -43,6 +43,52 @@ def test_master_card_defines_element_and_registers():
     assert "greenautarky_site/sub_user" in src
 
 
+# ─── danger zone (KB #169) ────────────────────────────────────────────────
+
+
+def test_master_card_danger_zone_targets_the_core_endpoints():
+    """Still a thin client: both resets go through greenautarky_site, never
+    straight at the addon."""
+    src = MASTER_CARD.read_text(encoding="utf-8")
+    assert '"greenautarky_site/household"' in src
+    assert '"greenautarky_site/site_reset"' in src
+    assert "/reset" in src and "/request" in src and "/status" in src
+
+
+def test_master_card_danger_actions_start_disabled():
+    """Both destructive buttons ship disabled and are armed only by the
+    confirmation handlers — a mis-click can never fire one."""
+    src = MASTER_CARD.read_text(encoding="utf-8")
+    assert 'class="btn danger hh-go" disabled' in src
+    assert 'class="btn danger site-go" disabled' in src
+
+
+def test_master_card_site_reset_requires_pin_and_phrase():
+    """The server gates this too; the card must not offer a path that skips
+    either input, or the user meets a 401 instead of a form error."""
+    src = MASTER_CARD.read_text(encoding="utf-8")
+    assert "_phraseOk" in src and "_pinOk" in src
+    # armSite only enables when BOTH hold
+    assert "this._phraseOk(siteConfirm.value) && this._pinOk(sitePin.value)" in src
+
+
+def test_master_card_says_rooms_return_to_their_default_names():
+    """A tenant can rename rooms, and the full reset puts the defaults back
+    (greenautarky-site 2.1.0 re-seeds them). The dialog has to say so — a
+    renamed room silently reverting is exactly the kind of surprise that
+    makes people distrust the button."""
+    src = MASTER_CARD.read_text(encoding="utf-8")
+    assert "Umbenannte Räume" in src
+    assert "Wohnzimmer" in src
+
+
+def test_master_card_states_what_the_soft_reset_does_not_delete():
+    """The soft reset cannot remove recorder history (it is entity-bound, not
+    user-bound). If the copy ever claims otherwise the promise is false."""
+    src = MASTER_CARD.read_text(encoding="utf-8")
+    assert "Messwerte" in src
+
+
 # ─── pure loader picks it up ──────────────────────────────────────────────
 
 
