@@ -114,7 +114,7 @@ class GaMasterCard extends HTMLElement {
           <p class="muted">Räume, Geräte, Automationen und dein eigenes Konto
              bleiben. Aufgezeichnete Messwerte gehören zu den Geräten, nicht zu
              den Nutzern — sie bleiben ebenfalls erhalten.</p>
-          <label class="dlg-label">Tippe <code>LÖSCHEN</code> zum Bestätigen
+          <label class="dlg-label"><span>Tippe <code>LÖSCHEN</code> zum Bestätigen</span>
             <input class="hh-confirm" type="text" autocomplete="off" />
           </label>
           <div class="dlg-msg hh-msg"></div>
@@ -140,7 +140,7 @@ class GaMasterCard extends HTMLElement {
             <input class="site-pin" type="text" inputmode="numeric"
                    autocomplete="off" placeholder="000-000" />
           </label>
-          <label class="dlg-label">Tippe <code>LÖSCHEN</code> zum Bestätigen
+          <label class="dlg-label"><span>Tippe <code>LÖSCHEN</code> zum Bestätigen</span>
             <input class="site-confirm" type="text" autocomplete="off" />
           </label>
           <label class="dlg-check">
@@ -188,6 +188,10 @@ class GaMasterCard extends HTMLElement {
         ga-master-card .ga-dlg h3 { margin:0; font-size:1.1em; }
         ga-master-card .ga-dlg p { margin:0; font-size:.92em; line-height:1.5; }
         ga-master-card .dlg-label { display:flex; flex-direction:column; gap:4px; font-size:.85em; }
+        /* The prompt is ONE sentence. Without the wrapping span its inline
+           parts (text, <code>, text) each become a flex row and it reads as
+           three stacked lines — caught on baked rc36, K0 2026-07-28. */
+        ga-master-card .dlg-label > span { display:block; }
         ga-master-card .dlg-label input { font:inherit; padding:8px 10px; border:1px solid var(--divider-color,#e0e0e0); border-radius:8px; background:transparent; color:inherit; }
         ga-master-card .dlg-check { display:flex; gap:8px; align-items:flex-start; font-size:.82em; }
         ga-master-card .dlg-msg { font-size:.85em; min-height:1.2em; }
