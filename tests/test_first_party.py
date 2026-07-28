@@ -132,3 +132,16 @@ async def test_first_party_injected(hass, enable_custom_integrations):
 
     extra = hass.data.get("frontend_extra_module_url", set())
     assert f"{FIRST_PARTY_URL_BASE}/ga-master-card/ga-master-card.js" in extra
+
+
+def test_dialog_prompt_is_a_single_element():
+    """`.dlg-label` is a column flex container, so every inline child becomes
+    its own row. Without the wrapping span, "Tippe LÖSCHEN zum Bestätigen"
+    rendered as three stacked lines — the most important instruction in a
+    destructive dialog, broken. Caught on baked rc36 (K0, 2026-07-28); no
+    string assertion could have seen it."""
+    src = MASTER_CARD.read_text(encoding="utf-8")
+    assert src.count('<label class="dlg-label"><span>Tippe') == 2, (
+        "both dialogs must wrap the prompt sentence in one element"
+    )
+    assert "ga-master-card .dlg-label > span { display:block; }" in src
