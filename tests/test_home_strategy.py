@@ -214,11 +214,12 @@ def test_options_have_safe_defaults():
     src = _src()
     assert "function gaOptions(config)" in src
     assert "const c = config || {};" in src
-    # new-look defaults ON, view-hiding OFF
+    # new-look defaults ON; view-hiding now ON by default too (resident-clean UI,
+    # Thomas 2026-09-08) — a device opts IN to the whole-house tabs with hide_*:false.
     assert "textTabs: c.text_tabs !== false" in src
     assert "singleThermostat: c.single_thermostat !== false" in src
-    assert "hideHousehold: !!c.hide_household" in src
-    assert "hideRoomless: !!c.hide_roomless" in src
+    assert "hideHousehold: c.hide_household !== false" in src
+    assert "hideRoomless: c.hide_roomless !== false" in src
 
 
 def test_coupled_trvs_render_one_control():
@@ -275,3 +276,21 @@ def test_household_and_roomless_views_are_hidable():
     assert "if (!opt.hideRoomless && model.roomless)" in src
     # master-only management view is generated only for the master
     assert "if (model.is_master) views.push(manageView(opt))" in src
+
+
+# ─── resident-clean defaults (Thomas 2026-09-08) ──────────────────────────
+
+
+def test_household_and_roomless_are_hidden_by_default():
+    """The "Haushalt" overview and "Ohne Raum" views are OFF by default — a device
+    must opt IN (hide_household:false / hide_roomless:false) to show them. Pins the
+    DEFAULT so a silent flip back to shown fails here. (Scoped residents never saw
+    them anyway; this cleans up the unscoped/master whole-house view.)"""
+    src = _src()
+    assert "hideHousehold: c.hide_household !== false" in src, (
+        "the 'Haushalt' overview is no longer hidden-by-default")
+    assert "hideRoomless: c.hide_roomless !== false" in src, (
+        "the 'Ohne Raum' view is no longer hidden-by-default")
+    # the render guards must still consult those flags (default not bypassed)
+    assert "if (!opt.hideHousehold) views.unshift(householdOverview" in src
+    assert "if (!opt.hideRoomless && model.roomless)" in src
