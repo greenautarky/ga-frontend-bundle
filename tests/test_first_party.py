@@ -125,13 +125,17 @@ async def test_first_party_injected(hass, enable_custom_integrations):
     )
     assert data["injected"] == community_count
 
-    # first-party card injected exactly once at its own URL base
-    assert data["first_party_injected"] == 1
+    # first-party non-strategy assets are injected at their own URL base. The
+    # count is not pinned — it grows as first-party modules are added (ga-home-strategy
+    # is a Lovelace resource, not injected) — so assert the specific modules instead.
     fp_ids = [c["id"] for c in data["first_party_cards"]]
     assert "ga-master-card" in fp_ids
+    assert "ga-sidebar-default" in fp_ids
+    assert data["first_party_injected"] >= 2
 
     extra = hass.data.get("frontend_extra_module_url", set())
     assert f"{FIRST_PARTY_URL_BASE}/ga-master-card/ga-master-card.js" in extra
+    assert f"{FIRST_PARTY_URL_BASE}/ga-sidebar-default/ga-sidebar-default.js" in extra
 
 
 def test_dialog_prompt_is_a_single_element():
@@ -145,3 +149,16 @@ def test_dialog_prompt_is_a_single_element():
         "both dialogs must wrap the prompt sentence in one element"
     )
     assert "ga-master-card .dlg-label > span { display:block; }" in src
+
+
+def test_sidebar_default_module_present_and_discovered(bundle_module):
+    """The sidebar-collapse-by-default module (Thomas 2026-09-08) ships, is
+    discovered by the loader (so it is injected globally like the cards), and
+    respects a user who has already set a sidebar preference."""
+    js = (FIRST_PARTY / "ga-sidebar-default" / "ga-sidebar-default.js").read_text(encoding="utf-8")
+    assert "hass-dock-sidebar" in js            # HA's own event to dock/undock
+    assert "always_hidden" in js                # collapse it
+    assert '"dockedSidebar"' in js                 # the HA per-user sidebar key
+    assert "localStorage.getItem(KEY)" in js       # only acts while no user preference
+    cards = bundle_module.load_cards(FIRST_PARTY)
+    assert {"id": "ga-sidebar-default", "file": "ga-sidebar-default.js"} in cards

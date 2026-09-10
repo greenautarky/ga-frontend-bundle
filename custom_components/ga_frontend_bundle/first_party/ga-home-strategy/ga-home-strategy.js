@@ -53,9 +53,10 @@ const HOUSE_ICON = "mdi:home-heart";
  *                               vendored simple-thermostat fallback. ("myvibe" =
  *                               old alias for classic.) Not resident-selectable
  *                               yet — admin/config only (selector = Odoo #571).
- *   hide_household    false     drop the "Haushalt" overview view (pilot devices
- *                               with a hand-built overview don't need a second one)
- *   hide_roomless     false     drop the "Ohne Raum" view
+ *   hide_household    true      drop the "Haushalt" overview view. DEFAULT hidden
+ *                               (resident-clean UI); set false to show it.
+ *   hide_roomless     true      drop the "Ohne Raum" view. DEFAULT hidden; set
+ *                               false to show devices without an area.
  */
 function gaOptions(config) {
   const c = config || {};
@@ -71,8 +72,10 @@ function gaOptions(config) {
       const v = c.thermostat_style === "myvibe" ? "classic" : c.thermostat_style;
       return ["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "setpoint";
     })(),
-    hideHousehold: !!c.hide_household,
-    hideRoomless: !!c.hide_roomless,
+    // DEFAULT: hidden (resident-clean UI, Thomas 2026-09-08). Set hide_household:false to show.
+    hideHousehold: c.hide_household !== false,
+    // DEFAULT: hidden. Set hide_roomless:false to show the roomless view.
+    hideRoomless: c.hide_roomless !== false,
   };
 }
 
