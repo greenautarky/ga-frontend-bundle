@@ -22,6 +22,17 @@ jobs:
         with:
           node-version: "20"
       - run: node --version
+      # tests/test_cards_register_in_browser.py drives a headless Chromium
+      # through the load order HA's index.html produces, because "the file
+      # contains customElements.define()" was TRUE for every first-party card on
+      # the day none of them existed in the browser. It FAILS (never skips) when
+      # its runtime is missing, so these two steps are part of the gate.
+      - name: Browser test deps
+        run: npm ci
+        working-directory: tests/browser
+      - name: Chromium for the card-registration proof
+        run: npx playwright install --with-deps chromium
+        working-directory: tests/browser
       - run: pip install pytest PyYAML ruff
       - name: Ruff lint
         run: ruff check .

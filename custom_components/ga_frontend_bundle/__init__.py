@@ -30,14 +30,14 @@ from homeassistant.core import CoreState, Event, HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .bundle import bundle_version, card_url, load_cards
+from .bundle import bundle_version, card_url, delivery_plan, load_cards
 from .const import (
     COMMUNITY_DIRNAME,
     DOMAIN,
+    EARLY_INJECT_ASSET_IDS,
     FIRST_PARTY_DIRNAME,
     FIRST_PARTY_URL_BASE,
     STATIC_URL_BASE,
-    STRATEGY_ASSET_IDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,10 +53,31 @@ CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 
 async def _serve_inject(
-    hass: HomeAssistant, directory: Path, url_base: str, version: str | None = None
+    hass: HomeAssistant,
+    directory: Path,
+    url_base: str,
+    version: str | None = None,
+    inject_ids: tuple[str, ...] | None = None,
 ) -> tuple[list[dict[str, str]], int]:
     """Load cards from ``directory``, serve them statically at ``url_base``, and
-    inject each as a frontend JS module. Returns ``(cards, injected)``.
+    inject the ones in ``inject_ids`` as frontend JS modules. Returns
+    ``(cards, injected)``. ``inject_ids=None`` injects every card.
+
+    NEVER inject anything that calls ``customElements.define()``. Injected
+    modules are started by an inline ``<script>import(...)</script>`` in
+    ``index.html``, side by side with the import of the app bundle — and the app
+    bundle's FIRST line installs the scoped custom-element registry polyfill,
+    which replaces ``window.customElements`` with a new, empty registry. A small
+    injected file regularly finishes first, so its ``define()`` lands in the
+    pre-swap registry: the call succeeds, nothing throws, and
+    ``customElements.get()`` returns nothing forever after. HA then renders
+    "Timeout waiting for strategy element" (strategy; K0, 2026-07-13: defined at
+    t=101 ms, invisible thereafter) or "Custom element doesn't exist" (card;
+    every first-party card on a freshly flashed canary, 2026-09-15).
+
+    Lovelace RESOURCES are imported by the panel, long after the swap — which is
+    why HA's docs say strategies must be loaded as resources, and why cards need
+    exactly the same treatment. See ``bundle.delivery_plan``.
 
     Blocking dir scan runs in the executor. Missing dir → ``([], 0)``.
     """
@@ -71,16 +92,7 @@ async def _serve_inject(
 
     injected = 0
     for card in cards:
-        if card["id"] in STRATEGY_ASSET_IDS:
-            # NEVER inject a strategy. `add_extra_js_url` modules execute during the
-            # frontend's bootstrap — and HA installs the scoped custom-element
-            # registry polyfill *after* that. A strategy that registers too early
-            # lands in the pre-swap registry: `customElements.define()` succeeds,
-            # `customElements.get()` afterwards returns nothing, and the dashboard
-            # renders "Timeout waiting for strategy element" (proven on K0,
-            # 2026-07-13: defined at t=101 ms, invisible thereafter).
-            # Lovelace RESOURCES are imported by the panel, long after the swap —
-            # which is why HA's docs say strategies must be loaded as resources.
+        if inject_ids is not None and card["id"] not in inject_ids:
             continue
         try:
             add_extra_js_url(hass, card_url(url_base, card, version))
@@ -97,39 +109,58 @@ async def _serve_inject(
     return cards, injected
 
 
-async def _register_strategy_resources(
-    hass: HomeAssistant, cards: list[dict[str, str]], version: str | None = None
+async def _register_resource_assets(
+    hass: HomeAssistant, assets: list[dict[str, str]], version: str | None = None
 ) -> int:
-    """Register strategy assets as Lovelace RESOURCES (not just injected modules).
+    """Register first-party assets as Lovelace RESOURCES (never injected modules).
 
-    Injection via ``add_extra_js_url`` races the app bootstrap. The Lovelace panel,
-    by contrast, loads its **resources** and only then resolves the dashboard's
-    ``strategy:`` block — so a strategy shipped as a resource is guaranteed to be
-    defined before HA looks for it. HA waits just 5 s for the element and then
-    renders "Timeout waiting for strategy element …"; on a canary over the mesh that
-    race is lost regularly (K0, 2026-07-13). Cards do not care — they are resolved
-    lazily, when a card is rendered.
+    This is the ONLY delivery path that works for anything defining a custom
+    element. Injection via ``add_extra_js_url`` races the app bootstrap, and the
+    app bundle's first line swaps ``window.customElements`` for the scoped
+    custom-element registry polyfill: whatever registered before that swap is
+    invisible to ``customElements.get()`` forever, with no error anywhere.
 
-    Same URL as the injected module, so the browser's ES-module registry executes the
-    file exactly once regardless of which path pulled it in. Idempotent.
+    The Lovelace panel, by contrast, loads its **resources** and only then
+    resolves the dashboard — long after the swap. A strategy shipped as a
+    resource is defined before HA looks for it (HA waits just 5 s and then
+    renders "Timeout waiting for strategy element …"; that race was lost
+    regularly on K0, 2026-07-13). A CARD shipped as a resource is the fix for
+    "Custom element doesn't exist", which is what every first-party card
+    rendered on a freshly flashed canary on 2026-09-15 — the belief that "cards
+    do not care because they resolve lazily" was wrong: lazily resolved or not,
+    they are resolved against the post-swap registry.
+
+    Same URL whichever path pulled it in, so the browser's ES-module registry
+    executes the file exactly once. Idempotent.
     """
-    strategies = [c for c in cards if c["id"] in STRATEGY_ASSET_IDS]
-    if not strategies:
+    if not assets:
         return 0
 
     try:
         from homeassistant.components.lovelace.const import LOVELACE_DATA
     except ImportError:  # pragma: no cover - lovelace is always there on GA OS
+        _LOGGER.error(
+            "%s: lovelace is not available — %d first-party asset(s) cannot be "
+            "delivered and every card among them will render \"Custom element "
+            "doesn\'t exist\": %s",
+            DOMAIN,
+            len(assets),
+            ", ".join(a["id"] for a in assets),
+        )
         return 0
 
     data = hass.data.get(LOVELACE_DATA)
     resources = getattr(data, "resources", None)
     if resources is None:
-        _LOGGER.warning(
-            "%s: lovelace resources unavailable — strategies may lose the 5 s "
-            "registration race and render a timeout card",
+        _LOGGER.error(
+            "%s: lovelace resource store unavailable — %d first-party asset(s) "
+            "are NOT delivered: %s. Cards will render \"Custom element doesn\'t "
+            "exist\" and the dashboard strategy will time out.",
             DOMAIN,
+            len(assets),
+            ", ".join(a["id"] for a in assets),
         )
+        hass.data.setdefault(DOMAIN, {})["resource_error"] = "lovelace-unavailable"
         return 0
 
     if not resources.loaded:
@@ -137,13 +168,14 @@ async def _register_strategy_resources(
 
     items = list(resources.async_items())
     added = 0
-    for card in strategies:
+    present = 0
+    for card in assets:
         path = card_url(FIRST_PARTY_URL_BASE, card)  # unversioned base path
         url = card_url(FIRST_PARTY_URL_BASE, card, version)  # cache-busted target
 
-        # Drop stale versioned copies of this strategy (same path, different ?v),
+        # Drop stale versioned copies of this asset (same path, different ?v),
         # otherwise every release leaves an old resource behind and the panel
-        # loads TWO strategy modules — the old one can still win the define race.
+        # loads TWO modules — the old one can still win the define race.
         for item in items:
             iu = item.get("url") or ""
             if iu.split("?", 1)[0] == path and iu != url:
@@ -156,16 +188,34 @@ async def _register_strategy_resources(
                     )
 
         if any((item.get("url") == url) for item in items):
+            present += 1
             continue
         try:
             await resources.async_create_item({"res_type": "module", "url": url})
         except Exception as err:  # a broken resource store must not break HA start
-            _LOGGER.warning(
-                "%s: could not register strategy resource %s: %r", DOMAIN, url, err
+            _LOGGER.error(
+                "%s: could not register resource %s — <%s> will not exist in the "
+                "browser: %r",
+                DOMAIN,
+                url,
+                card["id"],
+                err,
             )
             continue
         added += 1
-        _LOGGER.info("%s: registered strategy resource %s", DOMAIN, url)
+        _LOGGER.info("%s: registered first-party resource %s", DOMAIN, url)
+
+    if added + present != len(assets):
+        # Loud on purpose: a partial delivery is the state the operator meets as
+        # "the card just shows a red error box", and until now it was silent.
+        _LOGGER.error(
+            "%s: only %d of %d first-party asset(s) are delivered as Lovelace "
+            "resources — the rest will not exist in the browser",
+            DOMAIN,
+            added + present,
+            len(assets),
+        )
+        hass.data.setdefault(DOMAIN, {})["resource_error"] = "partial"
     return added
 
 
@@ -198,33 +248,50 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     # Separate dir + URL base so the vendor lock/integrity checks never touch them.
     first_party_dir = pkg / FIRST_PARTY_DIRNAME
     fp_cards, fp_injected = await _serve_inject(
-        hass, first_party_dir, FIRST_PARTY_URL_BASE, version
+        hass,
+        first_party_dir,
+        FIRST_PARTY_URL_BASE,
+        version,
+        inject_ids=EARLY_INJECT_ASSET_IDS,
     )
 
-    # Strategies additionally need to be Lovelace resources — see the docstring.
+    # Everything else first-party is delivered as a Lovelace RESOURCE — the only
+    # path that survives HA's custom-element registry swap (see delivery_plan).
     # Deferred to EVENT_HOMEASSISTANT_STARTED: lovelace sets up after us.
-    async def _strategies_started(_event: Event | None = None) -> None:
-        await _register_strategy_resources(hass, fp_cards, version)
+    _fp_inject, fp_resources = delivery_plan(fp_cards, EARLY_INJECT_ASSET_IDS)
+
+    async def _resources_started(_event: Event | None = None) -> None:
+        await _register_resource_assets(hass, fp_resources, version)
 
     if hass.state is CoreState.running:
-        hass.async_create_task(_strategies_started())
+        hass.async_create_task(_resources_started())
     else:
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _strategies_started)
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _resources_started)
 
     hass.data[DOMAIN] = {
         "cards": cards,
         "injected": injected,
         "first_party_cards": fp_cards,
         "first_party_injected": fp_injected,
+        "first_party_resources": [c["id"] for c in fp_resources],
     }
+    if fp_cards and not fp_resources:
+        _LOGGER.error(
+            "%s: not one first-party asset is delivered as a Lovelace resource — "
+            "if any of them defines a custom element it will not exist in the "
+            "browser",
+            DOMAIN,
+        )
     _LOGGER.info(
-        "%s: community %d cards (injected %d) at %s; first-party %d (injected %d) at %s",
+        "%s: community %d cards (injected %d) at %s; first-party %d at %s "
+        "(injected early: %s; Lovelace resources: %s)",
         DOMAIN,
         len(cards),
         injected,
         STATIC_URL_BASE,
         len(fp_cards),
-        fp_injected,
         FIRST_PARTY_URL_BASE,
+        ", ".join(c["id"] for c in _fp_inject) or "none",
+        ", ".join(c["id"] for c in fp_resources) or "none",
     )
     return True

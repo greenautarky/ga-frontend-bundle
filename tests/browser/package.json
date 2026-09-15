@@ -1,0 +1,14 @@
+{
+  "name": "ga-frontend-bundle-browser-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Headless-browser proof that every shipped first-party card ends up in the LIVE custom-element registry under Home Assistant's real load order.",
+  "type": "module",
+  "scripts": {
+    "cards-register": "node cards-register.mjs"
+  },
+  "dependencies": {
+    "@webcomponents/scoped-custom-element-registry": "0.0.10",
+    "playwright": "1.58.2"
+  }
+}

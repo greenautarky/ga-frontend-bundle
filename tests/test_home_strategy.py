@@ -146,26 +146,6 @@ def test_load_cards_finds_the_strategy(bundle_module):
     assert {"id": "ga-home-strategy", "file": "ga-home-strategy.js"} in cards
 
 
-# ─── HA integration: it is actually injected (else it never loads) ────────
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(
-    not _HAS_HA_TEST_HARNESS,
-    reason="needs pytest-homeassistant-custom-component (HA test harness); not in CI",
-)
-async def test_strategy_is_injected(hass, enable_custom_integrations):
-    from homeassistant.setup import async_setup_component
-
-    base = _const().FIRST_PARTY_URL_BASE
-
-    assert await async_setup_component(hass, "ga_frontend_bundle", {})
-    await hass.async_block_till_done()
-
-    extra = hass.data.get("frontend_extra_module_url", set())
-    assert f"{base}/ga-home-strategy/ga-home-strategy.js" in extra
-
-
 # ─── the 5-second race: a strategy MUST be a Lovelace resource ────────────
 
 
@@ -177,9 +157,10 @@ def _const():
     return mod
 
 
-def test_strategy_is_declared_as_a_strategy_asset():
-    """Injection alone loses HA's 5 s registration race — see const.STRATEGY_ASSET_IDS."""
-    assert "ga-home-strategy" in _const().STRATEGY_ASSET_IDS
+def test_strategy_is_not_early_injected():
+    """Injection alone loses HA's 5 s registration race — see
+    const.EARLY_INJECT_ASSET_IDS and bundle.delivery_plan."""
+    assert "ga-home-strategy" not in _const().EARLY_INJECT_ASSET_IDS
 
 
 @pytest.mark.asyncio
