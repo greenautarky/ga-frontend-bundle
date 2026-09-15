@@ -35,6 +35,100 @@
 const ROOM_ICON = "mdi:door-open";
 const HOUSE_ICON = "mdi:home-heart";
 
+/* ---------------------------------------------------------------------------
+ * Naming — a resident must never be shown a serial number
+ *
+ * zigbee2mqtt names a device it was never told a name for after its IEEE
+ * address (`0x00124b00294cf4a1`), and HA derives every entity's friendly_name
+ * from that. A tile with no `name` falls back to the friendly_name, so a
+ * resident's "Geräte" list read as a column of 16-hex-digit addresses
+ * (measured on a canary, 2026-09-15). The badges above the thermostat had
+ * already been given explicit names for exactly this reason; the tiles had not.
+ *
+ * Deliberately NOT a rename: this only strips the address and keeps whatever
+ * human text was around it (`0x0012… l1` -> `l1`, an endpoint a person chose).
+ * A device that carries a real name is left completely alone — a cleaner that
+ * renames everything is worse than the defect it replaces.
+ * ------------------------------------------------------------------------- */
+
+/** A z2m IEEE address, with or without the `0x`, as a whole word. */
+const RADIO_ADDRESS = /\b(?:0x)?[0-9a-f]{16}\b/gi;
+
+/** Last resort when stripping the address leaves nothing human behind. */
+const DEVICE_CLASS_LABELS = {
+  temperature: "Temperatur",
+  humidity: "Luftfeuchtigkeit",
+  battery: "Batterie",
+  illuminance: "Helligkeit",
+  pressure: "Luftdruck",
+  power: "Leistung",
+  energy: "Energie",
+};
+const DOMAIN_LABELS = {
+  light: "Licht",
+  switch: "Schalter",
+  climate: "Heizung",
+  sensor: "Messwert",
+  binary_sensor: "Sensor",
+  cover: "Rollladen",
+  fan: "Lüftung",
+  lock: "Schloss",
+};
+
+function prettify(text) {
+  return String(text || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * A label a person can read. Always non-empty.
+ *
+ * It ALWAYS returns a name rather than "leave it to HA when the name is fine",
+ * because "leave it to HA" is precisely the state that produced the defect: a
+ * card without a `name` is indistinguishable, from the outside, from a card
+ * whose name happens to be right. Naming every tile makes the rendered surface
+ * assertable — on the device, an e2e can read the tiles and fail on a hex
+ * address, which it cannot do for a name that is never written down.
+ *
+ * An entity somebody has actually named comes back unchanged.
+ */
+function humanLabel(hass, entityId) {
+  const state = (hass && hass.states && hass.states[entityId]) || null;
+  const attrs = (state && state.attributes) || {};
+  const raw = String(attrs.friendly_name || "");
+
+  RADIO_ADDRESS.lastIndex = 0;
+  const hasAddress = RADIO_ADDRESS.test(raw);
+  RADIO_ADDRESS.lastIndex = 0;
+
+  if (raw && !hasAddress) return raw;        // already human — verbatim
+
+  const stripped = prettify(raw.replace(RADIO_ADDRESS, " "));
+  if (stripped) return stripped;             // `0x0012… l1` -> `l1`
+
+  const label =
+    DEVICE_CLASS_LABELS[attrs.device_class] ||
+    DOMAIN_LABELS[String(entityId).split(".")[0]];
+  if (label) return label;
+
+  // Nothing at all to go on. Never return "" here: an empty name would put the
+  // address straight back on the tile.
+  return prettify(String(entityId).split(".")[1]) || String(entityId);
+}
+
+/** A device tile that always carries a readable name. */
+function deviceTile(hass, entity) {
+  return { type: "tile", entity, name: humanLabel(hass, entity) };
+}
+
+/** Is Home Assistant's `history` integration loaded on this instance? */
+function historyAvailable(hass) {
+  const components = (hass && hass.config && hass.config.components) || [];
+  return Array.prototype.includes.call(components, "history");
+}
+
 /**
  * Strategy options — set in the dashboard config:
  *   `strategy: { type: "custom:ga-home", hide_household: true, ... }`
@@ -156,7 +250,7 @@ function thermostatCard(entity, roomName, style) {
  * The room view sections, built from ONE pre-classified, states-validated room:
  *   { name, climate[], lights[], switches[], temps[], hums[], batts[] }
  */
-function roomSections(room, opt) {
+function roomSections(room, opt, hass) {
   // Coupled TRVs (two valves on one room's radiators) mirror each other —
   // rendering both just shows the same state twice and doubles the Heizplan.
   const climateAll = room.climate || [];
@@ -192,12 +286,34 @@ function roomSections(room, opt) {
   }
 
   // Climate history — MyVibe's "Daily Temperature / Humidity Range".
+  //
+  // Only when HA's `history` integration is actually loaded. `statistics-graph`
+  // renders "Verlauf-Integration deaktiviert" when it is not, so building the
+  // section regardless hands the resident a tile whose entire content is the
+  // reason it is empty (measured on a canary, 2026-09-15).
+  //
+  // That is NOT the same as deciding history is optional. ga_manager's converge
+  // writes `recorder:` into its own package file with a 7-day retention on
+  // every device (`ga_recorder.yaml`, HA_RECORDER_DEFAULTS), and `history` is a
+  // `default_config` dependency — so on a correctly converged device this
+  // branch never runs. A device where it DOES run has a real defect, and the
+  // warning below is what makes it findable instead of merely ugly.
   const history = [];
-  if (temps.length) {
+  const hasHistory = historyAvailable(hass);
+  if (!hasHistory && (temps.length || hums.length)) {
+    console.warn(
+      "ga-home: the `history` integration is not loaded — the 24 h curves for " +
+        (room.name || room.area_id) +
+        " are omitted. On a converged GA device history is always on " +
+        "(ga_manager writes recorder retention into ga_recorder.yaml), so this " +
+        "is a device defect, not a display setting.",
+    );
+  }
+  if (hasHistory && temps.length) {
     history.push({ type: "statistics-graph", title: "Temperatur (24 h)", entities: temps,
       stat_types: ["min", "mean", "max"], days_to_show: 1, period: "hour" });
   }
-  if (hums.length) {
+  if (hasHistory && hums.length) {
     history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit (24 h)", entities: hums,
       stat_types: ["min", "mean", "max"], days_to_show: 1, period: "hour" });
   }
@@ -211,7 +327,7 @@ function roomSections(room, opt) {
   if (rest.length) {
     sections.push({ type: "grid", cards: [
       { type: "heading", heading: "Geräte", heading_style: "title" },
-      ...rest.map((entity) => ({ type: "tile", entity })),
+      ...rest.map((entity) => deviceTile(hass, entity)),
     ] });
   }
 
@@ -223,7 +339,7 @@ function roomSections(room, opt) {
 }
 
 /** Cards for a classified section without rooms (house-wide user / flat fallback). */
-function classifiedCards(sec) {
+function classifiedCards(sec, hass) {
   const cards = [];
   const climate = sec.climate || [];
   if (climate.length) {
@@ -231,9 +347,11 @@ function classifiedCards(sec) {
       cards: climate.map((e) => ({ type: "thermostat", entity: e })) });
   }
   const measured = [...(sec.temps || []), ...(sec.hums || []), ...(sec.batts || [])];
-  if (measured.length) cards.push({ type: "entities", title: "Messwerte", entities: measured });
+  if (measured.length) cards.push({ type: "entities", title: "Messwerte",
+    entities: measured.map((e) => ({ entity: e, name: humanLabel(hass, e) })) });
   const rest = [...(sec.lights || []), ...(sec.switches || [])];
-  if (rest.length) cards.push({ type: "entities", title: "Schalter", entities: rest });
+  if (rest.length) cards.push({ type: "entities", title: "Schalter",
+    entities: rest.map((e) => ({ entity: e, name: humanLabel(hass, e) })) });
   return cards;
 }
 
@@ -269,8 +387,8 @@ function emptyView(name) {
 }
 
 /** House-wide user, but the device has no rooms: render everything flat. */
-function noRoomsView(name, model) {
-  const cards = classifiedCards(model.roomless || {});
+function noRoomsView(name, model, hass) {
+  const cards = classifiedCards(model.roomless || {}, hass);
   const hint = {
     type: "markdown",
     content:
@@ -309,7 +427,7 @@ function flatFallbackView(name, hass) {
     hums: ids.filter((e) => e.startsWith("sensor.") && hass.states[e].attributes.device_class === "humidity"),
     batts: ids.filter((e) => e.startsWith("sensor.") && hass.states[e].attributes.device_class === "battery"),
   };
-  const cards = classifiedCards(sec);
+  const cards = classifiedCards(sec, hass);
   const hint = {
     type: "markdown",
     content:
@@ -354,8 +472,8 @@ function manageView(opt) {
   };
 }
 
-function roomlessView(sec, opt) {
-  const cards = classifiedCards(sec);
+function roomlessView(sec, opt, hass) {
+  const cards = classifiedCards(sec, hass);
   if (!cards.length) return null;
   return {
     title: "Ohne Raum",
@@ -394,7 +512,7 @@ class GaHomeDashboardStrategy extends HTMLElement {
     // A house-wide user on a device with no rooms: the server put everything in
     // `roomless` — render it flat rather than an empty room list.
     if (!scoped && !rooms.length) {
-      return { title: "Zuhause", views: [noRoomsView(userName, model)] };
+      return { title: "Zuhause", views: [noRoomsView(userName, model, hass)] };
     }
 
     const views = rooms.map((room) => ({
@@ -404,7 +522,7 @@ class GaHomeDashboardStrategy extends HTMLElement {
       // With text_tabs the tab shows the room NAME; an icon would replace it.
       ...(opt.textTabs ? {} : { icon: ROOM_ICON }),
       max_columns: 3,
-      sections: roomSections(room, opt),
+      sections: roomSections(room, opt, hass),
     }));
 
     // The whole-house user (master / admin / unmanaged) gets an overview first,
@@ -417,7 +535,7 @@ class GaHomeDashboardStrategy extends HTMLElement {
       // master-gated server-side anyway; this is the UI half, not the security half.)
       if (model.is_master) views.push(manageView(opt));
       if (!opt.hideRoomless && model.roomless) {
-        const v = roomlessView(model.roomless, opt);
+        const v = roomlessView(model.roomless, opt, hass);
         if (v) views.push(v);
       }
     }

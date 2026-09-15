@@ -125,10 +125,17 @@ def test_sub_user_without_rooms_gets_an_empty_state():
 
 def test_device_without_rooms_still_renders_its_house():
     """No HA areas (today's fleet): the server puts everything in `roomless` and the
-    strategy renders it flat, never an empty room list."""
+    strategy renders it flat, never an empty room list.
+
+    The second half used to pin the literal call ``noRoomsView(userName, model)``.
+    That broke the day the function took a third argument — a passing signature
+    change, with the behaviour untouched. A string match cannot tell those apart,
+    which is the whole reason ``test_rendered_output.py`` exists; the behaviour
+    itself is asserted there by RUNNING the function.
+    """
     src = _src()
     assert "if (!scoped && !rooms.length)" in src
-    assert "noRoomsView(userName, model)" in src
+    assert "noRoomsView(userName, model" in src
 
 
 # ─── the loader picks it up ───────────────────────────────────────────────
