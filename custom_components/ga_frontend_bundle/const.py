@@ -16,12 +16,17 @@ COMMUNITY_DIRNAME = "community"
 FIRST_PARTY_DIRNAME = "first_party"
 FIRST_PARTY_URL_BASE = "/ga_frontend_bundle_first_party"
 
-# First-party assets that are Lovelace *strategies*, not cards.
-#
-# A strategy MUST be registered as a Lovelace resource, not merely injected via
-# add_extra_js_url: the lovelace panel loads its resources BEFORE it resolves the
-# dashboard's `strategy:` block, whereas an injected module races the app bootstrap.
-# HA gives a strategy element only 5 s to register (MAX_WAIT_STRATEGY_LOAD) and then
-# renders "Timeout waiting for strategy element …" — which is exactly what happened
-# on a canary (K0, 2026-07-13): the module was fetched but lost the race.
-STRATEGY_ASSET_IDS = ("ga-home-strategy",)
+# First-party assets that are injected EARLY via add_extra_js_url. Everything
+# else under first_party/ is delivered as a Lovelace resource instead — see
+# bundle.delivery_plan() for why that distinction decides whether a card works
+# at all. This is an allow-list: a new asset is a resource by default.
+EARLY_INJECT_ASSET_IDS = (
+    # Records every GA element defined against the pre-swap registry and shouts
+    # in the console if one is not visible afterwards. Defines no element of its
+    # own, so it is immune to the very failure it detects, and it has to run
+    # early — after the swap there is nothing left to observe.
+    "ga-registry-guard",
+    # A sidebar nudge, not an element: it must run on every page, not only on a
+    # dashboard, so a Lovelace resource would be the wrong carrier.
+    "ga-sidebar-default",
+)

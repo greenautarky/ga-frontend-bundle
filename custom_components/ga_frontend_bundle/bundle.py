@@ -68,3 +68,38 @@ def bundle_version(pkg_dir: Path) -> str | None:
         return str(v) if v else None
     except (ValueError, OSError, TypeError, KeyError):
         return None
+
+
+def delivery_plan(
+    cards: list[dict[str, str]], early_inject_ids: tuple[str, ...] | frozenset[str]
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Split first-party assets into ``(inject_early, lovelace_resource)``.
+
+    HOW AN ASSET REACHES THE BROWSER DECIDES WHETHER IT WORKS — this function is
+    that decision, kept pure so a test can assert on it without Home Assistant.
+
+    ``add_extra_js_url`` modules are started by an inline
+    ``<script>import(...)</script>`` in ``index.html``, alongside the import of
+    the app bundle. The app bundle's first line installs
+    ``@webcomponents/scoped-custom-element-registry``, which ends with
+    ``Object.defineProperty(window, 'customElements', {value: new
+    CustomElementRegistry()})`` — an EMPTY registry whose ``get()`` reads only
+    its own map. A small injected file regularly finishes first, so its
+    ``customElements.define()`` lands in the native registry and is invisible to
+    every ``customElements.get()`` afterwards. No error, no warning: the element
+    simply does not exist as far as Home Assistant is concerned.
+
+    So anything that DEFINES A CUSTOM ELEMENT must not be injected. Lovelace
+    resources are loaded by the Lovelace panel, long after the swap, which is
+    why strategies were already delivered that way — cards need it for exactly
+    the same reason.
+
+    ``early_inject_ids`` is therefore an ALLOW-LIST, not a deny-list: an asset
+    added to ``first_party/`` later is a Lovelace resource by default, which is
+    the safe answer for every card. Only assets that define no custom element
+    and must run on every page (not just on a dashboard) belong on the list.
+    """
+    early = frozenset(early_inject_ids)
+    inject = [c for c in cards if c["id"] in early]
+    resource = [c for c in cards if c["id"] not in early]
+    return inject, resource

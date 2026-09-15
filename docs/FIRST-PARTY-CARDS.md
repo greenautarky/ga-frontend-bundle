@@ -22,14 +22,51 @@ integrity-checked (`vendor.py --check`, `test_vendored.py`).
 
 **First-party** cards — authored by GreenAutarky — live separately in
 `custom_components/ga_frontend_bundle/first_party/<id>/<file>.js` so the vendor
-lock/integrity machinery never touches them. They are loaded, served, and
-injected by the **same** mechanism (`_serve_inject`), but under their own static
-URL base (`/ga_frontend_bundle_first_party`).
+lock/integrity machinery never touches them. They are loaded and served by the
+**same** mechanism (`_serve_inject`), under their own static URL base
+(`/ga_frontend_bundle_first_party`).
+
+### How a first-party asset reaches the browser — and why it matters
+
+There are two delivery paths and only one of them works for a card:
+
+| path | when the module runs | use it for |
+|---|---|---|
+| `add_extra_js_url` (early injection) | during the frontend's bootstrap | assets that define **no** custom element |
+| Lovelace **resource** | when the Lovelace panel loads, after bootstrap | everything that calls `customElements.define()` |
+
+`home-assistant-frontend`'s app bundle imports
+`@webcomponents/scoped-custom-element-registry` on its **first line**, and that
+polyfill ends by replacing `window.customElements` with a brand-new, empty
+registry whose `get()` reads only its own map. Injected modules are started by an
+inline `<script>import(...)</script>` in `index.html`, side by side with the
+import of the app bundle — so a small card file regularly finishes first, its
+`customElements.define()` lands in the pre-swap registry, and
+`customElements.get()` returns nothing for it forever after. Nothing throws.
+Home Assistant then renders *"Custom element doesn't exist"* (card) or *"Timeout
+waiting for strategy element"* (strategy).
+
+That is what broke **every** first-party card on a freshly flashed canary on
+2026-09-15, while every file was fetched, served 200 and contained its
+`define()`. The strategy had been moved to the resource path in an earlier fix;
+the note that "cards do not care, they resolve lazily" was wrong — lazily
+resolved or not, a card is resolved against the **post-swap** registry.
+
+So the injection list (`const.EARLY_INJECT_ASSET_IDS`) is an **allow-list**:
+anything not on it is a Lovelace resource. See `bundle.delivery_plan()`.
+
+`first_party/ga-registry-guard/` is the watchdog for this failure class: it
+records every `ga-*` / `ll-strategy-*` element defined against the pre-swap
+registry and writes a `console.error` naming the ones that are not in the live
+registry afterwards. It defines no element itself, so it cannot be a victim of
+what it watches.
 
 To add a first-party card: drop `first_party/<card-id>/<card-id>.js` (a vanilla
 custom element that `customElements.define(...)`s and pushes to
-`window.customCards`). No build step, no lock entry. `load_cards` auto-discovers
-it; `__init__.py` serves + injects it on every dashboard.
+`window.customCards`). No build step, no lock entry, and **no list to edit**:
+`load_cards` auto-discovers it and it is delivered as a Lovelace resource by
+default. `tests/test_cards_register_in_browser.py` picks it up automatically and
+proves in a headless Chromium that it really registers.
 
 ## Cards
 

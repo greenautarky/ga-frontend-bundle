@@ -97,10 +97,16 @@ def test_card_is_discovered_as_first_party(bundle_module):
     assert {"id": "ga-heating-card", "file": "ga-heating-card.js"} in cards
 
 
-def test_card_is_not_a_strategy():
-    """Cards resolve lazily, so they keep the injection path — only strategies must be
-    Lovelace resources (see the registry-swap fix)."""
-    assert "ga-heating-card" not in _const().STRATEGY_ASSET_IDS
+def test_card_is_not_early_injected():
+    """A card must NOT be on the add_extra_js_url path.
+
+    This used to assert the opposite belief ("cards resolve lazily, so they keep
+    the injection path"). That belief was wrong and it is what broke every
+    first-party card on a freshly flashed canary (2026-09-15): an injected module
+    can register before HA replaces `window.customElements`, and everything in
+    the pre-swap registry is invisible to `customElements.get()` afterwards.
+    Lazily resolved or not, a card is resolved against the post-swap registry."""
+    assert "ga-heating-card" not in _const().EARLY_INJECT_ASSET_IDS
 
 
 @pytest.mark.asyncio
@@ -108,7 +114,9 @@ def test_card_is_not_a_strategy():
     not _HAS_HA_TEST_HARNESS,
     reason="needs pytest-homeassistant-custom-component (HA test harness); not in CI",
 )
-async def test_card_is_injected(hass, enable_custom_integrations):
+async def test_card_is_delivered_as_a_resource_and_never_injected(
+    hass, enable_custom_integrations
+):
     from homeassistant.setup import async_setup_component
 
     base = _const().FIRST_PARTY_URL_BASE
@@ -116,4 +124,8 @@ async def test_card_is_injected(hass, enable_custom_integrations):
     await hass.async_block_till_done()
 
     extra = hass.data.get("frontend_extra_module_url", set())
-    assert f"{base}/ga-heating-card/ga-heating-card.js" in extra
+    assert not [u for u in extra if u.startswith(f"{base}/ga-heating-card/")], (
+        "the heating card is on the early-injection path again — it will register "
+        "into the pre-swap registry and render as \"Custom element doesn't exist\""
+    )
+    assert "ga-heating-card" in hass.data["ga_frontend_bundle"]["first_party_resources"]

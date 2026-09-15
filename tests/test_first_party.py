@@ -12,7 +12,7 @@ import json
 import pytest
 from conftest import PKG
 
-# test_first_party_injected needs the Home Assistant test harness (the ``hass`` +
+# test_first_party_delivery needs the Home Assistant test harness (the ``hass`` +
 # ``enable_custom_integrations`` fixtures). CI installs only pytest/PyYAML/ruff,
 # and fixtures resolve BEFORE the function body — so an in-body importorskip is
 # too late (errors as "fixture 'hass' not found"). Skip that ONE test when the
@@ -97,7 +97,7 @@ def test_load_cards_finds_first_party(bundle_module):
     assert {"id": "ga-master-card", "file": "ga-master-card.js"} in cards
 
 
-# ─── HA integration: served + injected without touching community count ───
+# ─── HA integration: served + delivered without touching community count ───
 
 
 @pytest.mark.asyncio
@@ -105,7 +105,7 @@ def test_load_cards_finds_first_party(bundle_module):
     not _HAS_HA_TEST_HARNESS,
     reason="needs pytest-homeassistant-custom-component (HA test harness); not in CI",
 )
-async def test_first_party_injected(hass, enable_custom_integrations):
+async def test_first_party_delivery(hass, enable_custom_integrations):
     from homeassistant.setup import async_setup_component
 
     from custom_components.ga_frontend_bundle.const import (
@@ -125,17 +125,21 @@ async def test_first_party_injected(hass, enable_custom_integrations):
     )
     assert data["injected"] == community_count
 
-    # first-party non-strategy assets are injected at their own URL base. The
-    # count is not pinned — it grows as first-party modules are added (ga-home-strategy
-    # is a Lovelace resource, not injected) — so assert the specific modules instead.
+    # Every first-party asset is discovered and served...
     fp_ids = [c["id"] for c in data["first_party_cards"]]
     assert "ga-master-card" in fp_ids
     assert "ga-sidebar-default" in fp_ids
-    assert data["first_party_injected"] >= 2
 
+    # ...but only the assets that define NO custom element are injected early.
+    # A card on this path registers before HA swaps window.customElements and is
+    # then invisible to customElements.get() (canary, 2026-09-15).
     extra = hass.data.get("frontend_extra_module_url", set())
-    assert f"{FIRST_PARTY_URL_BASE}/ga-master-card/ga-master-card.js" in extra
-    assert f"{FIRST_PARTY_URL_BASE}/ga-sidebar-default/ga-sidebar-default.js" in extra
+    injected_fp = {u for u in extra if u.startswith(FIRST_PARTY_URL_BASE)}
+    assert injected_fp == {
+        f"{FIRST_PARTY_URL_BASE}/ga-registry-guard/ga-registry-guard.js",
+        f"{FIRST_PARTY_URL_BASE}/ga-sidebar-default/ga-sidebar-default.js",
+    }, f"unexpected first-party module on the early-injection path: {injected_fp}"
+    assert "ga-master-card" in data["first_party_resources"]
 
 
 def test_dialog_prompt_is_a_single_element():
@@ -153,7 +157,8 @@ def test_dialog_prompt_is_a_single_element():
 
 def test_sidebar_default_module_present_and_discovered(bundle_module):
     """The sidebar-collapse-by-default module (Thomas 2026-09-08) ships, is
-    discovered by the loader (so it is injected globally like the cards), and
+    discovered by the loader (and injected globally — it defines no custom
+    element, so it is one of the few assets that may take that path), and
     respects a user who has already set a sidebar preference."""
     js = (FIRST_PARTY / "ga-sidebar-default" / "ga-sidebar-default.js").read_text(encoding="utf-8")
     assert "hass-dock-sidebar" in js            # HA's own event to dock/undock
