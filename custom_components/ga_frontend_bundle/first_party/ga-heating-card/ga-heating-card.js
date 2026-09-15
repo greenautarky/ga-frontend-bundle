@@ -25,6 +25,65 @@ const DAYS = [
 const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday"];
 const TMIN = 5, TMAX = 30;
 
+/* ─── the day curve ───────────────────────────────────────────────────────
+ *
+ * 24 bars, each the setpoint in force in that hour. It used to carry the hour
+ * in exactly one place: `title="06:00 · 21 °C"` on the bar — a HOVER TOOLTIP.
+ * There is no hover on a phone, so on the device residents actually use, the
+ * time axis did not exist and the bars were an abstract shape.
+ *
+ * Fixed with the cheapest thing that works: four labels under the curve (0, 6,
+ * 12, 18, 24) and the value on TAP. Not a charting library — a resident needs
+ * to see "warm in the morning, cool at night", not read off a value at 14:30.
+ *
+ * Kept as pure functions above the element on purpose: this is the part that
+ * was wrong, and a function returning a value can be asserted on. A method
+ * that assigns `innerHTML` can only be asserted on by grepping its source,
+ * which is how "the hour is in an attribute" passed every check for months.
+ * ------------------------------------------------------------------------- */
+
+/** The hours the axis is labelled at. Midnight is shown at both ends. */
+const AXIS_HOURS = [0, 6, 12, 18, 24];
+
+function curveAxisLabels() {
+  return AXIS_HOURS.map(String);
+}
+
+/** `[{h, t, pct}]` — one entry per hour of the day, or [] with no slots. */
+function curveModel(slots) {
+  const list = slots || [];
+  if (!list.length) return [];
+  const bars = [];
+  for (let h = 0; h < 24; h++) {
+    const hm = `${String(h).padStart(2, "0")}:59`;
+    const passed = list.filter((s) => s.time <= hm);
+    // Before the day's first slot the plan wraps from the previous day's last.
+    const t = passed.length ? passed[passed.length - 1].temp : list[list.length - 1].temp;
+    const pct = Math.max(6, Math.round(((t - TMIN) / (TMAX - TMIN)) * 100));
+    bars.push({ h, t, pct });
+  }
+  return bars;
+}
+
+/** The bar markup. `data-h`/`data-t` are what the tap readout reads. */
+function curveHtml(slots) {
+  return curveModel(slots)
+    .map(
+      (b) =>
+        `<div style="height:${b.pct}%" data-h="${b.h}" data-t="${b.t}"` +
+        ` title="${String(b.h).padStart(2, "0")}:00 · ${b.t} °C"></div>`,
+    )
+    .join("");
+}
+
+/** The axis markup. Element TEXT, not attributes — a phone can read this. */
+function curveAxisHtml(slots) {
+  if (!(slots || []).length) return "";
+  return curveAxisLabels()
+    .map((label) => `<span>${label}</span>`)
+    .join("");
+}
+
 class GaHeatingCard extends HTMLElement {
   setConfig(config) {
     if (!config.entity || !config.entity.startsWith("climate.")) {
@@ -116,6 +175,8 @@ class GaHeatingCard extends HTMLElement {
           <div class="days"></div>
           <div class="slots"></div>
           <div class="curve"></div>
+          <div class="axis"></div>
+          <div class="readout"></div>
           <div class="actions">
             <button class="btn add">+ Zeit hinzufügen</button>
             <button class="btn copy-week">Auf Mo–Fr übernehmen</button>
@@ -144,7 +205,14 @@ class GaHeatingCard extends HTMLElement {
         ga-heating-card .rm { border:none; background:none; cursor:pointer; color: var(--error-color,#c0392b); font-size:1.2em; }
         ga-heating-card .curve { display:flex; align-items:flex-end; gap:2px; height:56px; margin:14px 0 4px;
           border-bottom:1px solid var(--divider-color,#e0e0e0); }
-        ga-heating-card .curve div { flex:1; background: var(--primary-color,#03a9f4); opacity:.35; border-radius:2px 2px 0 0; }
+        ga-heating-card .curve div { flex:1; background: var(--primary-color,#03a9f4); opacity:.35; border-radius:2px 2px 0 0;
+          cursor:pointer; }
+        ga-heating-card .curve div.on { opacity:.85; }
+        ga-heating-card .axis { display:flex; justify-content:space-between; font-size:.75em; opacity:.65;
+          margin:2px 0 0; font-variant-numeric:tabular-nums; }
+        ga-heating-card .axis span:first-child { margin-left:-2px; }
+        ga-heating-card .axis span:last-child { margin-right:-2px; }
+        ga-heating-card .readout { min-height:1.25em; font-size:.85em; margin-top:4px; opacity:.8; }
         ga-heating-card .empty { opacity:.6; font-size:.9em; padding:8px 0; }
         ga-heating-card .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
         ga-heating-card .btn { font-family:inherit; font-size:.9em; font-weight:600; padding:8px 14px; border:none;
@@ -191,21 +259,24 @@ class GaHeatingCard extends HTMLElement {
       el.addEventListener("click", () => this._remove(+el.dataset.i));
     });
 
-    // A day at a glance: 24 bars, each the setpoint in force in that hour.
+    // A day at a glance: 24 bars, each the setpoint in force in that hour,
+    // with a readable time axis under them and the value on tap. See the
+    // curve* functions at the top of this file for why that is not cosmetic.
     const curve = this.querySelector(".curve");
-    if (list.length) {
-      const bars = [];
-      for (let h = 0; h < 24; h++) {
-        const hm = `${String(h).padStart(2, "0")}:59`;
-        const passed = list.filter((s) => s.time <= hm);
-        const t = passed.length ? passed[passed.length - 1].temp : list[list.length - 1].temp;
-        const pct = Math.max(6, Math.round(((t - TMIN) / (TMAX - TMIN)) * 100));
-        bars.push(`<div style="height:${pct}%" title="${String(h).padStart(2, "0")}:00 · ${t} °C"></div>`);
-      }
-      curve.innerHTML = bars.join("");
-    } else {
-      curve.innerHTML = "";
-    }
+    const axis = this.querySelector(".axis");
+    const readout = this.querySelector(".readout");
+    curve.innerHTML = curveHtml(list);
+    axis.innerHTML = curveAxisHtml(list);
+    readout.textContent = "";
+    curve.querySelectorAll("div").forEach((bar) => {
+      bar.addEventListener("click", () => {
+        curve.querySelectorAll("div.on").forEach((b) => b.classList.remove("on"));
+        bar.classList.add("on");
+        readout.textContent =
+          `${String(bar.dataset.h).padStart(2, "0")}:00 – ` +
+          `${String((+bar.dataset.h + 1) % 24).padStart(2, "0")}:00 · ${bar.dataset.t} °C`;
+      });
+    });
 
     this.querySelector(".save").disabled = !this._dirty;
   }
