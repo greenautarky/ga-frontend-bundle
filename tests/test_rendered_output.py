@@ -293,3 +293,47 @@ def test_the_bar_heights_still_track_the_setpoint():
     assert by_hour[18] == 22
     # Before the first slot the plan wraps from the previous day's last value.
     assert by_hour[3] == 22
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. A legend that names the same thing three times names nothing
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _history_cards(hass: str = _HASS, room: str = _ROOM):
+    expr = f"""(() => {{
+      const secs = roomSections({room}, gaOptions({{}}), {hass});
+      return secs.flatMap(s => (s.cards || [])
+        .filter(c => c.type === "statistics-graph"));
+    }})()"""
+    return run_js(STRATEGY, expr)
+
+
+def test_each_sensor_contributes_one_curve_not_three():
+    """THE RED ONE. `statistics-graph` labels each series with the ENTITY's
+    name and never says which statistic it is, so min/mean/max drew three
+    curves from one sensor under three identical labels. Measured on a bench
+    device on 2026-09-16: the humidity legend read the same radio address three
+    times, and the distinguishing word was the part that got truncated.
+    """
+    cards = _history_cards()
+    assert cards, "no history card was built at all — this test would be vacuous"
+    for card in cards:
+        assert card["stat_types"] == ["mean"], (
+            f"{card['title']!r} asks for {card['stat_types']} — every extra "
+            "statistic is another curve the legend cannot tell apart"
+        )
+
+
+def test_the_curves_are_still_there():
+    """Must-not-flag: dropping the band must not drop the chart.
+
+    The fixture room carries a temperature sensor and no humidity one, so one
+    chart is the correct answer here — asserting two would pin the FIXTURE
+    rather than the behaviour.
+    """
+    cards = _history_cards()
+    assert [c["title"] for c in cards] == ["Temperatur (24 h)"], cards
+    for card in cards:
+        assert card["entities"], f"{card['title']!r} charts nothing"
+        assert card["days_to_show"] == 1 and card["period"] == "hour"
