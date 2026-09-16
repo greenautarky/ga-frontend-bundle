@@ -29,6 +29,11 @@
  *   variant: classic|dial|setpoint  # optional, default "classic"
  */
 
+//: How long a run of presses is allowed to accumulate before one command is
+//: sent. Long enough that a human pressing repeatedly produces ONE call, short
+//: enough that a single press still feels immediate.
+const COMMIT_DELAY_MS = 400;
+
 const MODE_LABELS = [
   ["auto", "KI", "mdi:brain"],
   ["heat", "MANUEL", "mdi:hand-back-left"],
@@ -97,7 +102,17 @@ class GaThermostatCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._dragging) this._render();
+    const s = this._state();
+    this._reconcilePending(s);
+    if (this._dragging) return;
+    if (this._pending != null) {
+      // A press run is still in flight. Rebuilding now would both replace the
+      // buttons under the resident's finger and overwrite their intent with
+      // the value the backend has not yet been told about.
+      this._showPending();
+      return;
+    }
+    this._render();
   }
 
   getCardSize() { return this._variant === "dial" ? 4 : 3; }
@@ -113,13 +128,78 @@ class GaThermostatCard extends HTMLElement {
   _commitTemp(t) {
     this._hass.callService("climate", "set_temperature", { entity_id: this._config.entity, temperature: t });
   }
+
+  /**
+   * Step the setpoint. Presses accumulate; none of them is lost.
+   *
+   * THE DEFECT THIS REPLACES, measured on a bench device on 2026-09-16: nine
+   * presses produced seven steps. Two independent causes, and fixing either
+   * alone still loses presses.
+   *
+   * 1. READ-MODIFY-WRITE AGAINST A STALE VALUE. Each press read
+   *    `attributes.temperature` — the value the BACKEND last confirmed — and
+   *    wrote that plus one step. Two presses inside one round trip therefore
+   *    both read 19.5 and both wrote 20.0, and the second one vanished. The
+   *    faster the resident presses, the more they lose, which is precisely
+   *    backwards.
+   * 2. THE BUTTON IS REPLACED MID-CLICK. Every state update re-renders the
+   *    whole card with `innerHTML`, so the element a press is travelling to
+   *    can be detached before the event lands (observed as "Element is not
+   *    attached to the DOM"). Handled separately by delegating the listener
+   *    to the root, which survives a re-render.
+   *
+   * The pending value is the resident's intent, and it is what the card shows
+   * until the backend confirms it. The service call is debounced so a run of
+   * presses is one command, not one per press — a TRV that is asked five times
+   * in two seconds obeys the last answer anyway.
+   */
   _setTemp(delta) {
     const s = this._state();
     if (!s) return;
     const step = this._step(s);
-    let t = Number(s.attributes.temperature);
-    if (Number.isNaN(t)) return;
-    this._commitTemp(this._clamp(s, Math.round((t + delta * step) / step) * step));
+    const base = this._pending != null ? this._pending : Number(s.attributes.temperature);
+    if (Number.isNaN(base)) return;
+    this._pending = this._clamp(s, Math.round((base + delta * step) / step) * step);
+    this._showPending();
+    clearTimeout(this._commitTimer);
+    this._commitTimer = setTimeout(() => this._flushTemp(), COMMIT_DELAY_MS);
+  }
+
+  /** Send the accumulated intent, once. */
+  _flushTemp() {
+    if (this._pending == null || !this._hass) return;
+    this._commitTemp(this._pending);
+  }
+
+  /**
+   * Paint the pending value without rebuilding the card.
+   *
+   * A full re-render here would replace the very buttons being pressed, which
+   * is cause 2 above. Only the number changes.
+   */
+  _showPending() {
+    if (!this._root || this._pending == null) return;
+    const el = this._root.querySelector(".target, .sp .t");
+    if (!el) return;
+    el.innerHTML = this._variant === "setpoint"
+      ? `${this._pending.toFixed(1)}<small> °C</small>`
+      : `${this._pending.toFixed(1)} °C`;
+  }
+
+  /**
+   * Has the backend caught up with what the resident asked for?
+   *
+   * Cleared only when the confirmed value MATCHES the pending one. Clearing on
+   * any update instead would drop the intent every time an unrelated attribute
+   * changes — a TRV reports its local temperature every few seconds, so that
+   * is most updates.
+   */
+  _reconcilePending(s) {
+    if (this._pending == null) return;
+    const confirmed = Number(s && s.attributes && s.attributes.temperature);
+    if (!Number.isNaN(confirmed) && Math.abs(confirmed - this._pending) < 1e-6) {
+      this._pending = null;
+    }
   }
   _setMode(mode) {
     this._hass.callService("climate", "set_hvac_mode", { entity_id: this._config.entity, hvac_mode: mode });
@@ -286,11 +366,32 @@ class GaThermostatCard extends HTMLElement {
     dial.addEventListener("pointercancel", end);
   }
 
+  /**
+   * One listener on the root, bound once, instead of one per button per render.
+   *
+   * The second cause of lost presses: `_render()` rebuilds the card with
+   * `innerHTML`, so every re-render throws away the button a press may already
+   * be travelling to — the press then lands on a node that is no longer in the
+   * document and does nothing ("Element is not attached to the DOM", observed
+   * while driving the card on 2026-09-16). Re-binding faster does not fix it;
+   * not depending on the element's identity does.
+   *
+   * The root survives every re-render, so a listener here cannot be detached
+   * mid-click, and rendering no longer has to re-wire anything.
+   */
   _wireCommon() {
-    this._root.querySelectorAll(".set button, .big button").forEach((b) =>
-      b.addEventListener("click", () => this._setTemp(Number(b.dataset.delta))));
-    this._root.querySelectorAll(".modes .m").forEach((b) =>
-      b.addEventListener("click", () => this._setMode(b.dataset.mode)));
+    if (this._wired) return;
+    this._wired = true;
+    this._root.addEventListener("click", (ev) => {
+      const target = ev.target && ev.target.closest && ev.target.closest(
+        ".set button, .big button, .modes .m");
+      if (!target || !this._root.contains(target)) return;
+      if (target.dataset.mode) {
+        this._setMode(target.dataset.mode);
+      } else if (target.dataset.delta) {
+        this._setTemp(Number(target.dataset.delta));
+      }
+    });
   }
 }
 
