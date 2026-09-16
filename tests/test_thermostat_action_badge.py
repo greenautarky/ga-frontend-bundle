@@ -21,7 +21,6 @@ the source: a badge that exists in the file and never reaches the markup
 passes every string check ever written about it, which is exactly how the
 first half survived.
 """
-from pathlib import Path
 
 from conftest import PKG
 from test_rendered_output import run_js
