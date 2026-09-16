@@ -41,6 +41,14 @@ const DIAL = { size: 200, c: 100, r: 82, start: -135, sweep: 270 };
 const STYLE = `
   ga-thermostat-card .ga-body { padding: 16px; }
   ga-thermostat-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 10px; }
+  /* The running state is a WORD first; the colour only reinforces it. A badge
+     that says nothing without colour says nothing to a reader who cannot
+     distinguish it. */
+  ga-thermostat-card .act { float: right; font-size: 12px; font-weight: 600;
+    padding: 1px 8px; border-radius: 10px; opacity: 1; }
+  ga-thermostat-card .act-heating { background: rgba(230,126,34,.16); color: #b95b0b; }
+  ga-thermostat-card .act-idle { background: rgba(127,140,141,.16); color: #5d6d6e; }
+  ga-thermostat-card .act-off { background: rgba(127,140,141,.12); color: #7f8c8d; }
   ga-thermostat-card .val { text-align: center; font-size: 35px; font-weight: 500; line-height: 1.1; }
   ga-thermostat-card .val small { font-size: 15px; opacity: .6; }
   ga-thermostat-card .set { display: flex; align-items: center; justify-content: center;
@@ -159,7 +167,7 @@ class GaThermostatCard extends HTMLElement {
         `<div class="target">${Number(target).toFixed(1)} °C</div>` +
         `<button data-delta="1" aria-label="wärmer">+</button></div>`
       : "";
-    this._root.innerHTML = `<div class="ga-body"><div class="hdr">${header}</div>` +
+    this._root.innerHTML = `<div class="ga-body"><div class="hdr">${header}${this._actionBadge(s)}</div>` +
       `<div class="val">${curTxt}</div>${setRow}${this._modeRow(s)}</div>`;
   }
 
@@ -173,11 +181,11 @@ class GaThermostatCard extends HTMLElement {
         `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
         `<button data-delta="1">+</button></div>`
       : `<div class="offmsg">Heizung aus</div>`;
-    this._root.innerHTML = `<div class="ga-body sp"><div class="hdr">${header}</div>${body}${this._modeRow(s)}</div>`;
+    this._root.innerHTML = `<div class="ga-body sp"><div class="hdr">${header}${this._actionBadge(s)}</div>${body}${this._modeRow(s)}</div>`;
   }
 
   _renderDial(s, header) {
-    this._root.innerHTML = `<div class="ga-body dl"><div class="hdr">${header}</div>` +
+    this._root.innerHTML = `<div class="ga-body dl"><div class="hdr">${header}${this._actionBadge(s)}</div>` +
       `<div class="dialwrap">${this._dialSVG(s)}</div>${this._modeRow(s)}</div>`;
   }
 
@@ -192,12 +200,48 @@ class GaThermostatCard extends HTMLElement {
     const large = (a1 - a0) > 180 ? 1 : 0;
     return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${large} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
   }
-  _actionLabel(s) {
-    if (s.state === "off") return "Aus";
+  /**
+   * What the heating is DOING right now — read, not guessed.
+   *
+   * `hvac_action` is the thermostat's own answer and Home Assistant keeps it
+   * current; it is the only source here that can tell "the valve is open" from
+   * "the target is above the room". Those differ in practice: a valve holds
+   * `idle` with a target above the room when a window contact is open or the
+   * valve is closed, and reports `heating` at equal temperatures while it
+   * catches up. The comparison this used to make gets both of those wrong, and
+   * it gets them wrong silently.
+   *
+   * The comparison survives as a FALLBACK for a thermostat that publishes no
+   * `hvac_action` at all, and it is marked as an inference so the caller can
+   * word it less definitely. Guessing is acceptable; presenting a guess as a
+   * reading is not.
+   */
+  _action(s) {
+    if (s.state === "off") return { key: "off", label: "Aus", inferred: false };
+    const action = s.attributes.hvac_action;
+    if (action === "heating") return { key: "heating", label: "Heizt", inferred: false };
+    if (action === "idle") return { key: "idle", label: "Bereit", inferred: false };
+    if (action === "off") return { key: "off", label: "Aus", inferred: false };
     const cur = s.attributes.current_temperature, t = s.attributes.temperature;
-    if (cur != null && t != null) return Number(t) > Number(cur) ? "Heizt" : "Bereit";
-    return "";
+    if (cur != null && t != null) {
+      return Number(t) > Number(cur)
+        ? { key: "heating", label: "Heizt", inferred: true }
+        : { key: "idle", label: "Bereit", inferred: true };
+    }
+    return { key: "unknown", label: "", inferred: true };
   }
+
+  /** The badge every variant shows. Empty string when there is nothing to say. */
+  _actionBadge(s) {
+    const a = this._action(s);
+    if (!a.label) return "";
+    const title = a.inferred
+      ? ' title="abgeleitet aus Soll und Ist — dieses Thermostat meldet seinen Betriebszustand nicht"'
+      : "";
+    return `<span class="act act-${a.key}"${title}>${a.label}</span>`;
+  }
+
+  _actionLabel(s) { return this._action(s).label; }
   _dialSVG(s) {
     const heating = s.state !== "off";
     const target = Number(s.attributes.temperature), cur = s.attributes.current_temperature;
