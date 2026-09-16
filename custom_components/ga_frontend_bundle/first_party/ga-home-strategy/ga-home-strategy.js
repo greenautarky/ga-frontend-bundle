@@ -309,13 +309,23 @@ function roomSections(room, opt, hass) {
         "is a device defect, not a display setting.",
     );
   }
+  // ONE statistic per sensor, on purpose. `statistics-graph` labels every
+  // series with the ENTITY's name and never says WHICH statistic it is, so
+  // asking for min/mean/max drew three curves from one sensor under three
+  // identical labels. A legend that names the same thing three times tells a
+  // reader nothing, and it is worse than no legend because it reads like three
+  // sensors. Measured on a bench device 2026-09-16 (#22).
+  //
+  // The mean is the one a resident asks for ("how warm was it"). The band is
+  // worth having back the day we draw it ourselves and can label it; until
+  // then it costs comprehension and buys nothing.
   if (hasHistory && temps.length) {
     history.push({ type: "statistics-graph", title: "Temperatur (24 h)", entities: temps,
-      stat_types: ["min", "mean", "max"], days_to_show: 1, period: "hour" });
+      stat_types: ["mean"], days_to_show: 1, period: "hour" });
   }
   if (hasHistory && hums.length) {
     history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit (24 h)", entities: hums,
-      stat_types: ["min", "mean", "max"], days_to_show: 1, period: "hour" });
+      stat_types: ["mean"], days_to_show: 1, period: "hour" });
   }
   if (history.length) {
     sections.push({ type: "grid", cards: [
