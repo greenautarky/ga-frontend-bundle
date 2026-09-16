@@ -34,6 +34,14 @@
 //: enough that a single press still feels immediate.
 const COMMIT_DELAY_MS = 400;
 
+//: How long the resident's un-confirmed intent may stay on screen.
+//:
+//: Long enough to cover a slow Zigbee round trip, short enough that a press the
+//: device will never honour does not freeze the card. Measured on a device
+//: 2026-09-16: in `auto` mode `climate.set_temperature` answers 200 and changes
+//: nothing, so "wait for confirmation" is a wait that never ends.
+const PENDING_TTL_MS = 8000;
+
 const MODE_LABELS = [
   ["auto", "KI", "mdi:brain"],
   ["heat", "MANUEL", "mdi:hand-back-left"],
@@ -160,6 +168,7 @@ class GaThermostatCard extends HTMLElement {
     const base = this._pending != null ? this._pending : Number(s.attributes.temperature);
     if (Number.isNaN(base)) return;
     this._pending = this._clamp(s, Math.round((base + delta * step) / step) * step);
+    if (!this._pendingSince) this._pendingSince = Date.now();
     this._showPending();
     clearTimeout(this._commitTimer);
     this._commitTimer = setTimeout(() => this._flushTemp(), COMMIT_DELAY_MS);
@@ -199,6 +208,19 @@ class GaThermostatCard extends HTMLElement {
     const confirmed = Number(s && s.attributes && s.attributes.temperature);
     if (!Number.isNaN(confirmed) && Math.abs(confirmed - this._pending) < 1e-6) {
       this._pending = null;
+      this._pendingSince = 0;
+      return;
+    }
+    // The device may never confirm. Measured on a device 2026-09-16: in `auto`
+    // the plan owns the setpoint, `climate.set_temperature` is accepted with
+    // 200 and changes nothing, so the pending value was never confirmed, the
+    // early return in `set hass` fired on every update for ever, and the card
+    // stopped following the device at all — no current temperature, no mode, no
+    // running state. A card frozen on a number the device does not have is
+    // worse than the lost press this optimism was built to fix.
+    if (this._pendingSince && Date.now() - this._pendingSince > PENDING_TTL_MS) {
+      this._pending = null;
+      this._pendingSince = 0;
     }
   }
   _setMode(mode) {

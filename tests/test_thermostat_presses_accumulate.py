@@ -129,3 +129,51 @@ def test_the_listener_is_bound_to_the_root_and_only_once():
         "per-button binding is what loses a press to a detached node"
     )
     assert "this._wired" in body, "and it must not be bound again on every render"
+
+
+# ── intent that is never honoured must expire (measured on a device) ─────────
+#
+# MEASURED ON K31 / rc38, 2026-09-16, and it is a defect introduced by the fix
+# above. In `auto` mode the heating plan owns the setpoint: a
+# `climate.set_temperature` is accepted with HTTP 200 and changes nothing. The
+# pending value was therefore never confirmed, the `set hass` early-return fired
+# on every state update for ever, and the card stopped following the device
+# entirely — no current temperature, no mode, no running state, just a number
+# the device did not have.
+#
+# A card frozen on a wrong number is worse than the lost press the optimism was
+# built to fix. Intent expires now.
+
+
+def test_intent_the_device_never_honours_expires():
+    """THE RED ONE for the freeze. The backend keeps answering with its own
+    value; after the TTL the card must follow the device again."""
+    out = _run("""
+      card._setTemp(1);                       // intent: 20.0
+      card._pendingSince = Date.now() - 9000;  // ... nine seconds ago
+      card._reconcilePending(hass.states["climate.x"]);
+      return JSON.stringify({ pending: card._pending });
+    """)
+    assert out["pending"] is None
+
+
+def test_intent_is_kept_while_it_is_still_young():
+    """Must-not-flag: expiring immediately would reintroduce the lost press,
+    because a Zigbee round trip is slower than a render."""
+    out = _run("""
+      card._setTemp(1);
+      card._reconcilePending(hass.states["climate.x"]);
+      return JSON.stringify({ pending: card._pending });
+    """)
+    assert out["pending"] == 20.0
+
+
+def test_a_confirmed_value_still_clears_immediately():
+    """Confirmation must not have to wait for the timeout."""
+    out = _run("""
+      card._setTemp(1);
+      hass.states["climate.x"].attributes.temperature = 20.0;
+      card._reconcilePending(hass.states["climate.x"]);
+      return JSON.stringify({ pending: card._pending });
+    """)
+    assert out["pending"] is None
