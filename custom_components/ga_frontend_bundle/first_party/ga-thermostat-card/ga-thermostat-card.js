@@ -62,6 +62,11 @@ const STYLE = `
   ga-thermostat-card .act-heating { background: rgba(230,126,34,.16); color: #b95b0b; }
   ga-thermostat-card .act-idle { background: rgba(127,140,141,.16); color: #5d6d6e; }
   ga-thermostat-card .act-off { background: rgba(127,140,141,.12); color: #7f8c8d; }
+  /* The manual clock sits under the modes, because it is a statement ABOUT the
+     mode that is active — not a fourth thing to press. */
+  ga-thermostat-card .manualrow { display: flex; align-items: center; gap: 6px;
+    margin-top: 8px; font-size: 13px; opacity: .85; }
+  ga-thermostat-card .manualrow ha-icon { --mdc-icon-size: 18px; }
   ga-thermostat-card .val { text-align: center; font-size: 35px; font-weight: 500; line-height: 1.1; }
   ga-thermostat-card .val small { font-size: 15px; opacity: .6; }
   ga-thermostat-card .set { display: flex; align-items: center; justify-content: center;
@@ -227,6 +232,49 @@ class GaThermostatCard extends HTMLElement {
     this._hass.callService("climate", "set_hvac_mode", { entity_id: this._config.entity, hvac_mode: mode });
   }
 
+  /**
+   * How long a manual override still has, in words a resident reads.
+   *
+   * `manual_until` is an ISO timestamp the room entity carries while the plan is
+   * paused; ga_heating hands the room back to `auto` when it passes. Until now
+   * that clock was invisible: the card showed MANUEL highlighted and nothing
+   * about how long it would last, so "why did my temperature change back?" had
+   * no answer on the screen.
+   *
+   * BOTH numbers, on purpose. The remaining time answers "how long have I got",
+   * the wall-clock answers "when does it end" — and the second one is what
+   * someone leaving the house actually plans around. One without the other
+   * sends the reader to do arithmetic.
+   *
+   * Returns null when nothing is running, so the row disappears rather than
+   * showing a zero.
+   */
+  _manualRemaining(s) {
+    const raw = s.attributes && s.attributes.manual_until;
+    if (!raw) return null;
+    const until = new Date(raw);
+    if (Number.isNaN(until.getTime())) return null;
+    const ms = until.getTime() - Date.now();
+    // A clock that has run out is not a clock. ga_heating clears the attribute on
+    // its next tick; until then, saying nothing beats counting backwards.
+    if (ms <= 0) return null;
+
+    const mins = Math.round(ms / 60000);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    const left = h > 0 ? `${h} h ${String(m).padStart(2, "0")} min` : `${m} min`;
+    const clock = until.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    return { left, clock, minutes: mins };
+  }
+
+  _manualRow(s) {
+    const r = this._manualRemaining(s);
+    if (!r) return "";
+    return `<div class="manualrow" title="Danach übernimmt der Heizplan wieder">` +
+      `<ha-icon icon="mdi:timer-sand"></ha-icon>` +
+      `<span>Manuell noch ${r.left} — bis ${r.clock}</span></div>`;
+  }
+
   _modeRow(s) {
     const modes = s.attributes.hvac_modes || [];
     return `<div class="modes">` + MODE_LABELS
@@ -234,7 +282,7 @@ class GaThermostatCard extends HTMLElement {
       .map(([m, label, icon]) =>
         `<button class="m ${s.state === m ? "on" : ""} ${m === "heat" ? "heat" : ""}" data-mode="${m}">` +
         `<ha-icon icon="${icon}"></ha-icon>${label}</button>`)
-      .join("") + `</div>`;
+      .join("") + `</div>` + this._manualRow(s);
   }
 
   _render() {
