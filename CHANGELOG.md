@@ -14,6 +14,13 @@
   (the `simple` style's card) and `card-mod` (the style key inside it) —
   160 KB instead of 6.1 MB. The other eleven stay vendored and statically
   served, so a Lovelace resource can still load one.
+- **The injected set has a byte budget**: 256 KB, deterministic, no browser and
+  no network, so it can fail a pull request. Today's number is 155 KB
+  (card-mod 87, simple-thermostat 62, ga-registry-guard 4, ga-sidebar-default 3).
+  A wall-clock threshold on a mesh-linked device would flake and then be
+  ignored; the time this buys is measured separately on a real device. The
+  budget carries its own red proof — the largest vendored card alone is over
+  it — because a limit that cannot be exceeded measures nothing.
 - A gate reads the live sources and the live constant and compares both
   directions: a card placed but not injected is a dashboard that renders an
   error card; a card injected but not placed is this defect coming back. A
