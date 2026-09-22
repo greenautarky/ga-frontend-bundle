@@ -22,7 +22,6 @@ import ast
 import pathlib
 
 import pytest
-
 from conftest import PKG
 
 COMMUNITY = PKG / "community"

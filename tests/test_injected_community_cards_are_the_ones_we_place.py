@@ -21,13 +21,10 @@ allow-listed. Neither half can rot quietly.
 
 from __future__ import annotations
 
-import pathlib
+import ast
 import re
 
 import pytest
-
-import ast
-
 from conftest import PKG
 
 FIRST_PARTY = PKG / "first_party"
@@ -142,6 +139,8 @@ def test_the_discriminator_separates_use_from_mention(tmp_path, snippet, expect,
         __import__(__name__), "FIRST_PARTY", tmp_path / "first_party", raising=True
     )
     monkeypatch.setattr(
-        __import__(__name__), "_vendored_ids", lambda: {"simple-thermostat", "mushroom", "apexcharts-card"}
+        __import__(__name__),
+        "_vendored_ids",
+        lambda: {"simple-thermostat", "mushroom", "apexcharts-card"},
     )
     assert _placed_ids() == expect
