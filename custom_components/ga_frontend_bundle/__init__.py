@@ -33,6 +33,7 @@ from homeassistant.helpers.typing import ConfigType
 from .bundle import bundle_version, card_url, delivery_plan, load_cards
 from .const import (
     COMMUNITY_DIRNAME,
+    COMMUNITY_INJECT_ASSET_IDS,
     DOMAIN,
     EARLY_INJECT_ASSET_IDS,
     FIRST_PARTY_DIRNAME,
@@ -235,7 +236,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     # Vendored community cards (the de-HACS set, pinned in bundle.lock.yaml).
     community_dir = pkg / COMMUNITY_DIRNAME
-    cards, injected = await _serve_inject(hass, community_dir, STATIC_URL_BASE, version)
+    cards, injected = await _serve_inject(
+        hass,
+        community_dir,
+        STATIC_URL_BASE,
+        version,
+        inject_ids=COMMUNITY_INJECT_ASSET_IDS,
+    )
     if not cards:
         _LOGGER.error(
             "%s: no vendored cards under %s — bundle is empty. Did "
