@@ -194,7 +194,11 @@ function absenceBody(entityId, form) {
     out.end = `${form.end}T${et}:00`;
     if (out.end <= out.start) return "Das Ende liegt vor dem Anfang.";
   }
-  if (form.off) {
+  // "Aus · Frostschutz" belongs to a holiday, not to an illness. Someone in bed
+  // wants the room WARMER; an off-switch on that form is an offer nobody wants
+  // and a mis-tap with a cold night behind it. Sickness therefore always
+  // carries a temperature, whatever `off` happens to hold.
+  if (form.off && form.kind !== "sick") {
     out.switch_off = true;
   } else {
     const t = Number(form.temperature);
@@ -329,11 +333,22 @@ class GaHeatingActionsCard extends HTMLElement {
     }
   }
 
-  /** Back to the plan. An "all off" with no way back is a one-way street. */
+  /**
+   * "Alle → KI" — back to the plan, the old Profil view's own wording (`KI` is
+   * `hvac_mode: auto` in this product, as ga-thermostat-card already labels it).
+   *
+   * It is ALSO the way out of a boost: his layout had three buttons, not four,
+   * and a resident who wants the plan back does not care which override is in
+   * the way. So this cancels the boost too — otherwise "back to the plan" would
+   * leave a boost running for another four minutes and read as broken.
+   */
   async _planAll() {
     const rooms = this._rooms();
     let ok = 0;
     for (const id of rooms) {
+      try {
+        await this._hass.callService("ga_heating", "cancel_boost", { entity_id: id });
+      } catch (e) { /* no boost to cancel is the normal case */ }
       try { await this._hass.callService("climate", "set_hvac_mode", { entity_id: id, hvac_mode: "auto" }); ok += 1; }
       catch (e) { /* counted by omission */ }
     }
@@ -388,18 +403,17 @@ class GaHeatingActionsCard extends HTMLElement {
       <ha-card header="${this._config.title || "Heizung — Ganzes Zuhause"}">
         <div class="card-content">
           <div class="msg"></div>
-          <div class="quick">
-            <button class="btn boost">Alle Räume ${this._minutes} Min voll aufdrehen</button>
-            <button class="btn ghost cancel-boost">Boost beenden</button>
-          </div>
+          <h4>Boost</h4>
           <div class="hint boosthint"></div>
+          <div class="rooms"></div>
           <div class="quick">
-            <button class="btn offall">Alle Räume aus</button>
-            <button class="btn ghost planall">Wieder nach Plan heizen</button>
+            <button class="btn primary boost">Boost setzen</button>
+            <button class="btn ki planall">Alle → KI</button>
+            <button class="btn aus offall">Alle AUS</button>
           </div>
           <div class="hint frosthint"></div>
+          <h4 class="sph">Sonderpläne (Krankheit und Urlaub)</h4>
           <div class="status"></div>
-          <h4>Sonderplan</h4>
           <button class="btn ghost toggle-form"></button>
           <div class="form">
           <div class="kinds">
@@ -407,42 +421,79 @@ class GaHeatingActionsCard extends HTMLElement {
             <button class="btn kind" data-kind="holiday">Urlaub</button>
           </div>
           <div class="fields"></div>
-          <div class="rooms"></div>
           <div class="actions">
-            <button class="btn primary apply">Sonderplan setzen</button>
-            <button class="btn ghost cancel-absence">Sonderplan aufheben</button>
+            <button class="btn primary apply">Aktivieren</button>
+            <button class="btn ghost cancel-absence">Deaktivieren</button>
           </div>
           </div>
         </div>
       </ha-card>
       <style>
-        ga-heating-actions-card .card-content { padding: 16px; display: grid; gap: 12px; }
-        ga-heating-actions-card .msg { display:none; padding:8px 10px; border-radius:8px; font-size:.9em; }
+        /* Layout: two blocks with a rule between them, and a button row that
+           gives the primary action the room it needs. Everything collapses to a
+           single column on a phone, which is where a resident presses "Alle AUS"
+           on their way out of the door. */
+        ga-heating-actions-card .card-content { padding: 16px; display: grid; gap: 14px; }
+        ga-heating-actions-card h4 { margin: 0; font-size: .82em; font-weight: 700;
+          letter-spacing: .07em; text-transform: uppercase; color: var(--secondary-text-color, #6b7682); }
+        ga-heating-actions-card h4.sph { padding-top: 14px; border-top: 1px solid var(--divider-color, #e3e3e3); }
+        ga-heating-actions-card .msg { display:none; padding:9px 11px; border-radius:9px; font-size:.9em; }
         ga-heating-actions-card .msg.ok { display:block; background: rgba(76,175,80,.15); color: var(--success-color,#1d7a3a); }
         ga-heating-actions-card .msg.err { display:block; background: rgba(244,67,54,.15); color: var(--error-color,#c0392b); }
-        ga-heating-actions-card h4 { margin:4px 0 0; font-size:.95em; }
-        ga-heating-actions-card .quick, ga-heating-actions-card .kinds,
-        ga-heating-actions-card .actions { display:flex; gap:8px; flex-wrap:wrap; }
-        ga-heating-actions-card .btn { flex:1 1 auto; padding:10px 12px; border:none; border-radius:10px;
-          cursor:pointer; font-weight:600; background: var(--secondary-background-color,#e8e8e8); color: inherit; }
+
+        /* Boost setzen carries the weight; the two "everything" actions sit
+           beside it at equal width so neither is pressed by accident. */
+        ga-heating-actions-card .quick { display: grid; gap: 8px;
+          grid-template-columns: minmax(150px, 1.4fr) 1fr 1fr; }
+        @media (max-width: 460px) { ga-heating-actions-card .quick { grid-template-columns: 1fr; } }
+        ga-heating-actions-card .actions { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+
+        ga-heating-actions-card .btn { padding: 11px 12px; border: none; border-radius: 10px;
+          cursor: pointer; font-weight: 600; font-size: .92em; line-height: 1.2;
+          background: var(--secondary-background-color,#e8e8e8); color: inherit; }
+        ga-heating-actions-card .btn:hover { filter: brightness(.97); }
+        ga-heating-actions-card .btn:focus-visible { outline: 2px solid var(--primary-color,#03a9f4); outline-offset: 2px; }
         ga-heating-actions-card .btn.primary { background: var(--primary-color,#03a9f4); color:#fff; }
         ga-heating-actions-card .btn.ghost { background: transparent; box-shadow: inset 0 0 0 1px var(--divider-color,#ddd); }
+        /* the two accents from the old Profil view: KI orange-red, AUS deeper red */
+        ga-heating-actions-card .btn.ki { background: rgba(231,76,60,.12); box-shadow: inset 0 0 0 1px rgba(231,76,60,.3); }
+        ga-heating-actions-card .btn.aus { background: rgba(192,57,43,.16); box-shadow: inset 0 0 0 1px rgba(192,57,43,.35); }
+        ga-heating-actions-card .kinds { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
         ga-heating-actions-card .btn.kind.on { background: var(--primary-color,#03a9f4); color:#fff; }
-        ga-heating-actions-card .hint { font-size:.82em; opacity:.7; }
-        ga-heating-actions-card .status { font-size:.92em; padding:9px 11px; border-radius:9px;
-          background: var(--secondary-background-color,#f0f0f0); display:grid; gap:4px; }
+
+        ga-heating-actions-card .hint { font-size:.84em; color: var(--secondary-text-color,#6b7682); margin:0; }
+        ga-heating-actions-card .hint.wide { grid-column: 1 / -1; }
+
+        ga-heating-actions-card .status { font-size:.93em; padding:10px 12px; border-radius:10px;
+          background: var(--secondary-background-color,#f0f0f0); display:grid; gap:3px; }
         ga-heating-actions-card .status.on { box-shadow: inset 3px 0 0 var(--ga-heat,#ff8a3d); }
-        ga-heating-actions-card .status .quiet { opacity:.65; }
+        ga-heating-actions-card .status .quiet { color: var(--secondary-text-color,#6b7682); }
+
         ga-heating-actions-card .form[hidden] { display:none; }
-        ga-heating-actions-card .fields { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-        ga-heating-actions-card .fields label { font-size:.88em; display:flex; gap:6px; align-items:center; }
-        ga-heating-actions-card .rooms { display:flex; gap:6px; flex-wrap:wrap; font-size:.86em; }
-        ga-heating-actions-card .rooms label { display:flex; gap:5px; align-items:center;
-          background: var(--secondary-background-color,#f0f0f0); padding:5px 9px; border-radius:999px; }
+        ga-heating-actions-card .form { display: grid; gap: 12px; }
+
+        /* Label above its input, so a long German label never squeezes the field. */
+        ga-heating-actions-card .fields { display: grid; gap: 10px 14px;
+          grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); align-items: end; }
+        ga-heating-actions-card .fields label { display: grid; gap: 4px; font-size: .86em;
+          color: var(--secondary-text-color,#6b7682); }
+        ga-heating-actions-card .fields label.chk { display: flex; gap: 8px; align-items: center;
+          align-self: end; padding-bottom: 9px; color: inherit; font-size: .92em; }
+        ga-heating-actions-card .fields .in { display: flex; gap: 6px; align-items: center; }
+        ga-heating-actions-card .fields .in em { font-style: normal; color: var(--secondary-text-color,#6b7682); }
+        ga-heating-actions-card .fields input[type=number],
+        ga-heating-actions-card .fields input[type=date],
+        ga-heating-actions-card .fields select { flex: 1 1 auto; min-width: 0; padding: 8px 9px;
+          border-radius: 8px; border: 1px solid var(--divider-color,#ddd);
+          background: var(--card-background-color, #fff); color: inherit; font: inherit; }
+
+        ga-heating-actions-card .rooms { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:.9em; }
+        ga-heating-actions-card .rooms label { display:flex; gap:6px; align-items:center;
+          background: var(--secondary-background-color,#f0f0f0); padding:6px 11px; border-radius:999px; }
+        ga-heating-actions-card .rooms .btn { padding: 6px 11px; font-size: .88em; }
       </style>`;
 
     this.querySelector(".boost").addEventListener("click", () => this._boostAll());
-    this.querySelector(".cancel-boost").addEventListener("click", () => this._cancelBoost());
     this.querySelector(".offall").addEventListener("click", () => this._offAll());
     this.querySelector(".planall").addEventListener("click", () => this._planAll());
     this.querySelector(".apply").addEventListener("click", () => this._applyAbsence());
@@ -454,9 +505,7 @@ class GaHeatingActionsCard extends HTMLElement {
     this.querySelectorAll(".kind").forEach((el) => {
       el.addEventListener("click", () => { this._form.kind = el.dataset.kind; this._render(); });
     });
-    this.querySelector(".boosthint").textContent =
-      `„Voll aufdrehen“ setzt jeden Raum für ${this._minutes} Minuten auf seine höchste Zieltemperatur — `
-      + `das ist es, was die Thermostate annehmen. Danach gilt wieder der Wochenplan.`;
+
   }
 
   _render() {
@@ -485,29 +534,50 @@ class GaHeatingActionsCard extends HTMLElement {
       const lines = [a, b].filter(Boolean);
       st.classList.toggle("on", lines.length > 0);
       st.innerHTML = lines.length
-        ? lines.map((l) => `<div>${l}</div>`).join("")
-        : '<div class="quiet">Kein Sonderplan und kein Boost aktiv — es gilt der Wochenplan.</div>';
+        ? `<div><b>AKTIV</b></div>` + lines.map((l) => `<div>${l}</div>`).join("")
+        : '<div class="quiet"><b>Inaktiv</b> — es gilt der Wochenplan.</div>';
+    }
+
+    // His two wordings, verbatim: idle and running.
+    const bh = this.querySelector(".boosthint");
+    if (bh) {
+      const live = rooms0.filter((id) =>
+        ((((this._hass.states[id] || {}).attributes || {}).override || {}).boost || {}).active);
+      bh.textContent = live.length
+        ? `${live.length} Räume im Boost · Ventile ganz offen`
+        : "Ventile kurzzeitig ganz öffnen";
     }
 
     const tf = this.querySelector(".toggle-form");
-    if (tf) tf.textContent = this._openForm ? "Sonderplan schließen" : "Sonderplan ändern";
+    if (tf) tf.textContent = this._openForm ? "Abbrechen" : "Bearbeiten";
     const formEl = this.querySelector(".form");
     if (formEl) { if (this._openForm) formEl.removeAttribute("hidden"); else formEl.setAttribute("hidden", ""); }
 
     const fields = this.querySelector(".fields");
-    const tempField =
-      `<label><input type="checkbox" class="off" ${f.off ? "checked" : ""}> Heizung aus</label>` +
-      `<label>Temperatur <input type="number" class="temp" min="${TMIN}" max="${TMAX}" step="0.5"
-         value="${f.temperature}" ${f.off ? "disabled" : ""}> °C</label>`;
+    // The off-switch is a HOLIDAY field only — see absenceBody.
+    const offField = f.kind === "holiday"
+      ? `<label class="chk"><input type="checkbox" class="off" ${f.off ? "checked" : ""}>`
+        + ` Aus · Frostschutz</label>`
+      : "";
+    const showTemp = !(f.off && f.kind === "holiday");
+    const tempField = offField +
+      (showTemp
+        ? `<label>🌡️ Zieltemp.<span class="in"><input type="number" class="temp" min="${TMIN}" `
+          + `max="${TMAX}" step="0.5" value="${f.temperature}"><em>°C</em></span></label>`
+        : "");
     fields.innerHTML = f.kind === "sick"
-      ? `<label>Dauer <input type="number" class="hours" min="1" max="${SICK_MAX_HOURS}" value="${f.hours}"> h</label>`
-        + `<span class="hint">beginnt sofort, höchstens ${SICK_MAX_HOURS} h</span>` + tempField
-      : `<label>Von <input type="date" class="start" value="${f.start}">`
-        + `<select class="starttime">${timeOpts(f.startTime)}</select></label>`
-        + `<label>Bis <input type="date" class="end" value="${f.end}">`
-        + `<select class="endtime">${timeOpts(f.endTime)}</select></label>`
-        + `<span class="hint">Die Heizung läuft bis zur Rückkehr wieder normal, wenn du hier `
-        + `die Uhrzeit setzt.</span>` + tempField;
+      ? `<label>⏱️ Dauer ab jetzt<span class="in">`
+        + `<input type="number" class="hours" min="1" max="${SICK_MAX_HOURS}" value="${f.hours}">`
+        + `<em>h</em></span></label>`
+        + tempField
+        + `<p class="hint wide">Beginnt sofort, höchstens ${SICK_MAX_HOURS} h. Danach gilt wieder der Wochenplan.</p>`
+      : `<label>Von<span class="in"><input type="date" class="start" value="${f.start}">`
+        + `<select class="starttime">${timeOpts(f.startTime)}</select></span></label>`
+        + `<label>Bis<span class="in"><input type="date" class="end" value="${f.end}">`
+        + `<select class="endtime">${timeOpts(f.endTime)}</select></span></label>`
+        + tempField
+        + `<p class="hint wide">Die Uhrzeit bei „Bis“ entscheidet, ab wann wieder normal geheizt `
+        + `wird — sonst ist die Wohnung am Rückreisetag noch kalt.</p>`;
 
     const bind = (sel, key, cast) => {
       const el = fields.querySelector(sel);
@@ -536,7 +606,7 @@ class GaHeatingActionsCard extends HTMLElement {
         `<label><input type="checkbox" class="allrooms" ${f.allRooms ? "checked" : ""}>`
         + `<b>Alle Räume</b></label>`
         + `<button class="btn ghost toggle-rooms">`
-        + `${this._openRooms ? "Räume ausblenden" : `Räume wählen (${f.allRooms ? rooms.length : f.rooms.length}/${rooms.length})`}`
+        + `Räume: ${f.allRooms ? "Alle" : `${f.rooms.length} gewählt`}`
         + `</button>`
         + (this._openRooms
             ? rooms.map((id) =>

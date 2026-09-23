@@ -148,11 +148,18 @@ def test_the_handlers_are_deleted_rather_than_left_unreachable():
     assert run_js(CARD, "typeof GaHeatingCard.prototype._remove") == "undefined"
 
 
-def test_the_five_are_announced_as_a_proposal_until_saved():
-    """A padded plan must not look like a saved one — and must not arm Save."""
+def test_padding_never_arms_save_and_never_asks_the_resident_to_save():
+    """Two separate promises.
+
+    Padding must not mark the plan dirty — the next press would otherwise write
+    five slots nobody looked at. And it must not TELL the resident to save: gm
+    writes the default plan on converge, so five slots is what a room has, and
+    an instruction to save it is an instruction to fix something that is not
+    broken (Thomas, 2026-09-23).
+    """
     src = CARD.read_text(encoding="utf-8")
-    assert "Vorschlag" in src
     assert "this._padded = this._normalise();" in src
-    # padding is not an edit: _dirty stays false right after it
     i = src.index("this._padded = this._normalise();")
     assert "this._dirty = false;" in src[i:i + 500]
+    assert "Vorschlag" not in src
+    assert "macht sie zum Plan" not in src

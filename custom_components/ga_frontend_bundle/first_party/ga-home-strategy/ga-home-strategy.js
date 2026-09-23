@@ -166,8 +166,11 @@ function gaOptions(config) {
       const v = c.thermostat_style === "myvibe" ? "classic" : c.thermostat_style;
       return ["classic", "dial", "setpoint", "core", "simple"].includes(v) ? v : "setpoint";
     })(),
-    // DEFAULT: hidden (resident-clean UI, Thomas 2026-09-08). Set hide_household:false to show.
-    hideHousehold: c.hide_household !== false,
+    // DEFAULT CHANGED 2026-09-23 (Thomas): shown, as the LAST tab, renamed
+    // "Einstellungen". It was hidden on 2026-09-08 for a resident-clean UI, and
+    // that decision was about a "Haushalt" tab sitting FIRST — a settings tab at
+    // the end is a different thing. `hide_household: true` still hides it.
+    hideHousehold: c.hide_household === true,
     // DEFAULT: hidden. Set hide_roomless:false to show the roomless view.
     hideRoomless: c.hide_roomless !== false,
   };
@@ -263,7 +266,11 @@ function roomSections(room, opt, hass) {
 
   // Named badges — the raw entities carry IEEE-address names on fleet devices.
   const badges = [];
-  for (const e of temps.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Temperatur" });
+  // NO temperature badge. It is the room's MEASUREMENT, and the same decision
+  // that took it off the thermostat card (Odoo #1060, 2026-09-23) applies here:
+  // the resident acts on the target, and the measured value answers a question
+  // nobody asked. It is still on the entity and still drawn by the
+  // temperature/humidity view — hidden on this surface, not removed.
   for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Luftfeuchtigkeit" });
   for (const e of batts.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Batterie" });
 
@@ -463,9 +470,11 @@ function hasAnyRoomThermostat(hass) {
 
 function householdOverview(name, model, rooms, opt) {
   return {
-    title: "Haushalt",
-    path: "haushalt",
-    ...(opt.textTabs ? {} : { icon: HOUSE_ICON }),
+    // Renamed from "Haushalt" on 2026-09-23: it is where a resident changes how
+    // the home is set up, and "Einstellungen" is the word they look for.
+    title: "Einstellungen",
+    path: "einstellungen",
+    ...(opt.textTabs ? {} : { icon: "mdi:cog" }),
     cards: [
       {
         type: "markdown",
@@ -575,10 +584,14 @@ class GaHomeDashboardStrategy extends HTMLElement {
     // The whole-house user (master / admin / unmanaged) gets an overview first,
     // his management view (master only), and anything without a room.
     if (!scoped) {
+      // ORDER: the rooms a resident uses daily come first, then Profil, then
+      // Einstellungen last (Thomas, 2026-09-23). Both are appended rather than
+      // unshifted, so a room tab is always what opens.
+      //
       // Only where it applies, and never for a scoped sub-user: "alle Räume aus"
       // must not be offered to someone who holds two of the flat's six rooms.
-      if (hasAnyRoomThermostat(hass)) views.unshift(heatingProfileView(opt));
-      if (!opt.hideHousehold) views.unshift(householdOverview(userName, model, rooms, opt));
+      if (hasAnyRoomThermostat(hass)) views.push(heatingProfileView(opt));
+      if (!opt.hideHousehold) views.push(householdOverview(userName, model, rooms, opt));
       // HA cannot gate a SIDEBAR panel per user (only `require_admin`), but the
       // strategy knows exactly who is looking — so the management view simply is
       // not generated for anyone but the master. (The card's endpoints are

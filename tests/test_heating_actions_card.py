@@ -29,6 +29,20 @@ from test_rendered_output import run_js
 
 CARD = PKG / "first_party" / "ga-heating-actions-card" / "ga-heating-actions-card.js"
 
+#: Runs the REAL `_build()` and hands back the markup it produced. `_build` also
+#: wires listeners, so the DOM lookups it makes are stubbed — the markup is not.
+BUILD_MARKUP = (
+    "(() => {"
+    " const c = Object.create(GaHeatingActionsCard.prototype);"
+    " c.setConfig({});"
+    " const stub = { addEventListener() {}, querySelectorAll() { return []; },"
+    "                querySelector() { return null; } };"
+    " c.querySelector = () => stub;"
+    " c.querySelectorAll = () => [];"
+    " c._build();"
+    " return c.innerHTML; })()"
+)
+
 ROOM = {"attributes": {"valves": ["climate.0xaaa"], "area_id": "wohnzimmer",
                        "friendly_name": "Wohnzimmer", "max_temp": 30}}
 VALVE = {"attributes": {"local_temperature": 21.0}}
@@ -200,18 +214,21 @@ def test_the_boost_hint_never_claims_a_valve_position():
         CARD,
         "(() => {"
         " const c = Object.create(GaHeatingActionsCard.prototype);"
-        " c.setConfig({});"
+        " c.setConfig({}); c._built = true; c._hass = { states: {} };"
         " let hintText = '';"
-        " const stub = { addEventListener() {}, set textContent(v) { hintText = v; },"
-        "                get textContent() { return hintText; } };"
-        " c.querySelector = () => stub;"
+        " const mk = (setter) => ({ addEventListener() {}, querySelector: () => null,"
+        "   querySelectorAll: () => [], classList: { toggle() {}, add() {}, remove() {} },"
+        "   removeAttribute() {}, setAttribute() {},"
+        "   set innerHTML(v) {}, get innerHTML() { return ''; },"
+        "   set textContent(v) { setter(v); }, get textContent() { return ''; } });"
+        " c.querySelector = (sel) =>"
+        "   sel === '.boosthint' ? mk(v => { hintText = v; }) : mk(() => {});"
         " c.querySelectorAll = () => [];"
-        " c._build();"
+        " c._render();"
         " return hintText; })()",
     )
-    assert "Minuten" in hint
     assert "100" not in hint
-    assert "höchste Zieltemperatur" in hint
+    assert "Ventile kurzzeitig ganz öffnen" in hint
 
 
 def test_switching_everything_off_offers_a_way_back():
@@ -249,14 +266,21 @@ def test_the_view_is_generated_only_where_a_thermostat_exists():
     assert run_js(STRATEGY, f"(() => hasAnyRoomThermostat({_HASS_NO_ROOM}))()") is False
 
 
-def test_it_is_placed_FIRST_and_behind_the_not_scoped_gate():
-    """"alles aus" is looked for before leaving the flat, not after paging through
-    every room — and it must never reach a room-scoped sub-user."""
+def test_it_is_the_second_to_last_tab_and_behind_the_not_scoped_gate():
+    """Rooms first, then Profil, then Einstellungen (Thomas, 2026-09-23).
+
+    The first version appended it FIRST, on the reasoning that "alles aus" is
+    looked for before leaving the flat. Thomas put the daily rooms first
+    instead — this pins his order, and the not-scoped gate, which must never let
+    "alle Räume aus" reach someone who holds two of the flat's six rooms.
+    """
     src = STRATEGY.read_text(encoding="utf-8")
     i = src.index("if (!scoped) {")
     j = src.index("heatingProfileView(opt)", i)
     assert j > i
-    assert "views.unshift(heatingProfileView(opt))" in src
+    assert "views.push(heatingProfileView(opt))" in src
+    assert src.index("views.push(heatingProfileView(opt))") < src.index(
+        "views.push(householdOverview(")
 
 
 def test_the_household_view_no_longer_carries_the_card():
@@ -463,3 +487,71 @@ def test_the_form_starts_closed_and_the_status_does_not():
         "(() => { const c = Object.create(GaHeatingActionsCard.prototype);"
         " c.setConfig({}); return [c._openForm, c._openRooms]; })()")
     assert flags == [False, False]
+
+
+# ── sickness has no off-switch ───────────────────────────────────────────────
+# Someone in bed wants the room WARMER. An off-switch on that form is an offer
+# nobody wants and a mis-tap with a cold night behind it. (Thomas, 2026-09-23.)
+
+def test_the_sickness_form_offers_no_off_switch():
+    assert "Aus · Frostschutz" not in rendered_fields("sick")
+    assert 'class="off"' not in rendered_fields("sick")
+
+
+def test_the_holiday_form_still_offers_it():
+    assert "Aus · Frostschutz" in rendered_fields("holiday")
+
+
+def test_a_sickness_body_carries_a_temperature_even_if_off_was_left_set():
+    """Switching type from holiday to sickness must not smuggle `off` across."""
+    out = body({"kind": "sick", "hours": 6, "temperature": 22, "off": True})
+    assert "switch_off" not in out
+    assert out["temperature"] == 22
+
+
+# ── the labels are Ahmad's, verbatim ────────────────────────────────────────
+# Taken from ha-dashboard-automation/templates/profile_view_template.j2, read
+# 2026-09-23. Residents of the previous system read these words; inventing new
+# ones would have been a second vocabulary for the same three actions.
+
+def test_the_three_buttons_carry_the_old_labels():
+    markup = run_js(CARD, BUILD_MARKUP)
+    for label in ("Boost setzen", "Alle → KI", "Alle AUS"):
+        assert label in markup, label
+
+
+def test_the_form_toggle_and_actions_carry_the_old_labels():
+    markup = run_js(CARD, BUILD_MARKUP)
+    assert "Aktivieren" in markup and "Deaktivieren" in markup
+    assert "Sonderpläne (Krankheit und Urlaub)" in markup
+    toggle = run_js(
+        CARD,
+        "(() => { const c = Object.create(GaHeatingActionsCard.prototype);"
+        " c.setConfig({}); c._built = true; c._hass = { states: {} };"
+        " let t = '';"
+        " const mk = (setter) => ({ addEventListener() {}, querySelector: () => null,"
+        "   querySelectorAll: () => [], classList: { toggle() {}, add() {}, remove() {} },"
+        "   removeAttribute() {}, setAttribute() {},"
+        "   set innerHTML(v) {}, get innerHTML() { return ''; },"
+        "   set textContent(v) { setter(v); }, get textContent() { return ''; } });"
+        " c.querySelector = (sel) =>"
+        "   sel === '.toggle-form' ? mk(v => { t = v; }) : mk(() => {});"
+        " c.querySelectorAll = () => [];"
+        " c._render(); return t; })()")
+    assert toggle == "Bearbeiten"
+
+
+def test_the_field_labels_are_his_too():
+    assert "⏱️ Dauer ab jetzt" in rendered_fields("sick")
+    assert "🌡️ Zieltemp." in rendered_fields("sick")
+
+
+def test_alle_ki_also_ends_a_running_boost():
+    """His layout had three buttons, not four. A resident who wants the plan back
+    does not care which override is in the way — so "Alle → KI" cancels the boost
+    too, or "back to the plan" leaves one running for another four minutes."""
+    src = CARD.read_text(encoding="utf-8")
+    i = src.index("async _planAll()")
+    body_src = src[i:i + 900]
+    assert "cancel_boost" in body_src
+    assert 'hvac_mode: "auto"' in body_src

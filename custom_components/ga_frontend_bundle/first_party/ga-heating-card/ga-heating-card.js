@@ -352,10 +352,11 @@ class GaHeatingCard extends HTMLElement {
       if (list.length > SLOTS_PER_DAY) {
         this._flash("ok", `Dieser Tag hat ${list.length} Zeiten — mehr als die fünf, die hier angeboten werden. `
           + `Sie bleiben erhalten; nichts wird entfernt.`);
-      } else if ((this._padded || []).includes(this._day)) {
-        this._flash("ok", 'Die fünf Zeiten sind ein Vorschlag aus dem, was schon gilt — '
-          + 'erst „Speichern“ macht sie zum Plan.');
       }
+      // NO "this is only a proposal, press Save" message. gm writes the default
+      // plan on converge, so five slots is what a room HAS — telling a resident
+      // to save a plan that was set up for them is an instruction to fix
+      // something that is not broken. (Thomas, 2026-09-23.)
     }
   }
 }

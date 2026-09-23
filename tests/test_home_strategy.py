@@ -202,11 +202,14 @@ def test_options_have_safe_defaults():
     src = _src()
     assert "function gaOptions(config)" in src
     assert "const c = config || {};" in src
-    # new-look defaults ON; view-hiding now ON by default too (resident-clean UI,
-    # Thomas 2026-09-08) — a device opts IN to the whole-house tabs with hide_*:false.
+    # new-look defaults ON. "Ohne Raum" stays hidden by default (resident-clean
+    # UI, Thomas 2026-09-08). The household view does NOT any more: on
+    # 2026-09-23 Thomas asked for it back as the LAST tab, renamed
+    # "Einstellungen" — which is a different thing from the "Haushalt" tab that
+    # sat FIRST and was what the 09-08 decision removed.
     assert "textTabs: c.text_tabs !== false" in src
     assert "singleThermostat: c.single_thermostat !== false" in src
-    assert "hideHousehold: c.hide_household !== false" in src
+    assert "hideHousehold: c.hide_household === true" in src
     assert "hideRoomless: c.hide_roomless !== false" in src
 
 
@@ -255,12 +258,17 @@ def test_text_tabs_drop_view_icons():
     """With text_tabs (default) a view carries NO icon, so HA renders the title."""
     src = _src()
     assert "...(opt.textTabs ? {} : { icon: ROOM_ICON })" in src
-    assert "...(opt.textTabs ? {} : { icon: HOUSE_ICON })" in src
+    # Every generated view follows the same rule; the icons themselves differ
+    # (HOUSE_ICON for the unmanaged overview, mdi:cog for Einstellungen,
+    # mdi:thermostat for Profil), so the PATTERN is what is pinned here.
+    assert src.count("...(opt.textTabs ? {} : { icon:") >= 4
 
 
 def test_household_and_roomless_views_are_hidable():
     src = _src()
-    assert "if (!opt.hideHousehold) views.unshift(householdOverview(" in src
+    # push, not unshift: Einstellungen is the LAST tab (Thomas 2026-09-23), so a
+    # room tab is always what opens.
+    assert "if (!opt.hideHousehold) views.push(householdOverview(" in src
     assert "if (!opt.hideRoomless && model.roomless)" in src
     # master-only management view is generated only for the master
     assert "if (model.is_master) views.push(manageView(opt))" in src
@@ -269,16 +277,25 @@ def test_household_and_roomless_views_are_hidable():
 # ─── resident-clean defaults (Thomas 2026-09-08) ──────────────────────────
 
 
-def test_household_and_roomless_are_hidden_by_default():
-    """The "Haushalt" overview and "Ohne Raum" views are OFF by default — a device
-    must opt IN (hide_household:false / hide_roomless:false) to show them. Pins the
-    DEFAULT so a silent flip back to shown fails here. (Scoped residents never saw
-    them anyway; this cleans up the unscoped/master whole-house view.)"""
+def test_the_last_two_tabs_are_profil_then_einstellungen():
+    """Order asked for on 2026-09-23: rooms, then Profil, then Einstellungen.
+
+    This replaces `test_household_and_roomless_are_hidden_by_default`, which
+    pinned the 2026-09-08 decision that the household view is off by default.
+    That decision was about a "Haushalt" tab sitting FIRST. Thomas asked for it
+    back on 2026-09-23 as the last tab, renamed "Einstellungen" — so the default
+    flips and the ORDER becomes the thing worth pinning.
+
+    "Ohne Raum" stays hidden; only the household default moved.
+    """
     src = _src()
-    assert "hideHousehold: c.hide_household !== false" in src, (
-        "the 'Haushalt' overview is no longer hidden-by-default")
-    assert "hideRoomless: c.hide_roomless !== false" in src, (
-        "the 'Ohne Raum' view is no longer hidden-by-default")
-    # the render guards must still consult those flags (default not bypassed)
-    assert "if (!opt.hideHousehold) views.unshift(householdOverview" in src
-    assert "if (!opt.hideRoomless && model.roomless)" in src
+    assert 'title: "Einstellungen"' in src and 'path: "einstellungen"' in src
+    assert "hideHousehold: c.hide_household === true" in src
+    assert "hideRoomless: c.hide_roomless !== false" in src
+    # Profil is pushed BEFORE the household view, so it lands second to last.
+    i = src.index("views.push(heatingProfileView(opt))")
+    j = src.index("views.push(householdOverview(")
+    assert i < j, "Profil must be appended before Einstellungen"
+    # and neither is unshifted any more
+    assert "views.unshift(householdOverview(" not in src
+    assert "views.unshift(heatingProfileView(" not in src
