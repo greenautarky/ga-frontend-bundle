@@ -60,7 +60,11 @@ def test_the_shipped_file_defines_both_helpers():
 # ── tempAt: the value in force, wrapping midnight ────────────────────────────
 
 def test_temp_at_returns_the_slot_in_force():
-    day = [{"time": "00:00", "temp": 17}, {"time": "09:00", "temp": 19}, {"time": "18:00", "temp": 20}]
+    day = [
+        {"time": "00:00", "temp": 17},
+        {"time": "09:00", "temp": 19},
+        {"time": "18:00", "temp": 20},
+    ]
     assert temp_at(day, "10:00") == 19
     assert temp_at(day, "23:59") == 20
 
