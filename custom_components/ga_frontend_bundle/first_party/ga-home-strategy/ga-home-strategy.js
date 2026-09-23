@@ -454,6 +454,13 @@ function flatFallbackView(name, hass) {
   };
 }
 
+/** Does any room have a thermostat this house can act on as a whole? */
+function hasAnyRoomThermostat(hass) {
+  const states = (hass && hass.states) || {};
+  return Object.keys(states).some(
+    (id) => id.startsWith("climate.") && Array.isArray((states[id].attributes || {}).valves));
+}
+
 function householdOverview(name, model, rooms, opt) {
   return {
     title: "Haushalt",
@@ -470,6 +477,36 @@ function householdOverview(name, model, rooms, opt) {
       },
       ...rooms.map((a) => ({ type: "area", area: a.area_id, navigation_path: a.area_id })),
     ],
+  };
+}
+
+/**
+ * The whole-home heating controls, on their own tab.
+ *
+ * NAMED `Profil` ON PURPOSE. The previous system had exactly this view — read in
+ * `ha-dashboard-automation/templates/profile_view_template.j2` on 2026-09-23,
+ * whose grid is literally `"boost override" / "schedule override"`. Residents of
+ * that system look for these controls under that word, and inventing "Heizung"
+ * would have been a new name for a place that already had one.
+ *
+ * FIRST POSITION, because "alles aus" is looked for before leaving the flat, not
+ * after paging through every room.
+ *
+ * NOT A SECTION OF THE HOUSEHOLD VIEW, which was the first attempt: that view is
+ * hidden by default ("resident-clean UI", 2026-09-08), so the controls would have
+ * existed on no device at all. Measured on KIB-SON-00000031 the same day — its
+ * dashboard had three room tabs and nothing else.
+ *
+ * The weekly plan stays in each room's own view. The old design had it here
+ * because there was nowhere else; our room tabs already carry ga-heating-card,
+ * and two copies would raise the question of which one is authoritative.
+ */
+function heatingProfileView(opt) {
+  return {
+    title: "Profil",
+    path: "profil",
+    ...(opt.textTabs ? {} : { icon: "mdi:thermostat" }),
+    cards: [{ type: "custom:ga-heating-actions-card" }],
   };
 }
 
@@ -538,6 +575,9 @@ class GaHomeDashboardStrategy extends HTMLElement {
     // The whole-house user (master / admin / unmanaged) gets an overview first,
     // his management view (master only), and anything without a room.
     if (!scoped) {
+      // Only where it applies, and never for a scoped sub-user: "alle Räume aus"
+      // must not be offered to someone who holds two of the flat's six rooms.
+      if (hasAnyRoomThermostat(hass)) views.unshift(heatingProfileView(opt));
       if (!opt.hideHousehold) views.unshift(householdOverview(userName, model, rooms, opt));
       // HA cannot gate a SIDEBAR panel per user (only `require_admin`), but the
       // strategy knows exactly who is looking — so the management view simply is

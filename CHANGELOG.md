@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.18.0
+
+- **The whole-home heating controls, on a tab called `Profil`.** Boost every
+  room for five minutes, switch every room off, and a Sonderplan for sickness or
+  a holiday. The card owns no heating logic: every button calls something
+  `ga_heating` already had — the engine, its validation and its expiry live in
+  Core, where they survive a restart a browser tab does not.
+
+  The name is not new. The previous system had exactly this view, read in
+  `ha-dashboard-automation/templates/profile_view_template.j2` on 2026-09-23,
+  whose grid is literally `"boost override" / "schedule override"`. Residents of
+  that system look for these controls under that word.
+
+  It is generated only where a room entity carries a `valves` list, and never for
+  a room-scoped sub-user — "alle Räume aus" must not be offered to someone who
+  holds two of the flat's six rooms. The first attempt put the card in the
+  household view and reached nobody: `hide_household` defaults to true, so that
+  view exists on no device.
+
+- **Four things the old Profil view had and this card did not**, all measured in
+  that template rather than invented:
+
+  - the **status is always visible** and the form collapses behind a toggle. An
+    override whose status is only visible where it was entered is the invisible
+    override `ga_heating`'s own source warns about;
+  - **`Alle Räume` is its own switch.** "Nothing ticked = all rooms" was the
+    first implementation and reads as "none";
+  - the **boost shows its remaining time**, from `ga_heating` 0.10.0's new
+    `override` attribute — the number the old view had from a real timer;
+  - a holiday's **end carries a time**, in literal 15-minute options. The old
+    source states the reason: "option text is literal, so locale-independent -
+    no native 12h/AM-PM picker". Ending at 23:59 means a cold flat on the day
+    the resident comes home.
+
+  What is deliberately NOT taken is the old design's `_saved` twin for every
+  field. That two-stage commit existed because its "form" was twenty live
+  entities that would otherwise take effect as they were typed.
+
+- **"Alle Räume aus" says at which temperature the valves still open**, read from
+  each valve's own `frost_protection_temperature`. On a SONOFF TRVZB
+  `system_mode: off` IS the anti-freeze state, while `ga_heating`'s own OFF is
+  deliberately not a low setpoint — so the protection comes from the hardware and
+  the card must not promise it without looking. Measured on KIB-SON-00000031:
+  7 °C, not the 5 °C the vendor documents as the default.
+
 ## 1.17.0
 
 - **The thermostat card leads with the target, not with the measurement.** Both
