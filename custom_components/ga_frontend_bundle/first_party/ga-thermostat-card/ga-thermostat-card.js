@@ -27,6 +27,9 @@
  *   entity: climate.wohnzimmer
  *   header: "Steuerung"             # optional, default "Steuerung"
  *   variant: classic|dial|setpoint  # optional, default "classic"
+ *   show_current: true             # optional, default FALSE — the card shows the
+ *                                  # TARGET only; true puts the measured room
+ *                                  # temperature back (diagnostic views)
  */
 
 //: How long a run of presses is allowed to accumulate before one command is
@@ -110,6 +113,14 @@ class GaThermostatCard extends HTMLElement {
     }
     this._config = config;
     this._variant = ["dial", "setpoint"].includes(config.variant) ? config.variant : "classic";
+    // The resident asked for the TARGET, not the measurement (2026-09-23): a
+    // thermostat card that leads with the room's current temperature answers a
+    // question nobody asked while burying the one number the resident can act
+    // on. Default off, so every dashboard that does not say otherwise shows the
+    // setpoint alone; `show_current: true` puts the measurement back for a
+    // diagnostic view. The measurement itself is untouched — it is still on the
+    // entity and still drawn by the temperature/humidity view.
+    this._showCurrent = config.show_current === true;
     this._root = null;
   }
 
@@ -195,7 +206,10 @@ class GaThermostatCard extends HTMLElement {
     if (!this._root || this._pending == null) return;
     const el = this._root.querySelector(".target, .sp .t");
     if (!el) return;
-    el.innerHTML = this._variant === "setpoint"
+    // Format follows the element, not the variant: with the measurement hidden,
+    // classic's target sits in `.val.target` and is rendered with <small> too.
+    const small = this._variant === "setpoint" || el.classList.contains("val");
+    el.innerHTML = small
       ? `${this._pending.toFixed(1)}<small> °C</small>`
       : `${this._pending.toFixed(1)} °C`;
   }
@@ -311,14 +325,20 @@ class GaThermostatCard extends HTMLElement {
     const cur = s.attributes.current_temperature;
     const target = s.attributes.temperature;
     const heating = s.state !== "off";
-    const curTxt = cur != null ? `${Number(cur).toFixed(1)}<small> °C</small>` : "–";
+    const tTxt = target != null ? `${Number(target).toFixed(1)}<small> °C</small>` : "–";
+    // Exactly one element carries the class `target`, in both layouts, because
+    // `_showPending` finds the number by that class. Two of them, or none,
+    // breaks the optimistic press without breaking anything a test would see.
+    const big = this._showCurrent
+      ? `<div class="val">${cur != null ? `${Number(cur).toFixed(1)}<small> °C</small>` : "–"}</div>`
+      : `<div class="val target">${tTxt}</div>`;
     const setRow = (target != null && heating)
       ? `<div class="set"><button data-delta="-1" aria-label="kälter">−</button>` +
-        `<div class="target">${Number(target).toFixed(1)} °C</div>` +
+        (this._showCurrent ? `<div class="target">${Number(target).toFixed(1)} °C</div>` : "") +
         `<button data-delta="1" aria-label="wärmer">+</button></div>`
       : "";
     this._root.innerHTML = `<div class="ga-body"><div class="hdr">${header}${this._actionBadge(s)}</div>` +
-      `<div class="val">${curTxt}</div>${setRow}${this._modeRow(s)}</div>`;
+      `${big}${setRow}${this._modeRow(s)}</div>`;
   }
 
   _renderSetpoint(s, header) {
@@ -326,7 +346,9 @@ class GaThermostatCard extends HTMLElement {
     const target = s.attributes.temperature;
     const heating = s.state !== "off";
     const body = heating
-      ? `<div class="cur">aktuell ${cur != null ? Number(cur).toFixed(1) : "–"} °C</div>` +
+      ? (this._showCurrent
+          ? `<div class="cur">aktuell ${cur != null ? Number(cur).toFixed(1) : "–"} °C</div>`
+          : "") +
         `<div class="big"><button data-delta="-1">−</button>` +
         `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
         `<button data-delta="1">+</button></div>`
@@ -404,7 +426,14 @@ class GaThermostatCard extends HTMLElement {
       `<circle class="knob" cx="${kx.toFixed(1)}" cy="${ky.toFixed(1)}" r="9" fill="#fff" stroke="${col}" stroke-width="2"/>` +
       `<text class="d-act" x="${DIAL.c}" y="${DIAL.c - 16}" text-anchor="middle">${this._actionLabel(s)}</text>` +
       `<text class="d-tgt" x="${DIAL.c}" y="${DIAL.c + 10}" text-anchor="middle">${heating && !Number.isNaN(target) ? Number(target).toFixed(1) : "–"}</text>` +
-      `<text class="d-cur" x="${DIAL.c}" y="${DIAL.c + 30}" text-anchor="middle">${cur != null ? Number(cur).toFixed(1) + " °C" : ""}</text>` +
+      // The dial is the variant the canary actually renders (measured on
+      // KIB-SON-00000031, 2026-09-23): the first version of this change fixed
+      // `classic` and `setpoint` and left the dial showing the measurement, so
+      // the fix was correct and not on the path the device takes. Reachability is
+      // part of correctness, and only the browser test said so.
+      (this._showCurrent
+        ? `<text class="d-cur" x="${DIAL.c}" y="${DIAL.c + 30}" text-anchor="middle">${cur != null ? Number(cur).toFixed(1) + " °C" : ""}</text>`
+        : "") +
       `</svg>`;
   }
   _wireDial(s) {

@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.17.0
+
+- **The thermostat card leads with the target, not with the measurement.** Both
+  looks showed the room's current temperature — `classic` as the large number,
+  `setpoint` as an "aktuell …" line above it — and put the setpoint, the one
+  value a resident can act on, in a small row underneath. Asked for on
+  2026-09-23: show the target only. `show_current: true` puts the measurement
+  back for a diagnostic view; the default is off. The measurement itself is
+  untouched — still on the entity, still drawn by the temperature/humidity view.
+
+  The `dial` look had the same defect in a third place (`.d-cur` inside the SVG)
+  and was missed by the first version of this change: it fixed the two looks a
+  test drove and left the one nobody had asserted on. Found by a browser test
+  against a canary, not by reading. Reachability is part of correctness.
+
+- **The weekly plan is never an empty form.** The scheduler came back with no
+  slots for a day and offered "+ Zeit hinzufügen" as the only way in, so a
+  resident opening a fresh flat saw a blank week and a blank curve and had to
+  invent a plan before the card could show one. Now exactly five times per day,
+  always present; add and remove are gone.
+
+  Five is not a number anyone liked: the canonical table the installation has
+  used since 2026-06 (`ha-dashboard-automation`,
+  `scripts/apply_default_profile_schedule.py`) has exactly five entries per day
+  per room. And the padding invents nothing — a filled slot takes the
+  temperature ALREADY IN FORCE at that time of day from whatever the plan
+  already says, falling back only to the thermostat's own current target, which
+  is a real number on the card above. A day that already carries MORE than five
+  is left alone: trimming would be a silent loss of the resident's plan dressed
+  up as tidying.
+
+  Observed on KIB-SON-00000031 on 2026-09-23: the selected day went from 4 slots
+  to 5, and the same browser check fails on the previous cards with
+  "The plan offers 4 times for the selected day".
+
 ## 1.16.0
 
 - **Only the community cards we actually place are injected.** All thirteen
