@@ -45,6 +45,61 @@ const TMIN = 5, TMAX = 30;
 /** The hours the axis is labelled at. Midnight is shown at both ends. */
 const AXIS_HOURS = [0, 6, 12, 18, 24];
 
+/* --- five slots, always ----------------------------------------------------
+ * The scheduler used to start EMPTY: `days` came back with no slots and the
+ * only way in was "+ Zeit hinzufügen". A resident opening a fresh flat saw an
+ * empty week and a blank curve, and had to invent a plan before the card could
+ * show one. Decided 2026-09-23: exactly five slots per day, always present.
+ *
+ * Five is not a round number somebody liked. The canonical table the
+ * installation has used since 2026-06 —
+ * `ha-dashboard-automation/scripts/apply_default_profile_schedule.py` — has
+ * exactly five entries per day per room (living room on working days:
+ * 00:00=17, 09:00=19, 18:00=20, 22:00=17, 23:00=17).
+ *
+ * WHAT THE PADDING MUST NOT DO is invent a temperature. A number the card made
+ * up looks exactly like one the resident chose, and on 2026-09-23 an invented
+ * default table reached a converge step before it was caught. So a padded slot
+ * takes the temperature ALREADY IN FORCE at that time of day, from whatever the
+ * plan already says; with nothing to derive from it takes the thermostat's
+ * current target, which is a real value the resident can see on the card above.
+ */
+const SLOTS_PER_DAY = 5;
+/** The times a padded slot takes, in order, skipping any the day already has. */
+const SLOT_LADDER = ["00:00", "06:00", "09:00", "18:00", "22:00", "23:00"];
+
+/** The setpoint in force at `hhmm` per `slots`, wrapping midnight — or null. */
+function tempAt(slots, hhmm) {
+  const list = slots || [];
+  if (!list.length) return null;
+  const sorted = [...list].sort((a, b) => a.time.localeCompare(b.time));
+  const passed = sorted.filter((x) => x.time <= hhmm);
+  return passed.length ? passed[passed.length - 1].temp : sorted[sorted.length - 1].temp;
+}
+
+/**
+ * `slots` grown to exactly SLOTS_PER_DAY, or returned untouched when it already
+ * has that many or MORE.
+ *
+ * A day carrying more than five is NOT trimmed. Dropping a slot a resident
+ * entered would be a silent loss of their plan, and the card would look like it
+ * had merely tidied up. It says so instead (see `_render`).
+ *
+ * `fallback` is used only when there is nothing at all to derive from.
+ */
+function padDay(slots, fallback) {
+  const list = [...(slots || [])];
+  if (list.length >= SLOTS_PER_DAY) return list;
+  for (const time of SLOT_LADDER) {
+    if (list.length >= SLOTS_PER_DAY) break;
+    if (list.some((x) => x.time === time)) continue;
+    const t = tempAt(list, time);
+    list.push({ time, temp: t != null ? t : fallback });
+  }
+  list.sort((a, b) => a.time.localeCompare(b.time));
+  return list;
+}
+
 function curveAxisLabels() {
   return AXIS_HOURS.map(String);
 }
@@ -113,6 +168,10 @@ class GaHeatingCard extends HTMLElement {
         "get", `ga_heating/schedule?entity_id=${encodeURIComponent(this._config.entity)}`);
       this._week = r.days || {};
       for (const [d] of DAYS) this._week[d] = this._week[d] || [];
+      this._padded = this._normalise();
+      // `_dirty` stays false: padding is a PROPOSAL, not an edit the resident
+      // made. Marking it dirty would arm Save on a plan nobody touched, and the
+      // next press would write five slots the resident never looked at.
       this._dirty = false;
       this._render();
     } catch (e) {
@@ -132,18 +191,31 @@ class GaHeatingCard extends HTMLElement {
     }
   }
 
+  /** The thermostat's own target — a real number on screen, not an invention. */
+  _fallbackTemp() {
+    const st = this._hass && this._hass.states && this._hass.states[this._config.entity];
+    const t = st && st.attributes && Number(st.attributes.temperature);
+    return Number.isFinite(t) && t >= TMIN && t <= TMAX ? t : null;
+  }
+
+  /** Grow every day to five slots. Returns the days that were padded. */
+  _normalise() {
+    const fb = this._fallbackTemp();
+    const padded = [];
+    for (const [d] of DAYS) {
+      const before = (this._week[d] || []).length;
+      if (before >= SLOTS_PER_DAY) continue;
+      if (before === 0 && fb == null) continue;   // nothing to derive from: leave it
+      this._week[d] = padDay(this._week[d], fb);
+      if (this._week[d].length !== before) padded.push(d);
+    }
+    return padded;
+  }
+
   // ─── editing (local until saved) ────────────────────────────────────────
   _slots() { return this._week[this._day] || []; }
   _sort() { this._week[this._day].sort((a, b) => a.time.localeCompare(b.time)); }
 
-  _add() {
-    this._week[this._day].push({ time: "12:00", temp: 21 });
-    this._sort(); this._dirty = true; this._render();
-  }
-  _remove(i) {
-    this._week[this._day].splice(i, 1);
-    this._dirty = true; this._render();
-  }
   _set(i, field, value) {
     const s = this._week[this._day][i];
     if (field === "time") s.time = value;
@@ -178,7 +250,6 @@ class GaHeatingCard extends HTMLElement {
           <div class="axis"></div>
           <div class="readout"></div>
           <div class="actions">
-            <button class="btn add">+ Zeit hinzufügen</button>
             <button class="btn copy-week">Auf Mo–Fr übernehmen</button>
             <button class="btn copy-all">Auf alle Tage</button>
             <button class="btn primary save">Speichern</button>
@@ -202,7 +273,6 @@ class GaHeatingCard extends HTMLElement {
         ga-heating-card input { font-family:inherit; font-size:1em; padding:6px 8px; border-radius:8px;
           border:1px solid var(--divider-color,#e0e0e0); background: var(--card-background-color,#fff);
           color: var(--primary-text-color,#212121); }
-        ga-heating-card .rm { border:none; background:none; cursor:pointer; color: var(--error-color,#c0392b); font-size:1.2em; }
         ga-heating-card .curve { display:flex; align-items:flex-end; gap:2px; height:56px; margin:14px 0 4px;
           border-bottom:1px solid var(--divider-color,#e0e0e0); }
         ga-heating-card .curve div { flex:1; background: var(--primary-color,#03a9f4); opacity:.35; border-radius:2px 2px 0 0;
@@ -222,7 +292,6 @@ class GaHeatingCard extends HTMLElement {
         ga-heating-card .btn:disabled { opacity:.45; cursor:default; }
       </style>`;
 
-    this.querySelector(".add").addEventListener("click", () => this._add());
     this.querySelector(".copy-week").addEventListener("click", () => this._copyTo(WEEKDAYS));
     this.querySelector(".copy-all").addEventListener("click", () => this._copyTo(DAYS.map((d) => d[0])));
     this.querySelector(".save").addEventListener("click", () => this._save());
@@ -248,15 +317,12 @@ class GaHeatingCard extends HTMLElement {
             <input type="time" value="${s.time}" data-i="${i}" data-f="time">
             <input type="number" min="${TMIN}" max="${TMAX}" step="0.5" value="${s.temp}" data-i="${i}" data-f="temp">
             <span class="unit">°C</span>
-            <button class="rm" data-i="${i}" title="Entfernen">✕</button>
           </div>`).join("")
-      : '<div class="empty">Für diesen Tag ist noch keine Zeit hinterlegt. Ohne Plan bleibt die Temperatur, wie du sie eingestellt hast.</div>';
+      : '<div class="empty">Dieser Tag hat noch keinen Plan, und das Thermostat meldet gerade keine Zieltemperatur — '
+        + 'sobald es eine meldet, stehen hier fünf Zeiten. Ohne Plan bleibt die Temperatur, wie du sie eingestellt hast.</div>';
 
     slots.querySelectorAll("input").forEach((el) => {
       el.addEventListener("change", () => this._set(+el.dataset.i, el.dataset.f, el.value));
-    });
-    slots.querySelectorAll(".rm").forEach((el) => {
-      el.addEventListener("click", () => this._remove(+el.dataset.i));
     });
 
     // A day at a glance: 24 bars, each the setpoint in force in that hour,
@@ -279,6 +345,19 @@ class GaHeatingCard extends HTMLElement {
     });
 
     this.querySelector(".save").disabled = !this._dirty;
+
+    // Two things the resident must not have to guess. Only shown while nothing
+    // has been edited, so it never sits on top of a save result.
+    if (!this._dirty) {
+      if (list.length > SLOTS_PER_DAY) {
+        this._flash("ok", `Dieser Tag hat ${list.length} Zeiten — mehr als die fünf, die hier angeboten werden. `
+          + `Sie bleiben erhalten; nichts wird entfernt.`);
+      }
+      // NO "this is only a proposal, press Save" message. gm writes the default
+      // plan on converge, so five slots is what a room HAS — telling a resident
+      // to save a plan that was set up for them is an instruction to fix
+      // something that is not broken. (Thomas, 2026-09-23.)
+    }
   }
 }
 
