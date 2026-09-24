@@ -163,6 +163,8 @@ class GaMasterCard extends HTMLElement {
         ga-master-card .msg.ok { display:block; background: rgba(76,175,80,.15); color: var(--success-color,#1d7a3a); }
         ga-master-card .msg.err { display:block; background: rgba(244,67,54,.15); color: var(--error-color,#c0392b); }
         ga-master-card .invite-out { margin-top:8px; }
+        ga-master-card .invite-linkrow { display:flex; gap:8px; margin-bottom:6px; }
+        ga-master-card .invite-link { flex:1; min-width:0; font:inherit; padding:6px 8px; }
         ga-master-card table { width:100%; border-collapse:collapse; }
         ga-master-card th, ga-master-card td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--divider-color,#e0e0e0); vertical-align:top; font-size:.92em; }
         ga-master-card .muted { opacity:.6; font-size:.85em; }
@@ -315,11 +317,28 @@ class GaMasterCard extends HTMLElement {
     try {
       const d = await this._api("POST", API + "/invite", {});
       const out = this._root.querySelector(".invite-out");
-      out.innerHTML = `PIN: <code>${d.pin}</code> <span class="muted">(gültig bis ${new Date(
-        d.expires_at
-      ).toLocaleString()})</span>`;
+      out.innerHTML = renderInvite(d);
+      const share = out.querySelector(".invite-share");
+      if (share) share.addEventListener("click", () => this._shareInvite(d.invite_url));
     } catch (e) {
       this._flash("err", this._errText(e));
+    }
+  }
+
+  /** The phone's own share sheet where there is one; the clipboard otherwise. */
+  async _shareInvite(url) {
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Einladung", text: "Einladung zu unserem Zuhause", url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      this._flash("ok", "Link kopiert.");
+    } catch (e) {
+      // Cancelled share sheet, or no clipboard on a plain-http page: the link is
+      // still on screen in a field the resident can select and copy by hand.
+      const field = this._root.querySelector(".invite-link");
+      if (field) field.select();
     }
   }
 
@@ -478,6 +497,38 @@ class GaMasterCard extends HTMLElement {
       this._flash("err", this._errText(e));
     }
   }
+}
+
+/**
+ * What the master sees after "Einladungs-PIN erzeugen".
+ *
+ * The server (greenautarky_site >= 2.9.4) sends `invite_url` next to the PIN:
+ * `<external_url>/greenautarky-join?pin=…`, the thing the master actually wants
+ * to send. Until 2026-09-24 this card showed only the six digits — the link
+ * arrived and nothing rendered it. The PIN stays, for reading out over the
+ * phone. Without `invite_url` (Home Assistant knows no external URL) the card
+ * says so instead of building a link the recipient could not reach.
+ *
+ * A top-level function, not a method, so tests/js/eval.mjs can run the shipped
+ * bytes without a DOM. Everything interpolated is escaped.
+ */
+function renderInvite(d) {
+  const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const until = new Date(d.expires_at).toLocaleString();
+  const pin = `PIN: <code>${esc(d.pin)}</code> <span class="muted">(gültig bis ${esc(until)})</span>`;
+  if (!d.invite_url) {
+    return pin + `<div class="muted">Kein Link verfügbar — dieses Zuhause hat keine externe Adresse. Bitte den PIN weitergeben.</div>`;
+  }
+  const url = esc(d.invite_url);
+  return (
+    `<div class="invite-linkrow">` +
+      `<input class="invite-link" type="text" readonly value="${url}" aria-label="Einladungs-Link">` +
+      `<button class="btn primary invite-share" type="button">Link teilen</button>` +
+    `</div>` +
+    `<div><a href="${url}" target="_blank" rel="noopener">${url}</a></div>` +
+    pin
+  );
 }
 
 if (!customElements.get("ga-master-card")) {
