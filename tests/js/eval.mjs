@@ -37,6 +37,10 @@ function browserContext() {
       define(name, cls) {
         this._defined[name] = cls;
       },
+      // ga-master-card guards its define with get(), as a browser allows.
+      get(name) {
+        return this._defined[name];
+      },
     },
     HTMLElement: class HTMLElement {},
     console,
