@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.19.0
+
+- **Einstellungen carries household management, not the rooms again** (#34).
+  The tab repeated every room as a stock `area` card while users, room access
+  and invite links sat on a separate Verwalten tab. The master's management
+  card now lives in Einstellungen and the second tab is gone; a resident who is
+  not the master gets no management card.
+- **An invite shows a link to send, not six digits only** (#35). The server
+  has returned `invite_url` since greenautarky_site 2.9.4; the card never read
+  it. The link sits in a selectable field with a "Link teilen" button (share
+  sheet, clipboard fallback); the PIN stays for reading out over the phone;
+  without an external URL the card says so instead of guessing a link.
+
 ## 1.18.0
 
 - **The whole-home heating controls, on a tab called `Profil`.** Boost every
