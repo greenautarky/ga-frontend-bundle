@@ -475,16 +475,24 @@ function householdOverview(name, model, rooms, opt) {
     title: "Einstellungen",
     path: "einstellungen",
     ...(opt.textTabs ? {} : { icon: "mdi:cog" }),
+    // What a resident MANAGES, not the rooms again. Until 2026-09-24 this tab
+    // repeated every room as Home Assistant's stock `area` card — rooms the
+    // resident already has as tabs — while users, room access and invite links
+    // sat on a separate "Verwalten" tab. Thomas, the same day, looking at it as
+    // a resident: the management belongs here, the room cards do not. So the
+    // master's card moved in and the second tab is gone. A resident who is not
+    // the master gets no card: the server refuses them anyway (ADR-0006), and a
+    // tab must not offer what it will refuse.
     cards: [
       {
         type: "markdown",
         content:
           "# Hallo " + (name || "") + "!\n\n" +
           (model.is_master
-            ? "Du verwaltest **" + rooms.length + " Räume**. Nutzer und Raum-Freigaben: [Haushalt verwalten](/greenautarky-master)"
+            ? "Du verwaltest **" + rooms.length + " Räume**."
             : "Dieses Zuhause hat **" + rooms.length + " Räume**."),
       },
-      ...rooms.map((a) => ({ type: "area", area: a.area_id, navigation_path: a.area_id })),
+      ...(model.is_master ? [{ type: "custom:ga-master-card" }] : []),
     ],
   };
 }
@@ -516,15 +524,6 @@ function heatingProfileView(opt) {
     path: "profil",
     ...(opt.textTabs ? {} : { icon: "mdi:thermostat" }),
     cards: [{ type: "custom:ga-heating-actions-card" }],
-  };
-}
-
-function manageView(opt) {
-  return {
-    title: "Verwalten",
-    path: "verwalten",
-    ...(opt.textTabs ? {} : { icon: "mdi:account-cog" }),
-    cards: [{ type: "custom:ga-master-card" }],
   };
 }
 
@@ -596,7 +595,6 @@ class GaHomeDashboardStrategy extends HTMLElement {
       // strategy knows exactly who is looking — so the management view simply is
       // not generated for anyone but the master. (The card's endpoints are
       // master-gated server-side anyway; this is the UI half, not the security half.)
-      if (model.is_master) views.push(manageView(opt));
       if (!opt.hideRoomless && model.roomless) {
         const v = roomlessView(model.roomless, opt, hass);
         if (v) views.push(v);

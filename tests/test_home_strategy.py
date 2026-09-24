@@ -270,8 +270,9 @@ def test_household_and_roomless_views_are_hidable():
     # room tab is always what opens.
     assert "if (!opt.hideHousehold) views.push(householdOverview(" in src
     assert "if (!opt.hideRoomless && model.roomless)" in src
-    # master-only management view is generated only for the master
-    assert "if (model.is_master) views.push(manageView(opt))" in src
+    # Management lives IN Einstellungen since 2026-09-24 (Thomas): no second
+    # tab. The behaviour is asserted in test_settings_view_is_management.py.
+    assert "manageView" not in src
 
 
 # ─── resident-clean defaults (Thomas 2026-09-08) ──────────────────────────
