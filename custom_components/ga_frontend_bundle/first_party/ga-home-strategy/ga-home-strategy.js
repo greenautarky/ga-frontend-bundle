@@ -270,17 +270,17 @@ function roomSections(room, opt, hass) {
   // dropped it — "the resident acts on the target" — and was REVERSED for this
   // badge on 2026-09-25 at Thomas's request: the measured room temperature
   // belongs next to the humidity. The thermostat card stays setpoint-only.
-  // Source: temps[0] — the model does not tell a room sensor from a valve's own
-  // thermometer. Without a sensor, the thermostat's current_temperature, and
-  // only if it is a number; otherwise no badge (never an empty one).
-  if (temps.length) {
+  // Source: the ga_heating ROOM entity (climate[0] — the home model hands only
+  // that entity when one exists). ga_heating decides the value in ONE place —
+  // room sensor first, the valve's own thermometer as fallback — so badge,
+  // heating and calibration agree. Order: climate current_temperature if it is
+  // a number; else temps[0]; else no badge (never an empty one).
+  const clim = climate.length && hass && hass.states ? hass.states[climate[0]] : null;
+  if (clim && typeof (clim.attributes || {}).current_temperature === "number") {
+    badges.push({ type: "entity", entity: climate[0], name: "Temperatur",
+      state_content: "current_temperature" });
+  } else if (temps.length) {
     badges.push({ type: "entity", entity: temps[0], name: "Temperatur" });
-  } else if (climate.length) {
-    const st = hass && hass.states && hass.states[climate[0]];
-    if (st && typeof (st.attributes || {}).current_temperature === "number") {
-      badges.push({ type: "entity", entity: climate[0], name: "Temperatur",
-        state_content: "current_temperature" });
-    }
   }
   for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Luftfeuchtigkeit" });
   for (const e of batts.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Batterie" });

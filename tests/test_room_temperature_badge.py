@@ -6,13 +6,9 @@ Thomas asked on 2026-09-25 for the measured room temperature to be shown again
 2026-09-23 that had dropped it. The thermostat card stays setpoint-only
 (tests/test_thermostat_target_only.py still pins that).
 
-Source: `room.temps[0]`. The model from greenautarky_site does not distinguish a
-dedicated room sensor from a valve's own thermometer — `temps` is every
-temperature sensor in the area — so the first one is used. Without any
-temperature sensor the badge falls back to the room thermostat's
-`current_temperature` attribute (a heading entity badge with `state_content`),
-and only when that attribute actually carries a number. Otherwise: no badge,
-never a null one.
+Source (decision 2026-09-25): the ga_heating room entity's `current_temperature`
+(ga_heating picks room sensor first, valve fallback); else `room.temps[0]`;
+else no badge, never a null one.
 
 These run the SHIPPED bytes in a VM (tests/js/eval.mjs).
 """
