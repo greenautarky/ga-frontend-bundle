@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.20.0
+
+- **The room's measured temperature is back as a badge, before the humidity.**
+  Asked for on 2026-09-25. The Heizung heading of a room view now reads
+  Temperatur, Luftfeuchtigkeit, Batterie. This reverses, for the badge only, the
+  2026-09-23 decision (#1060) that had dropped it; the thermostat card stays
+  setpoint-only. The value comes from the room's `ga_heating` climate entity
+  (`current_temperature`), which already applies the rule "room sensor first,
+  valve thermometer as fallback" — one place, so badge, heating and calibration
+  agree. Without a numeric reading there, the room's first temperature sensor;
+  without either, no temperature badge at all, never an empty one.
+
 ## 1.19.0
 
 - **Einstellungen carries household management, not the rooms again** (#34).
