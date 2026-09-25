@@ -266,11 +266,22 @@ function roomSections(room, opt, hass) {
 
   // Named badges — the raw entities carry IEEE-address names on fleet devices.
   const badges = [];
-  // NO temperature badge. It is the room's MEASUREMENT, and the same decision
-  // that took it off the thermostat card (Odoo #1060, 2026-09-23) applies here:
-  // the resident acts on the target, and the measured value answers a question
-  // nobody asked. It is still on the entity and still drawn by the
-  // temperature/humidity view — hidden on this surface, not removed.
+  // Temperature badge FIRST, then humidity. The #1060 decision (2026-09-23) had
+  // dropped it — "the resident acts on the target" — and was REVERSED for this
+  // badge on 2026-09-25 at Thomas's request: the measured room temperature
+  // belongs next to the humidity. The thermostat card stays setpoint-only.
+  // Source: temps[0] — the model does not tell a room sensor from a valve's own
+  // thermometer. Without a sensor, the thermostat's current_temperature, and
+  // only if it is a number; otherwise no badge (never an empty one).
+  if (temps.length) {
+    badges.push({ type: "entity", entity: temps[0], name: "Temperatur" });
+  } else if (climate.length) {
+    const st = hass && hass.states && hass.states[climate[0]];
+    if (st && typeof (st.attributes || {}).current_temperature === "number") {
+      badges.push({ type: "entity", entity: climate[0], name: "Temperatur",
+        state_content: "current_temperature" });
+    }
+  }
   for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Luftfeuchtigkeit" });
   for (const e of batts.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Batterie" });
 
