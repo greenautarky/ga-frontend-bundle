@@ -48,7 +48,6 @@ def test_temperature_badge_comes_first_then_humidity():
                 _STATES)
     assert b is not None, "no Heizung heading built — the test would be vacuous"
     assert [x["name"] for x in b] == ["Temperatur", "Luftfeuchtigkeit", "Batterie"], b
-    assert b[0]["entity"] == "sensor.wz_t"
     assert b[1]["entity"] == "sensor.wz_h"
 
 
@@ -68,3 +67,25 @@ def test_without_a_sensor_the_thermostat_measurement_is_the_fallback():
                 ' batts: [], lights: [], switches: [] }', _STATES)
     assert b == [{"type": "entity", "entity": "climate.wz", "name": "Temperatur",
                   "state_content": "current_temperature"}], b
+
+
+def test_a_room_climate_entity_wins_over_temps():
+    """ga_heating's room entity decides (room sensor first, valve fallback), so
+    its current_temperature (19.5) must beat temps[0] (20.1)."""
+    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+                ' hums: [], batts: [], lights: [], switches: [] }', _STATES)
+    assert b[0] == {"type": "entity", "entity": "climate.wz", "name": "Temperatur",
+                    "state_content": "current_temperature"}, b
+
+
+def test_temps_is_the_fallback_when_the_climate_has_no_measurement():
+    """Badges live on the Heizung heading, which exists only with a climate
+    entity — so a room with NO thermostat shows no badges at all (unchanged).
+    temps[0] is reached when the climate entity carries no numeric reading."""
+    states = """{
+      "climate.wz": { state: "heat", attributes: { temperature: 21 } },
+      "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } }
+    }"""
+    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+                ' hums: [], batts: [], lights: [], switches: [] }', states)
+    assert b == [{"type": "entity", "entity": "sensor.wz_t", "name": "Temperatur"}], b
