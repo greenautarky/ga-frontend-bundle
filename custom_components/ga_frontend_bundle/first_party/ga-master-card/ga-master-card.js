@@ -412,8 +412,13 @@ class GaMasterCard extends HTMLElement {
   }
 
   _dlgMsg(sel, kind, text) {
+    // Touch ONLY the state class. `sel` (".hh-msg" / ".site-msg") is a class
+    // on this same element; assigning `className` wholesale dropped it, so the
+    // next lookup returned null and both Danger Zone buttons threw before
+    // sending anything (1.9.0–1.20.0). tests/test_master_card_danger_zone_submits.py
     const el = this._root.querySelector(sel);
-    el.className = "dlg-msg " + kind;
+    el.classList.remove("ok", "err");
+    if (kind) el.classList.add(kind);
     el.textContent = text;
   }
 

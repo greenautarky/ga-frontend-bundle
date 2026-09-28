@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.21.0
+
+- **Both Danger Zone buttons send their request again.** Since 1.9.0,
+  "Nutzer entfernen" and "Endgültig löschen" in the household-management card
+  did nothing: opening the dialog replaced the message line's whole `class`
+  attribute, which also removed the class the card later used to find that
+  line, so the click threw (`Cannot set properties of null`) before any request
+  was built — and left the button disabled. The card now adds and removes only
+  the `ok` / `err` state class. A new browser test opens each dialog, fills it,
+  clicks, and asserts the POST (path and body) that leaves the page, including
+  a second click after a failed attempt and a reopened dialog.
+  A sweep of every `className =` in the first-party cards found no second
+  instance: the other seven assignments keep the class they are looked up by,
+  or are never looked up by class.
+
 ## 1.20.0
 
 - **The room's measured temperature is back as a badge, before the humidity.**
