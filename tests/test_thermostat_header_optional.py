@@ -66,7 +66,8 @@ def test_default_keeps_the_title(variant):
 def test_empty_header_drops_the_title_but_keeps_the_badge(variant):
     html = render(variant, {"entity": "climate.x", "header": ""})
     assert "Steuerung" not in html
-    assert '<div class="hdr notitle"><span class="act act-idle"' in html
+    # the badge takes the title's place: first thing in the card, no float
+    assert html.startswith('<div class="ga-body') and '"><div class="hdr notitle"><span class="act act-idle"' in html
     assert "Bereit" in html
 
 
@@ -110,3 +111,22 @@ def test_strategy_passes_the_option_to_the_card():
 
 def test_simple_fallback_hides_its_header_too():
     assert "header: header ? { name: header } : false," in _strategy_src()
+
+
+# ── icons ───────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "action, key, icon, word",
+    [("heating", "heating", "mdi:fire", "Heizt"),
+     ("idle", "idle", "mdi:check-circle-outline", "Bereit")],
+)
+def test_each_running_state_carries_an_icon_next_to_its_word(action, key, icon, word):
+    html = render("setpoint", {"entity": "climate.x", "header": ""}, action=action)
+    assert f'<span class="act act-{key}"><ha-icon icon="{icon}"></ha-icon>{word}</span>' in html
+
+
+def test_the_notitle_badge_is_not_floated_right():
+    src = CARD.read_text(encoding="utf-8")
+    assert "ga-thermostat-card .hdr.notitle .act { float: none; }" in src
+    assert ".hdr.notitle { text-align: right; }" not in src

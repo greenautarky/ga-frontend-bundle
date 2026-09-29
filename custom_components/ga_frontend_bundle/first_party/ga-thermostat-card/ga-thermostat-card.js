@@ -27,7 +27,8 @@
  *   entity: climate.wohnzimmer
  *   header: "Steuerung"             # optional, default "Steuerung"; "" = no
  *                                  # title (the room heading above already
- *                                  # says what the card is), badge stays
+ *                                  # says what the card is); the running-
+ *                                  # state badge then takes its place
  *   variant: classic|dial|setpoint  # optional, default "classic"
  *   show_current: true             # optional, default FALSE — the card shows the
  *                                  # TARGET only; true puts the measured room
@@ -59,15 +60,16 @@ const DIAL = { size: 200, c: 100, r: 82, start: -135, sweep: 270 };
 const STYLE = `
   ga-thermostat-card .ga-body { padding: 16px; }
   ga-thermostat-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 10px; }
-  /* No title: the badge alone, still on the right. A float in an otherwise empty
-     line collapses the line and lets the value wrap up beside the badge. */
-  ga-thermostat-card .hdr.notitle { text-align: right; }
+  /* No title: the badge takes the title's place, left. A float in an otherwise
+     empty line collapses the line and lets the value wrap up beside the badge. */
   ga-thermostat-card .hdr.notitle .act { float: none; }
   /* The running state is a WORD first; the colour only reinforces it. A badge
      that says nothing without colour says nothing to a reader who cannot
      distinguish it. */
-  ga-thermostat-card .act { float: right; font-size: 12px; font-weight: 600;
+  ga-thermostat-card .act { float: right; display: inline-flex; align-items: center;
+    gap: 4px; font-size: 12px; font-weight: 600;
     padding: 1px 8px; border-radius: 10px; opacity: 1; }
+  ga-thermostat-card .act ha-icon { --mdc-icon-size: 14px; }
   ga-thermostat-card .act-heating { background: rgba(230,126,34,.16); color: #b95b0b; }
   ga-thermostat-card .act-idle { background: rgba(127,140,141,.16); color: #5d6d6e; }
   ga-thermostat-card .act-off { background: rgba(127,140,141,.12); color: #7f8c8d; }
@@ -395,6 +397,10 @@ class GaThermostatCard extends HTMLElement {
    * word it less definitely. Guessing is acceptable; presenting a guess as a
    * reading is not.
    */
+  //: One icon per running state, next to the word — never instead of it.
+  //: `off` matches the AUS mode button.
+  static ACTION_ICONS = { heating: "mdi:fire", idle: "mdi:check-circle-outline", off: "mdi:power" };
+
   _action(s) {
     if (s.state === "off") return { key: "off", label: "Aus", inferred: false };
     const action = s.attributes.hvac_action;
@@ -424,7 +430,9 @@ class GaThermostatCard extends HTMLElement {
     const title = a.inferred
       ? ' title="abgeleitet aus Soll und Ist — dieses Thermostat meldet seinen Betriebszustand nicht"'
       : "";
-    return `<span class="act act-${a.key}"${title}>${a.label}</span>`;
+    const icon = GaThermostatCard.ACTION_ICONS[a.key];
+    const ico = icon ? `<ha-icon icon="${icon}"></ha-icon>` : "";
+    return `<span class="act act-${a.key}"${title}>${ico}${a.label}</span>`;
   }
 
   _actionLabel(s) { return this._action(s).label; }

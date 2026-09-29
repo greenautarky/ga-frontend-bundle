@@ -8,9 +8,13 @@
   change), `""` drops the title, any other string replaces it. The card itself
   now honours `header: ""` — before, `||` turned an empty string back into
   "Steuerung", so there was no way to switch it off even by hand. Without a
-  title the running-state badge ("Bereit" / "Heizt") stays on the right of its
-  own line in all three variants; with neither, no empty line is left. The
+  title the running-state badge ("Bereit" / "Heizt") takes its place, on the
+  left, in all three variants; with neither, no empty line is left. The
   `simple` fallback gets `header: false`; `core` never had a title.
+- **The running-state badge carries an icon next to its word:** `mdi:fire`
+  for Heizt, `mdi:check-circle-outline` for Bereit, `mdi:power` for Aus (the
+  same icon as the AUS mode button). The word stays — the icon reinforces it,
+  it does not replace it.
 
 ## 1.21.0
 
