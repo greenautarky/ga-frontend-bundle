@@ -147,6 +147,10 @@ function historyAvailable(hass) {
  *                               vendored simple-thermostat fallback. ("myvibe" =
  *                               old alias for classic.) Not resident-selectable
  *                               yet — admin/config only (selector = Odoo #571).
+ *   thermostat_header "Steuerung" title line of the thermostat card. "" drops
+ *                               it — the "Heizung" heading directly above
+ *                               already names the section. Any other string
+ *                               replaces it. ("core" style has no title.)
  *   hide_household    true      drop the "Haushalt" overview view. DEFAULT hidden
  *                               (resident-clean UI); set false to show it.
  *   hide_roomless     true      drop the "Ohne Raum" view. DEFAULT hidden; set
@@ -173,6 +177,8 @@ function gaOptions(config) {
     hideHousehold: c.hide_household === true,
     // DEFAULT: hidden. Set hide_roomless:false to show the roomless view.
     hideRoomless: c.hide_roomless !== false,
+    // Unset keeps the fleet look; "" is a deliberate "no title", not unset.
+    thermostatHeader: typeof c.thermostat_header === "string" ? c.thermostat_header : "Steuerung",
   };
 }
 
@@ -206,7 +212,7 @@ async function fetchHomeModel(hass) {
  * ------------------------------------------------------------------------- */
 
 /** The heating control card for one climate entity, per the chosen style. */
-function thermostatCard(entity, roomName, style) {
+function thermostatCard(entity, roomName, style, header = "Steuerung") {
   if (["classic", "dial", "setpoint"].includes(style)) {
     // FIRST-PARTY ga-thermostat-card (Odoo #518): one card, three looks
     // (classic = big value + setpoint + AUS/MANUEL/KI chips [default];
@@ -215,7 +221,7 @@ function thermostatCard(entity, roomName, style) {
     return {
       type: "custom:ga-thermostat-card",
       entity,
-      header: "Steuerung",
+      header,
       ...(style === "classic" ? {} : { variant: style }),
     };
   }
@@ -225,7 +231,7 @@ function thermostatCard(entity, roomName, style) {
     return {
       type: "custom:simple-thermostat",
       entity,
-      header: { name: "Steuerung" },
+      header: header ? { name: header } : false,
       hide: { temperature: true, state: true },
       layout: { mode: { icons: true, names: true, headings: false } },
       control: { hvac: {
@@ -290,7 +296,7 @@ function roomSections(room, opt, hass) {
   // Heating — the control MyVibe called KI / MANUEL / AUS.
   if (climate.length) {
     const cards = [{ type: "heading", heading: "Heizung", heading_style: "title", badges }];
-    for (const entity of climate) cards.push(thermostatCard(entity, room.name, opt.thermostatStyle));
+    for (const entity of climate) cards.push(thermostatCard(entity, room.name, opt.thermostatStyle, opt.thermostatHeader));
     sections.push({ type: "grid", cards });
   }
 

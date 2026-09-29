@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.22.0
+
+- **The thermostat card's "Steuerung" title can be turned off.** It sits
+  directly under the room's "Heizung" heading and says the same thing twice.
+  New strategy option `thermostat_header`: unset keeps "Steuerung" (no fleet
+  change), `""` drops the title, any other string replaces it. The card itself
+  now honours `header: ""` — before, `||` turned an empty string back into
+  "Steuerung", so there was no way to switch it off even by hand. Without a
+  title the running-state badge ("Bereit" / "Heizt") stays on the right of its
+  own line in all three variants; with neither, no empty line is left. The
+  `simple` fallback gets `header: false`; `core` never had a title.
+
 ## 1.21.0
 
 - **Both Danger Zone buttons send their request again.** Since 1.9.0,

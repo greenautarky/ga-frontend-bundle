@@ -25,7 +25,9 @@
  * Config:
  *   type: custom:ga-thermostat-card
  *   entity: climate.wohnzimmer
- *   header: "Steuerung"             # optional, default "Steuerung"
+ *   header: "Steuerung"             # optional, default "Steuerung"; "" = no
+ *                                  # title (the room heading above already
+ *                                  # says what the card is), badge stays
  *   variant: classic|dial|setpoint  # optional, default "classic"
  *   show_current: true             # optional, default FALSE — the card shows the
  *                                  # TARGET only; true puts the measured room
@@ -57,6 +59,10 @@ const DIAL = { size: 200, c: 100, r: 82, start: -135, sweep: 270 };
 const STYLE = `
   ga-thermostat-card .ga-body { padding: 16px; }
   ga-thermostat-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 10px; }
+  /* No title: the badge alone, still on the right. A float in an otherwise empty
+     line collapses the line and lets the value wrap up beside the badge. */
+  ga-thermostat-card .hdr.notitle { text-align: right; }
+  ga-thermostat-card .hdr.notitle .act { float: none; }
   /* The running state is a WORD first; the colour only reinforces it. A badge
      that says nothing without colour says nothing to a reader who cannot
      distinguish it. */
@@ -313,7 +319,8 @@ class GaThermostatCard extends HTMLElement {
       this._root.innerHTML = `<div class="ga-body off">Thermostat nicht verfügbar</div>`;
       return;
     }
-    const header = this._config.header || "Steuerung";
+    // `??`, not `||`: an empty string is a request for no title, not a missing one.
+    const header = this._config.header ?? "Steuerung";
     if (this._variant === "dial") this._renderDial(s, header);
     else if (this._variant === "setpoint") this._renderSetpoint(s, header);
     else this._renderClassic(s, header);
@@ -337,7 +344,7 @@ class GaThermostatCard extends HTMLElement {
         (this._showCurrent ? `<div class="target">${Number(target).toFixed(1)} °C</div>` : "") +
         `<button data-delta="1" aria-label="wärmer">+</button></div>`
       : "";
-    this._root.innerHTML = `<div class="ga-body"><div class="hdr">${header}${this._actionBadge(s)}</div>` +
+    this._root.innerHTML = `<div class="ga-body">${this._hdr(s, header)}` +
       `${big}${setRow}${this._modeRow(s)}</div>`;
   }
 
@@ -353,11 +360,11 @@ class GaThermostatCard extends HTMLElement {
         `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
         `<button data-delta="1">+</button></div>`
       : `<div class="offmsg">Heizung aus</div>`;
-    this._root.innerHTML = `<div class="ga-body sp"><div class="hdr">${header}${this._actionBadge(s)}</div>${body}${this._modeRow(s)}</div>`;
+    this._root.innerHTML = `<div class="ga-body sp">${this._hdr(s, header)}${body}${this._modeRow(s)}</div>`;
   }
 
   _renderDial(s, header) {
-    this._root.innerHTML = `<div class="ga-body dl"><div class="hdr">${header}${this._actionBadge(s)}</div>` +
+    this._root.innerHTML = `<div class="ga-body dl">${this._hdr(s, header)}` +
       `<div class="dialwrap">${this._dialSVG(s)}</div>${this._modeRow(s)}</div>`;
   }
 
@@ -401,6 +408,13 @@ class GaThermostatCard extends HTMLElement {
         : { key: "idle", label: "Bereit", inferred: true };
     }
     return { key: "unknown", label: "", inferred: true };
+  }
+
+  /** The title line every variant shows: title, running-state badge, or both. */
+  _hdr(s, header) {
+    const badge = this._actionBadge(s);
+    if (header) return `<div class="hdr">${header}${badge}</div>`;
+    return badge ? `<div class="hdr notitle">${badge}</div>` : "";
   }
 
   /** The badge every variant shows. Empty string when there is nothing to say. */

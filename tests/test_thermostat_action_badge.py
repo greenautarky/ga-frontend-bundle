@@ -117,7 +117,11 @@ def test_every_variant_renders_the_badge():
         "green on a card that renders nothing."
     )
     for variant, body in bodies.items():
-        assert "_actionBadge" in body, f"{variant} renders no running state"
+        assert "this._hdr(s, header)" in body, f"{variant} renders no running state"
+    # …and the shared title line carries the badge, with a title and without one
+    # (test_thermostat_header_optional.py renders both).
+    hdr = re.search(r"\n  _hdr\(s, header\) \{(.*?)\n  \}", src, re.S)
+    assert hdr and "_actionBadge" in hdr.group(1)
 
 
 def test_the_badge_carries_a_word_and_not_only_a_colour():
