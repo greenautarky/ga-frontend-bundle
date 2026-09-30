@@ -443,20 +443,28 @@ class GaThermostatCard extends HTMLElement {
    * reading is not.
    */
   //: One icon per running state, next to the word — never instead of it.
-  //: `off` matches the AUS mode button.
-  static ACTION_ICONS = { heating: "mdi:fire", idle: "mdi:check-circle-outline", off: "mdi:power" };
+  //: The radiator pair (2026-09-30) shows the THING, hot or cold, rather than a
+  //: generic symbol: a resident reads a radiator faster than a flame or a pause
+  //: bar. `off` keeps mdi:power, the AUS mode button's own icon.
+  //:
+  //: "Leerlauf" (2026-09-30) is Home Assistant's own German for `hvac_action:
+  //: idle`, so this card and a stock HA card never say different words about the
+  //: same reading. It also says only what was READ: a valve reports `idle` with
+  //: an open window too, where "Temperatur erreicht" or "Warm genug" would be a
+  //: claim about a room nobody measured.
+  static ACTION_ICONS = { heating: "mdi:radiator", idle: "mdi:radiator-off", off: "mdi:power" };
 
   _action(s) {
     if (s.state === "off") return { key: "off", label: "Aus", inferred: false };
     const action = s.attributes.hvac_action;
     if (action === "heating") return { key: "heating", label: "Heizt", inferred: false };
-    if (action === "idle") return { key: "idle", label: "Bereit", inferred: false };
+    if (action === "idle") return { key: "idle", label: "Leerlauf", inferred: false };
     if (action === "off") return { key: "off", label: "Aus", inferred: false };
     const cur = s.attributes.current_temperature, t = s.attributes.temperature;
     if (cur != null && t != null) {
       return Number(t) > Number(cur)
         ? { key: "heating", label: "Heizt", inferred: true }
-        : { key: "idle", label: "Bereit", inferred: true };
+        : { key: "idle", label: "Leerlauf", inferred: true };
     }
     return { key: "unknown", label: "", inferred: true };
   }

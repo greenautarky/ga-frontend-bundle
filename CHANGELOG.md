@@ -23,9 +23,17 @@
   disagree are both named ("7 / 8 °C"); when no valve reports one the card falls
   back to "Heizung aus" rather than promising protection it has not read.
 
-- **The running-state badge carries an icon next to its word:** `mdi:fire`
-  for Heizt, `mdi:check-circle-outline` for Bereit, `mdi:power` for Aus (the
-  same icon as the AUS mode button). The word stays — the icon reinforces it,
+- **The idle badge says "Leerlauf", not "Bereit".** "Bereit" reads as standby and
+  says nothing about what the heating is doing. "Leerlauf" is Home Assistant's own
+  German for `hvac_action: idle`, so this card and a stock HA card never say
+  different words about the same reading — and, unlike "Temperatur erreicht" or
+  "Warm genug", it claims nothing about the room: a valve reports `idle` with an
+  open window too.
+
+- **The running-state badge carries an icon next to its word:** `mdi:radiator`
+  for Heizt, `mdi:radiator-off` for Leerlauf, `mdi:power` for Aus (the same icon
+  as the AUS mode button). The radiator pair shows the thing itself, hot or cold,
+  rather than a generic flame or pause bar. The word stays — the icon reinforces it,
   it does not replace it.
 
 ## 1.21.0

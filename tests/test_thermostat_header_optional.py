@@ -68,7 +68,7 @@ def test_empty_header_drops_the_title_but_keeps_the_badge(variant):
     assert "Steuerung" not in html
     # the badge takes the title's place: first thing in the card, no float
     assert html.startswith('<div class="ga-body') and '"><div class="hdr notitle"><span class="act act-idle"' in html
-    assert "Bereit" in html
+    assert "Leerlauf" in html
 
 
 @pytest.mark.parametrize("variant", sorted(METHODS))
@@ -118,8 +118,8 @@ def test_simple_fallback_hides_its_header_too():
 
 @pytest.mark.parametrize(
     "action, key, icon, word",
-    [("heating", "heating", "mdi:fire", "Heizt"),
-     ("idle", "idle", "mdi:check-circle-outline", "Bereit")],
+    [("heating", "heating", "mdi:radiator", "Heizt"),
+     ("idle", "idle", "mdi:radiator-off", "Leerlauf")],
 )
 def test_each_running_state_carries_an_icon_next_to_its_word(action, key, icon, word):
     html = render("setpoint", {"entity": "climate.x", "header": ""}, action=action)
