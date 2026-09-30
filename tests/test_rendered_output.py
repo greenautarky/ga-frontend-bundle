@@ -333,7 +333,7 @@ def test_the_curves_are_still_there():
     rather than the behaviour.
     """
     cards = _history_cards()
-    assert [c["title"] for c in cards] == ["Temperatur (24 h)"], cards
+    assert [c["title"] for c in cards] == ["Temperatur letzte 24h"], cards
     for card in cards:
         assert card["entities"], f"{card['title']!r} charts nothing"
         assert card["days_to_show"] == 1 and card["period"] == "hour"

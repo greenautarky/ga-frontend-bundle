@@ -24,6 +24,17 @@
   control that was already there. ("off" and "cannot be changed" are not the same
   statement, and the card must not quietly make them one.)
 
+- **The 24 h temperature curve draws the room, not the radiator.** A TRV publishes
+  its own `_local_temperature`, which is a temperature sensor in the room like any
+  other — so the chart drew two curves and the legend gave no hint that the upper
+  one was the valve (measured 2026-09-30: 23.65 °C at the valve against 23.40 °C
+  in the room). A valve reads warm because it sits on the radiator; that is what
+  `calibration.py` exists for, and it is not what a resident means by "how warm was
+  it". The valves are read from the room entity's `valves` attribute and their
+  sensors dropped; a room whose only thermometer IS a valve keeps it, under its own
+  name, rather than showing an empty card. The remaining single curve is labelled
+  "Raum Temperatur", and the card is titled "Temperatur letzte 24h".
+
 - **The Heizplan card ships no header.** It carried the room name, under a
   "Heizplan" heading, in a tab named after the room — the same thing three times.
   The strategy passes no `title` and the card's default is now nothing at all:

@@ -352,8 +352,32 @@ function roomSections(room, opt, hass) {
   // The mean is the one a resident asks for ("how warm was it"). The band is
   // worth having back the day we draw it ourselves and can label it; until
   // then it costs comprehension and buys nothing.
-  if (hasHistory && temps.length) {
-    history.push({ type: "statistics-graph", title: "Temperatur (24 h)", entities: temps,
+  // ONE curve: the room's own thermometer.
+  //
+  // A TRV reports its own `_local_temperature` too, and it is a temperature
+  // sensor in the room like any other — so the graph drew both, and the second
+  // curve was the radiator, not the room (measured on 100.126.209.15,
+  // 2026-09-30: 23.65 °C at the valve against 23.40 °C in the room, with the
+  // legend giving no hint which was which). A valve reads warm because it sits
+  // on the radiator; that is the whole reason `calibration.py` exists, and it
+  // is not the number a resident means by "how warm was it".
+  //
+  // The valves are named on the room entity (`attributes.valves`), and a valve's
+  // sensors carry its IEEE in their entity_id — so this is read from the model,
+  // not guessed from a name. A room whose ONLY thermometer is a valve keeps it:
+  // one honest curve under its own name beats an empty card.
+  const valveIds = ((clim && clim.attributes && clim.attributes.valves) || [])
+    .map((v) => String(v).split(".").pop());
+  const roomTemps = temps.filter((id) => !valveIds.some((ieee) => id.includes(ieee)));
+  const graphTemps = roomTemps.length ? roomTemps : temps;
+  if (hasHistory && graphTemps.length) {
+    // Named only when it is the single curve AND it is not a valve's own
+    // thermometer: "Raum Temperatur" on a sensor screwed to the radiator would
+    // be a label that contradicts the reading it sits under.
+    const entities = (graphTemps.length === 1 && roomTemps.length)
+      ? [{ entity: graphTemps[0], name: "Raum Temperatur" }]
+      : graphTemps;
+    history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
       stat_types: ["mean"], days_to_show: 1, period: "hour" });
   }
   if (hasHistory && hums.length) {

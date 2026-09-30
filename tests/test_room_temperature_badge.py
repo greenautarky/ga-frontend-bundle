@@ -112,3 +112,65 @@ def test_the_temperature_badge_carries_a_thermometer_from_either_source():
     assert b2 is not None, "no Heizung heading built — the test would be vacuous"
     assert b2[0]["entity"] == "sensor.wz_t"
     assert b2[0]["icon"] == "mdi:thermometer"
+
+
+# ── the 24 h curve (2026-09-30) ─────────────────────────────────────────────
+
+
+def _temp_graph(room: str, states: str):
+    expr = f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
+      const secs = roomSections({room}, gaOptions({{}}), hass);
+      return secs.flatMap(s => s.cards || [])
+        .find(c => c.type === "statistics-graph" && /Temperatur/.test(c.title)) || null;
+    }})()"""
+    return run_js(STRATEGY, expr)
+
+
+_VALVE_STATES = """{
+  "climate.wz": { state: "heat", attributes: { current_temperature: 19.5, temperature: 21,
+                  valves: ["climate.0xdead"] } },
+  "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } },
+  "sensor.0xdead_local_temperature": { state: "23.6",
+                  attributes: { device_class: "temperature" } }
+}"""
+
+_ROOM = ('{ name: "WZ", climate: ["climate.wz"],'
+         ' temps: ["sensor.wz_t", "sensor.0xdead_local_temperature"],'
+         ' hums: [], batts: [], lights: [], switches: [] }')
+
+
+def test_the_valves_own_thermometer_is_not_a_second_curve():
+    """It reads the radiator, not the room — the reason calibration.py exists."""
+    g = _temp_graph(_ROOM, _VALVE_STATES)
+    assert g is not None, "no temperature graph built — the test would be vacuous"
+    assert g["entities"] == [{"entity": "sensor.wz_t", "name": "Raum Temperatur"}]
+
+
+def test_the_title_says_letzte_24h():
+    assert _temp_graph(_ROOM, _VALVE_STATES)["title"] == "Temperatur letzte 24h"
+
+
+def test_a_room_whose_only_thermometer_is_the_valve_keeps_it_unrenamed():
+    """One honest curve under its own name beats an empty card — and "Raum
+    Temperatur" on a sensor screwed to the radiator would contradict itself."""
+    room = ('{ name: "WZ", climate: ["climate.wz"],'
+            ' temps: ["sensor.0xdead_local_temperature"],'
+            ' hums: [], batts: [], lights: [], switches: [] }')
+    g = _temp_graph(room, _VALVE_STATES)
+    assert g["entities"] == ["sensor.0xdead_local_temperature"]
+
+
+def test_two_real_room_sensors_are_both_drawn_and_keep_their_names():
+    """Renaming both "Raum Temperatur" would repeat the #22 defect: a legend
+    that names the same thing twice reads like one sensor drawn twice."""
+    states = """{
+      "climate.wz": { state: "heat", attributes: { current_temperature: 19.5,
+                      temperature: 21, valves: ["climate.0xdead"] } },
+      "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } },
+      "sensor.wz_t2": { state: "20.4", attributes: { device_class: "temperature" } }
+    }"""
+    room = ('{ name: "WZ", climate: ["climate.wz"],'
+            ' temps: ["sensor.wz_t", "sensor.wz_t2"],'
+            ' hums: [], batts: [], lights: [], switches: [] }')
+    assert _temp_graph(room, states)["entities"] == ["sensor.wz_t", "sensor.wz_t2"]
