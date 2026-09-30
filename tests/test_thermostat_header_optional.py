@@ -67,7 +67,8 @@ def test_empty_header_drops_the_title_but_keeps_the_badge(variant):
     html = render(variant, {"entity": "climate.x", "header": ""})
     assert "Steuerung" not in html
     # the badge takes the title's place: first thing in the card, no float
-    assert html.startswith('<div class="ga-body') and '"><div class="hdr notitle"><span class="act act-idle"' in html
+    assert html.startswith('<div class="ga-body')
+    assert '"><div class="hdr notitle"><span class="act act-idle"' in html
     assert "Leerlauf" in html
 
 

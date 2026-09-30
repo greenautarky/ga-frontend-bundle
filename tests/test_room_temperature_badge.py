@@ -91,10 +91,12 @@ def test_the_temperature_badge_carries_a_thermometer_from_either_source():
     """Read off a climate entity, the badge inherits the THERMOSTAT icon — the
     dial, which is the control, not the reading. Stated on both branches, so the
     badge looks the same whichever source answers."""
-    room = '{ name: "WZ", area_id: "wz", climate: ["climate.wz"], temps: [], hums: [], batts: [] }'
+    room = ('{ name: "WZ", area_id: "wz", climate: ["climate.wz"],'
+            ' temps: [], hums: [], batts: [] }')
     b = _badges(room, _STATES)
     assert b[0]["icon"] == "mdi:thermometer"
 
-    room_sensor = '{ name: "WZ", area_id: "wz", climate: [], temps: ["sensor.wz_t"], hums: [], batts: [] }'
+    room_sensor = ('{ name: "WZ", area_id: "wz", climate: [],'
+                   ' temps: ["sensor.wz_t"], hums: [], batts: [] }')
     b2 = _badges(room_sensor, _STATES)
     assert b2[0]["icon"] == "mdi:thermometer"
