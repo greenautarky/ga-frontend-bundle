@@ -62,6 +62,7 @@ def test_without_a_sensor_the_thermostat_measurement_is_the_fallback():
     b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: [],'
                 ' batts: [], lights: [], switches: [] }', _STATES)
     assert b == [{"type": "entity", "entity": "climate.wz", "name": "Temperatur",
+                  "icon": "mdi:thermometer",
                   "state_content": "current_temperature"}], b
 
 
@@ -71,6 +72,7 @@ def test_a_room_climate_entity_wins_over_temps():
     b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
                 ' hums: [], batts: [], lights: [], switches: [] }', _STATES)
     assert b[0] == {"type": "entity", "entity": "climate.wz", "name": "Temperatur",
+                    "icon": "mdi:thermometer",
                     "state_content": "current_temperature"}, b
 
 
@@ -84,19 +86,29 @@ def test_temps_is_the_fallback_when_the_climate_has_no_measurement():
     }"""
     b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
                 ' hums: [], batts: [], lights: [], switches: [] }', states)
-    assert b == [{"type": "entity", "entity": "sensor.wz_t", "name": "Temperatur"}], b
+    assert b == [{"type": "entity", "entity": "sensor.wz_t", "name": "Temperatur",
+                  "icon": "mdi:thermometer"}], b
 
 
 def test_the_temperature_badge_carries_a_thermometer_from_either_source():
     """Read off a climate entity, the badge inherits the THERMOSTAT icon — the
     dial, which is the control, not the reading. Stated on both branches, so the
     badge looks the same whichever source answers."""
-    room = ('{ name: "WZ", area_id: "wz", climate: ["climate.wz"],'
-            ' temps: [], hums: [], batts: [] }')
-    b = _badges(room, _STATES)
+    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: [],'
+                ' batts: [], lights: [], switches: [] }', _STATES)
+    assert b is not None, "no Heizung heading built — the test would be vacuous"
     assert b[0]["icon"] == "mdi:thermometer"
 
-    room_sensor = ('{ name: "WZ", area_id: "wz", climate: [],'
-                   ' temps: ["sensor.wz_t"], hums: [], batts: [] }')
-    b2 = _badges(room_sensor, _STATES)
+    # The sensor branch needs a climate entity to exist (the badges live on the
+    # Heizung heading) but carry no numeric reading — same setup as the fallback
+    # test above. A room with `climate: []` builds no heading at all, so asking
+    # for its badges would test nothing.
+    states = """{
+      "climate.wz": { state: "heat", attributes: { temperature: 21 } },
+      "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } }
+    }"""
+    b2 = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+                 ' hums: [], batts: [], lights: [], switches: [] }', states)
+    assert b2 is not None, "no Heizung heading built — the test would be vacuous"
+    assert b2[0]["entity"] == "sensor.wz_t"
     assert b2[0]["icon"] == "mdi:thermometer"

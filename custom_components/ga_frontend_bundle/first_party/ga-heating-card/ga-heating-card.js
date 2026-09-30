@@ -15,7 +15,9 @@
  * Config:
  *   type: custom:ga-heating-card
  *   entity: climate.wohnzimmer
- *   title: Wohnzimmer
+ *   title: Wohnzimmer            # optional; "" = no header (the "Heizplan"
+ *                                # heading above already names the card, and
+ *                                # the room is the tab you are standing in)
  */
 
 const DAYS = [
@@ -239,9 +241,17 @@ class GaHeatingCard extends HTMLElement {
     this._t = setTimeout(() => { m.className = "msg"; }, 4000);
   }
 
+  //: `??`, not `||`: an empty title is a request for no header, not a missing
+  //: one. Dropped from the strategy on 2026-09-30 — the section heading above
+  //: says "Heizplan" and the tab says the room, so the name said it a third time.
+  _header() {
+    const title = this._config.title ?? "Heizplan";
+    return title ? ` header="${title}"` : "";
+  }
+
   _build() {
     this.innerHTML = `
-      <ha-card header="${this._config.title || "Heizplan"}">
+      <ha-card${this._header()}>
         <div class="card-content">
           <div class="msg"></div>
           <div class="days"></div>

@@ -24,6 +24,12 @@
   control that was already there. ("off" and "cannot be changed" are not the same
   statement, and the card must not quietly make them one.)
 
+- **The Heizplan card drops the room-name header.** The "Heizplan" heading sits
+  directly above it and the tab you are standing in is the room, so the name was
+  the same thing said a third time. The strategy passes no `title`; the card
+  honours `title: ""` (`??`, not `||`) and keeps its "Heizplan" default for a
+  hand-written config that sets nothing.
+
 - **The room's temperature badge carries a thermometer.** Read off the ga_heating
   room entity, it inherited that entity's icon — the thermostat dial, which is the
   control, not the reading (seen on a device 2026-09-30). `mdi:thermometer` is now

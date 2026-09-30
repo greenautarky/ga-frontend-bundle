@@ -27,6 +27,7 @@ except ImportError:
 
 FIRST_PARTY = PKG / "first_party"
 CARD = FIRST_PARTY / "ga-heating-card" / "ga-heating-card.js"
+STRATEGY = FIRST_PARTY / "ga-home-strategy" / "ga-home-strategy.js"
 
 
 def _const():
@@ -129,3 +130,22 @@ async def test_card_is_delivered_as_a_resource_and_never_injected(
         "into the pre-swap registry and render as \"Custom element doesn't exist\""
     )
     assert "ga-heating-card" in hass.data["ga_frontend_bundle"]["first_party_resources"]
+
+
+# ── the header (2026-09-30) ─────────────────────────────────────────────────
+
+
+def test_the_strategy_passes_no_room_name_to_the_heating_card():
+    """The "Heizplan" heading is directly above it and the tab is the room, so a
+    room-name header inside the card was the same thing said a third time."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert '{ type: "custom:ga-heating-card", entity },' in src
+    assert 'title: room.name' not in src
+
+
+def test_the_card_honours_an_empty_title_and_still_defaults():
+    """`??`, not `||`: "" is a request for no header, not a missing one."""
+    src = CARD.read_text(encoding="utf-8")
+    assert 'const title = this._config.title ?? "Heizplan";' in src
+    assert 'this._config.title || "Heizplan"' not in src
+    assert 'return title ? ` header="${title}"` : "";' in src

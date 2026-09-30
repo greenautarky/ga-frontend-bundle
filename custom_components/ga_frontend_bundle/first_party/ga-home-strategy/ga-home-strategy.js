@@ -310,7 +310,11 @@ function roomSections(room, opt, hass) {
   for (const entity of climate) {
     sections.push({ type: "grid", cards: [
       { type: "heading", heading: "Heizplan", heading_style: "title" },
-      { type: "custom:ga-heating-card", entity, title: room.name },
+      // No `title`: the heading directly above says "Heizplan" and the tab says
+      // the room, so a room-name header inside the card was the third telling
+      // (2026-09-30). The card still honours one when a hand-written config
+      // sets it.
+      { type: "custom:ga-heating-card", entity },
     ] });
   }
 
