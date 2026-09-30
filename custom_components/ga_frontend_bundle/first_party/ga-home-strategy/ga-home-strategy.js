@@ -381,7 +381,14 @@ function roomSections(room, opt, hass) {
       stat_types: ["mean"], days_to_show: 1, period: "hour" });
   }
   if (hasHistory && hums.length) {
-    history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit (24 h)", entities: hums,
+    // Named for the same reason the temperature curve is: left to itself the card
+    // labelled the single series "… Luftfeuchtigkeit (mean)", and "(mean)" is the
+    // card's own arithmetic leaking into a resident's legend — it answers a
+    // question nobody asked and reads like part of the sensor's name.
+    const entities = hums.length === 1
+      ? [{ entity: hums[0], name: "Raum Luftfeuchtigkeit" }]
+      : hums;
+    history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h", entities,
       stat_types: ["mean"], days_to_show: 1, period: "hour" });
   }
   if (history.length) {

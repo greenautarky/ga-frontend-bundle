@@ -174,3 +174,25 @@ def test_two_real_room_sensors_are_both_drawn_and_keep_their_names():
             ' temps: ["sensor.wz_t", "sensor.wz_t2"],'
             ' hums: [], batts: [], lights: [], switches: [] }')
     assert _temp_graph(room, states)["entities"] == ["sensor.wz_t", "sensor.wz_t2"]
+
+
+def test_the_humidity_curve_is_named_too_so_no_mean_suffix_leaks():
+    """Left to itself the card labelled the series "… Luftfeuchtigkeit (mean)" —
+    the card's own arithmetic in a resident's legend."""
+    states = """{
+      "climate.wz": { state: "heat", attributes: { current_temperature: 19.5,
+                      temperature: 21, valves: [] } },
+      "sensor.wz_h": { state: "48", attributes: { device_class: "humidity" } }
+    }"""
+    room = ('{ name: "WZ", climate: ["climate.wz"], temps: [],'
+            ' hums: ["sensor.wz_h"], batts: [], lights: [], switches: [] }')
+    expr = f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
+      const secs = roomSections({room}, gaOptions({{}}), hass);
+      return secs.flatMap(s => s.cards || [])
+        .find(c => c.type === "statistics-graph") || null;
+    }})()"""
+    g = run_js(STRATEGY, expr)
+    assert g is not None, "no humidity graph built — the test would be vacuous"
+    assert g["entities"] == [{"entity": "sensor.wz_h", "name": "Raum Luftfeuchtigkeit"}]
+    assert g["title"] == "Luftfeuchtigkeit letzte 24h"

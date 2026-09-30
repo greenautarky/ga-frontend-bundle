@@ -34,6 +34,11 @@
   sensors dropped; a room whose only thermometer IS a valve keeps it, under its own
   name, rather than showing an empty card. The remaining single curve is labelled
   "Raum Temperatur", and the card is titled "Temperatur letzte 24h".
+- **The humidity curve loses its "(mean)" suffix.** Unnamed, the card labelled the
+  single series "… Luftfeuchtigkeit (mean)" — the card's own arithmetic leaking
+  into a resident's legend, answering a question nobody asked and reading like
+  part of the sensor's name. It is named "Raum Luftfeuchtigkeit", and the card is
+  titled "Luftfeuchtigkeit letzte 24h" to match the temperature one.
 
 - **The Heizplan card ships no header.** It carried the room name, under a
   "Heizplan" heading, in a tab named after the room — the same thing three times.
