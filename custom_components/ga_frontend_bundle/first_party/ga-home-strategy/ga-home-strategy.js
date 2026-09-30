@@ -281,12 +281,17 @@ function roomSections(room, opt, hass) {
   // room sensor first, the valve's own thermometer as fallback — so badge,
   // heating and calibration agree. Order: climate current_temperature if it is
   // a number; else temps[0]; else no badge (never an empty one).
+  //: A thermometer, stated rather than inherited. Read off the CLIMATE entity the
+  //: badge would otherwise take its icon from a thermostat — the dial glyph, which
+  //: is the control, not the reading (seen on 100.126.209.15, 2026-09-30). Set on
+  //: the sensor branch too, so the badge looks the same whichever source answers.
   const clim = climate.length && hass && hass.states ? hass.states[climate[0]] : null;
   if (clim && typeof (clim.attributes || {}).current_temperature === "number") {
     badges.push({ type: "entity", entity: climate[0], name: "Temperatur",
-      state_content: "current_temperature" });
+      icon: "mdi:thermometer", state_content: "current_temperature" });
   } else if (temps.length) {
-    badges.push({ type: "entity", entity: temps[0], name: "Temperatur" });
+    badges.push({ type: "entity", entity: temps[0], name: "Temperatur",
+      icon: "mdi:thermometer" });
   }
   for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Luftfeuchtigkeit" });
   for (const e of batts.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Batterie" });

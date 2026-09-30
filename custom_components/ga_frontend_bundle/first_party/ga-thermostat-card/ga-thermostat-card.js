@@ -101,13 +101,13 @@ const STYLE = `
   ga-thermostat-card .modes .m.on.heat { background: var(--ga-heat, #ff8a3d); }
   ga-thermostat-card .modes .m ha-icon { --mdc-icon-size: 20px; display: block; margin: 0 auto 2px; }
   ga-thermostat-card .off, ga-thermostat-card .offmsg { text-align: center; opacity: .6; padding: 20px 0; }
-  /* AUS is not "nothing": the valve still opens on its own at its frost
-     setpoint, so that number is what the card shows instead of a blank. */
-  ga-thermostat-card .frost { text-align: center; padding: 10px 0 14px; }
-  ga-thermostat-card .frost .fl { display: block; font-size: 13px; opacity: .6; margin-bottom: 2px; }
-  ga-thermostat-card .frost .fl ha-icon { --mdc-icon-size: 16px; vertical-align: -3px; }
-  ga-thermostat-card .frost .ft { font-size: 40px; font-weight: 600; line-height: 1; opacity: .75; }
-  ga-thermostat-card .frost .ft small { font-size: 15px; opacity: .6; font-weight: 500; }
+  /* AUS is not "nothing": the valve still opens on its own at its frost setpoint.
+     That number rides ALONG the normal body as one small line — the layout of an
+     off room must not differ from a heating one (asked for 2026-09-30), so the
+     big value and its −/+ stay exactly where they were. Icon, no word. */
+  ga-thermostat-card .frostline { text-align: center; font-size: 13px; opacity: .55;
+    margin-bottom: 4px; }
+  ga-thermostat-card .frostline ha-icon { --mdc-icon-size: 15px; vertical-align: -3px; }
   /* setpoint */
   ga-thermostat-card .sp .cur { text-align: center; opacity: .6; font-size: 13px; margin-bottom: 4px; }
   ga-thermostat-card .sp .big { display: flex; align-items: center; justify-content: center;
@@ -350,18 +350,21 @@ class GaThermostatCard extends HTMLElement {
     // Exactly one element carries the class `target`, in both layouts, because
     // `_showPending` finds the number by that class. Two of them, or none,
     // breaks the optimistic press without breaking anything a test would see.
-    const big = !heating
-      ? this._offBody(s)
-      : this._showCurrent
-        ? `<div class="val">${cur != null ? `${Number(cur).toFixed(1)}<small> °C</small>` : "–"}</div>`
-        : `<div class="val target">${tTxt}</div>`;
-    const setRow = (target != null && heating)
+    const big = this._showCurrent
+      ? `<div class="val">${cur != null ? `${Number(cur).toFixed(1)}<small> °C</small>` : "–"}</div>`
+      : `<div class="val target">${tTxt}</div>`;
+    //: `heating` is deliberately NOT a condition here any more. An off room keeps
+    //: the same body and the same −/+ (asked for 2026-09-30); pressing one is a
+    //: setpoint, which ga_heating treats as a manual change — so the room leaves
+    //: AUS and heats. That is the resident's intent, expressed on the one control
+    //: that was already there.
+    const setRow = (target != null)
       ? `<div class="set"><button data-delta="-1" aria-label="kälter">−</button>` +
         (this._showCurrent ? `<div class="target">${Number(target).toFixed(1)} °C</div>` : "") +
         `<button data-delta="1" aria-label="wärmer">+</button></div>`
       : "";
     this._root.innerHTML = `<div class="ga-body">${this._hdr(s, header)}` +
-      `${big}${setRow}${this._modeRow(s)}</div>`;
+      `${this._frostLine(s)}${big}${setRow}${this._modeRow(s)}</div>`;
   }
 
   //: A valve's frost setpoint lives on its OWN `number` entity, named after the
@@ -384,29 +387,30 @@ class GaThermostatCard extends HTMLElement {
     return Array.from(new Set(vals)).sort((a, b) => a - b);
   }
 
-  //: What an off room says. With no valve reporting a setpoint we say only that
-  //: the heating is off — promising frost protection we have not read would be
-  //: the one sentence a cold flat could not forgive.
-  _offBody(s) {
+  //: The one line an off room adds. Nothing when no valve reports a setpoint:
+  //: promising frost protection we have not read is the one sentence a cold flat
+  //: could not forgive. Shown only while off — while heating it is noise.
+  _frostLine(s) {
+    if (s.state !== "off") return "";
     const v = this._frostSetpoints(s);
-    if (!v.length) return `<div class="offmsg">Heizung aus</div>`;
-    return `<div class="frost"><span class="fl">` +
-      `<ha-icon icon="mdi:snowflake"></ha-icon> Frostschutz</span>` +
-      `<div class="ft">${v.join(" / ")}<small> °C</small></div></div>`;
+    if (!v.length) return "";
+    return `<div class="frostline"><ha-icon icon="mdi:snowflake"></ha-icon> ` +
+      `${v.join(" / ")} °C</div>`;
   }
 
   _renderSetpoint(s, header) {
     const cur = s.attributes.current_temperature;
     const target = s.attributes.temperature;
-    const heating = s.state !== "off";
-    const body = heating
-      ? (this._showCurrent
-          ? `<div class="cur">aktuell ${cur != null ? Number(cur).toFixed(1) : "–"} °C</div>`
-          : "") +
-        `<div class="big"><button data-delta="-1">−</button>` +
-        `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
-        `<button data-delta="1">+</button></div>`
-      : this._offBody(s);
+    //: One body for every state. See `setRow` in _renderClassic for why an off
+    //: room keeps its −/+.
+    const body =
+      (this._showCurrent
+        ? `<div class="cur">aktuell ${cur != null ? Number(cur).toFixed(1) : "–"} °C</div>`
+        : "") +
+      this._frostLine(s) +
+      `<div class="big"><button data-delta="-1">−</button>` +
+      `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
+      `<button data-delta="1">+</button></div>`;
     this._root.innerHTML = `<div class="ga-body sp">${this._hdr(s, header)}${body}${this._modeRow(s)}</div>`;
   }
 

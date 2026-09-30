@@ -15,13 +15,24 @@
   scale rather than three unrelated buttons. Order is presentation only: each
   button carries its own `data-mode` and the handler reads that, never a
   position, so the services called are unchanged. A test pins both.
-- **An off room shows the frost-protection setpoint its own valves hold**,
-  not "Heizung aus". On a TRVZB `off` IS the anti-freeze state — the valve keeps
-  its own `frost_protection_temperature` and opens at it — so the number is READ
-  from the room's `valves` attribute, never assumed (measured 2026-09-30 on a
-  device: three valves at 7 °C, not the vendor's documented 5). Valves that
-  disagree are both named ("7 / 8 °C"); when no valve reports one the card falls
-  back to "Heizung aus" rather than promising protection it has not read.
+- **An off room keeps the layout of a heating one.** It used to lose its whole
+  body — no value, no −/+, just "Heizung aus" — so the card jumped every time
+  someone pressed AUS. Now the big value and both buttons stay exactly where they
+  were, and one small line is added: the frost-protection setpoint the room's own
+  valves hold, as a snowflake and a number, no word. A press on −/+ while off is
+  a setpoint like any other, so ga_heating takes the room out of AUS and heats —
+  the chosen behaviour (2026-09-30), on the control that was already there.
+  The frost number is READ from the room's `valves` attribute, never assumed: on
+  a TRVZB `off` IS the anti-freeze state and the setpoint is the hardware's
+  (measured on a device: three valves at 7 °C, not the vendor's documented 5).
+  Valves that disagree are both named ("7 / 8 °C"); with none reporting there is
+  no line at all, rather than a promise of protection nobody read.
+
+- **The room's temperature badge carries a thermometer.** Read off the ga_heating
+  room entity, it inherited that entity's icon — the thermostat dial, which is the
+  control, not the reading (seen on a device 2026-09-30). `mdi:thermometer` is now
+  stated on both branches, so the badge looks the same whether the climate entity
+  or a temperature sensor answers.
 
 - **The idle badge says "Leerlauf", not "Bereit".** "Bereit" reads as standby and
   says nothing about what the heating is doing. "Leerlauf" is Home Assistant's own

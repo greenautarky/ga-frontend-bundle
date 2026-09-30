@@ -11,15 +11,21 @@ Two things, and the second is the one with teeth:
                handler that ever read an index would send the wrong service
                to the wrong room while looking perfectly correct on screen.
 
-  the OFF BODY "Heizung aus" told a resident nothing about whether their flat
-               can freeze. A TRVZB's `off` IS its anti-freeze state: the valve
-               keeps its own `frost_protection_temperature` and opens at it. So
-               the card shows THAT number — read from this room's valves, never
-               assumed. Measured on the device: three valves, all 7 °C, not the
-               5 °C the vendor documents as the default.
+  the OFF BODY An off room used to lose its whole body: no value, no −/+, just
+               "Heizung aus". The layout jumped every time someone pressed AUS.
+               Since 2026-09-30 an off room renders EXACTLY like a heating one —
+               same big value, same −/+ — and adds one small line: the frost
+               setpoint its own valves hold, as an icon and a number, no word.
+               A press on −/+ while off is a setpoint, so ga_heating takes the
+               room out of AUS and heats; that is the chosen behaviour, and the
+               test below pins that the buttons are really there.
 
-               With no valve reporting one, the card must NOT promise frost
-               protection it has not read. It falls back to "Heizung aus".
+               The frost number is READ from this room's valves, never assumed:
+               a TRVZB's `off` IS its anti-freeze state and the setpoint is the
+               hardware's. Measured on the device: three valves at 7 °C, not the
+               5 °C the vendor documents. With no valve reporting one, no line —
+               promising frost protection we have not read is the one sentence a
+               cold flat could not forgive.
 
 These run the SHIPPED bytes in a VM (tests/js/eval.mjs).
 """
@@ -110,40 +116,65 @@ def test_the_click_handler_reads_the_mode_off_the_button_not_an_index():
 
 
 @pytest.mark.parametrize("variant", sorted(METHODS))
-def test_an_off_room_shows_the_frost_setpoint_its_valves_hold(variant):
+def test_an_off_room_keeps_the_body_a_heating_room_has(variant):
+    """THE RED ONE for the jump: value and both buttons, exactly as when heating."""
     html = render_off(variant, IEEE, {IEEE[0]: "7", IEEE[1]: "7"})
-    assert "Frostschutz" in html
-    assert "7" in html and "°C" in html
+    assert "21.5" in html, "the target is still the big value"
+    assert 'data-delta="-1"' in html and 'data-delta="1"' in html
     assert "Heizung aus" not in html
 
 
 @pytest.mark.parametrize("variant", sorted(METHODS))
-def test_valves_that_disagree_are_both_named(variant):
-    html = render_off(variant, IEEE, {IEEE[0]: "7", IEEE[1]: "8"})
-    assert "7 / 8" in html
+def test_the_frost_line_is_an_icon_and_a_number_without_the_word(variant):
+    html = render_off(variant, IEEE, {IEEE[0]: "7", IEEE[1]: "7"})
+    assert '<div class="frostline"><ha-icon icon="mdi:snowflake"></ha-icon> 7 °C</div>' in html
+    assert "Frostschutz" not in html
 
 
 @pytest.mark.parametrize("variant", sorted(METHODS))
-def test_no_valve_reports_a_setpoint_means_no_promise(variant):
+def test_valves_that_disagree_are_both_named(variant):
+    assert "7 / 8 °C" in render_off(variant, IEEE, {IEEE[0]: "7", IEEE[1]: "8"})
+
+
+@pytest.mark.parametrize("variant", sorted(METHODS))
+def test_no_valve_reports_a_setpoint_means_no_line_and_no_promise(variant):
     html = render_off(variant, IEEE, {})
+    assert "frostline" not in html
     assert "Frostschutz" not in html
-    assert "Heizung aus" in html
+    # …and the body is STILL the normal one: the line is an addition, not the body
+    assert "21.5" in html and 'data-delta="1"' in html
 
 
 @pytest.mark.parametrize("variant", sorted(METHODS))
 def test_an_unreadable_setpoint_is_dropped_rather_than_shown_as_nan(variant):
     html = render_off(variant, IEEE, {IEEE[0]: "unavailable", IEEE[1]: "7"})
     assert "NaN" not in html
-    assert "7" in html
+    assert "7 °C" in html
 
 
 def test_only_this_rooms_valves_are_asked():
     """A global sweep would show the neighbour's valve in this room's card."""
-    html = render_off(
-        "setpoint", [IEEE[0]], {IEEE[0]: "7", "0xf84477fffe0f93e9": "12"}
-    )
+    html = render_off("setpoint", [IEEE[0]], {IEEE[0]: "7", "0xf84477fffe0f93e9": "12"})
     assert "12" not in html
-    assert "7" in html
+    assert "7 °C" in html
+
+
+def test_a_heating_room_gets_no_frost_line():
+    """While the heating runs, the frost setpoint is noise."""
+    html = run_js(
+        CARD,
+        "(() => { const c = Object.create(GaThermostatCard.prototype);"
+        " c._variant = 'setpoint'; c._showCurrent = false;"
+        " c._config = { entity: 'climate.schlafzimmer' };"
+        f" c._hass = {{ states: {json.dumps(_states({IEEE[0]: '7'}))} }};"
+        " c._root = { innerHTML: '' };"
+        " c._renderSetpoint({ state: 'heat', attributes: { temperature: 21.5,"
+        " current_temperature: 18.4, hvac_modes: ['off','heat','auto'],"
+        f" valves: ['climate.{IEEE[0]}'] }} }}, '');"
+        " return c._root.innerHTML; })()",
+    )
+    assert "frostline" not in html
+    assert "21.5" in html
 
 
 def test_a_room_without_a_valves_attribute_does_not_crash():
@@ -154,18 +185,3 @@ def test_a_room_without_a_valves_attribute_does_not_crash():
         " return JSON.stringify(c._frostSetpoints({ attributes: {} })); })()",
     )
     assert json.loads(html) == []
-
-
-def test_a_heating_room_still_shows_its_target():
-    html = run_js(
-        CARD,
-        "(() => { const c = Object.create(GaThermostatCard.prototype);"
-        " c._variant = 'setpoint'; c._showCurrent = false;"
-        " c._config = { entity: 'climate.schlafzimmer' };"
-        " c._hass = { states: {} }; c._root = { innerHTML: '' };"
-        " c._renderSetpoint({ state: 'heat', attributes: { temperature: 21.5,"
-        " current_temperature: 18.4, hvac_modes: ['off','heat','auto'] } }, '');"
-        " return c._root.innerHTML; })()",
-    )
-    assert "21.5" in html
-    assert "Frostschutz" not in html
