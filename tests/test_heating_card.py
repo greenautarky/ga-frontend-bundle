@@ -137,15 +137,20 @@ async def test_card_is_delivered_as_a_resource_and_never_injected(
 
 def test_the_strategy_passes_no_room_name_to_the_heating_card():
     """The "Heizplan" heading is directly above it and the tab is the room, so a
-    room-name header inside the card was the same thing said a third time."""
+    room-name header inside the card was the same thing said a third time.
+
+    Asserted on the card object alone: `title: room.name` also spells the VIEW's
+    tab title a few lines away, and a bare "not in src" flagged that instead —
+    green logic, red build (CI, 2026-09-30).
+    """
     src = STRATEGY.read_text(encoding="utf-8")
     assert '{ type: "custom:ga-heating-card", entity },' in src
-    assert 'title: room.name' not in src
+    assert '{ type: "custom:ga-heating-card", entity, title' not in src
 
 
-def test_the_card_honours_an_empty_title_and_still_defaults():
-    """`??`, not `||`: "" is a request for no header, not a missing one."""
+def test_the_card_ships_no_header_by_default():
+    """Defaulting to "Heizplan" only moved the duplication one line up."""
     src = CARD.read_text(encoding="utf-8")
-    assert 'const title = this._config.title ?? "Heizplan";' in src
-    assert 'this._config.title || "Heizplan"' not in src
+    assert 'const title = this._config.title ?? "";' in src
+    assert '"Heizplan"' not in src.split("_header()")[1][:200]
     assert 'return title ? ` header="${title}"` : "";' in src

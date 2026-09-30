@@ -24,11 +24,11 @@
   control that was already there. ("off" and "cannot be changed" are not the same
   statement, and the card must not quietly make them one.)
 
-- **The Heizplan card drops the room-name header.** The "Heizplan" heading sits
-  directly above it and the tab you are standing in is the room, so the name was
-  the same thing said a third time. The strategy passes no `title`; the card
-  honours `title: ""` (`??`, not `||`) and keeps its "Heizplan" default for a
-  hand-written config that sets nothing.
+- **The Heizplan card ships no header.** It carried the room name, under a
+  "Heizplan" heading, in a tab named after the room — the same thing three times.
+  The strategy passes no `title` and the card's default is now nothing at all:
+  falling back to "Heizplan" only moved the duplication one line up. A
+  hand-written config that sets a `title` still gets it.
 
 - **The room's temperature badge carries a thermometer.** Read off the ga_heating
   room entity, it inherited that entity's icon — the thermostat dial, which is the
