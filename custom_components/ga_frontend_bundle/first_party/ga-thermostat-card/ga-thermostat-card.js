@@ -48,10 +48,15 @@ const COMMIT_DELAY_MS = 400;
 //: nothing, so "wait for confirmation" is a wait that never ends.
 const PENDING_TTL_MS = 8000;
 
+//: AUS ... MANUEL ... KI, left to right — least heating to most, so the row
+//: reads as one scale instead of three unrelated buttons. Asked for 2026-09-30.
+//: ORDER IS PRESENTATION ONLY: each button carries its own `data-mode` and the
+//: click handler reads THAT (`_wireCommon`), never a position, so the services
+//: called are unchanged.
 const MODE_LABELS = [
-  ["auto", "KI", "mdi:brain"],
-  ["heat", "MANUEL", "mdi:hand-back-left"],
   ["off", "AUS", "mdi:power"],
+  ["heat", "MANUEL", "mdi:hand-back-left"],
+  ["auto", "KI", "mdi:brain"],
 ];
 
 // Dial geometry: a 270° arc with a 90° gap at the bottom (0° = top, clockwise).
@@ -96,6 +101,13 @@ const STYLE = `
   ga-thermostat-card .modes .m.on.heat { background: var(--ga-heat, #ff8a3d); }
   ga-thermostat-card .modes .m ha-icon { --mdc-icon-size: 20px; display: block; margin: 0 auto 2px; }
   ga-thermostat-card .off, ga-thermostat-card .offmsg { text-align: center; opacity: .6; padding: 20px 0; }
+  /* AUS is not "nothing": the valve still opens on its own at its frost
+     setpoint, so that number is what the card shows instead of a blank. */
+  ga-thermostat-card .frost { text-align: center; padding: 10px 0 14px; }
+  ga-thermostat-card .frost .fl { display: block; font-size: 13px; opacity: .6; margin-bottom: 2px; }
+  ga-thermostat-card .frost .fl ha-icon { --mdc-icon-size: 16px; vertical-align: -3px; }
+  ga-thermostat-card .frost .ft { font-size: 40px; font-weight: 600; line-height: 1; opacity: .75; }
+  ga-thermostat-card .frost .ft small { font-size: 15px; opacity: .6; font-weight: 500; }
   /* setpoint */
   ga-thermostat-card .sp .cur { text-align: center; opacity: .6; font-size: 13px; margin-bottom: 4px; }
   ga-thermostat-card .sp .big { display: flex; align-items: center; justify-content: center;
@@ -338,9 +350,11 @@ class GaThermostatCard extends HTMLElement {
     // Exactly one element carries the class `target`, in both layouts, because
     // `_showPending` finds the number by that class. Two of them, or none,
     // breaks the optimistic press without breaking anything a test would see.
-    const big = this._showCurrent
-      ? `<div class="val">${cur != null ? `${Number(cur).toFixed(1)}<small> °C</small>` : "–"}</div>`
-      : `<div class="val target">${tTxt}</div>`;
+    const big = !heating
+      ? this._offBody(s)
+      : this._showCurrent
+        ? `<div class="val">${cur != null ? `${Number(cur).toFixed(1)}<small> °C</small>` : "–"}</div>`
+        : `<div class="val target">${tTxt}</div>`;
     const setRow = (target != null && heating)
       ? `<div class="set"><button data-delta="-1" aria-label="kälter">−</button>` +
         (this._showCurrent ? `<div class="target">${Number(target).toFixed(1)} °C</div>` : "") +
@@ -348,6 +362,37 @@ class GaThermostatCard extends HTMLElement {
       : "";
     this._root.innerHTML = `<div class="ga-body">${this._hdr(s, header)}` +
       `${big}${setRow}${this._modeRow(s)}</div>`;
+  }
+
+  //: A valve's frost setpoint lives on its OWN `number` entity, named after the
+  //: valve: climate.0xIEEE -> number.0xIEEE_frost_protection_temperature. The
+  //: room entity lists its valves in `attributes.valves` (ga_heating climate.py),
+  //: so the card asks THIS room's valves and never a global sweep.
+  //:
+  //: READ, never assumed: on a TRVZB `off` IS the anti-freeze state, and the
+  //: setpoint is the hardware's, not ours. Measured on 100.126.209.15
+  //: (2026-09-30): all three valves hold 7 °C, not the 5 °C the vendor
+  //: documents — a hardcoded 5 would have shown a number this flat does not use.
+  _frostSetpoints(s) {
+    const states = (this._hass && this._hass.states) || {};
+    const valves = Array.isArray(s.attributes.valves) ? s.attributes.valves : [];
+    const vals = valves
+      .map((v) => states[`number.${String(v).split(".").pop()}_frost_protection_temperature`])
+      .filter(Boolean)
+      .map((e) => Number(e.state))
+      .filter((n) => Number.isFinite(n));
+    return Array.from(new Set(vals)).sort((a, b) => a - b);
+  }
+
+  //: What an off room says. With no valve reporting a setpoint we say only that
+  //: the heating is off — promising frost protection we have not read would be
+  //: the one sentence a cold flat could not forgive.
+  _offBody(s) {
+    const v = this._frostSetpoints(s);
+    if (!v.length) return `<div class="offmsg">Heizung aus</div>`;
+    return `<div class="frost"><span class="fl">` +
+      `<ha-icon icon="mdi:snowflake"></ha-icon> Frostschutz</span>` +
+      `<div class="ft">${v.join(" / ")}<small> °C</small></div></div>`;
   }
 
   _renderSetpoint(s, header) {
@@ -361,7 +406,7 @@ class GaThermostatCard extends HTMLElement {
         `<div class="big"><button data-delta="-1">−</button>` +
         `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
         `<button data-delta="1">+</button></div>`
-      : `<div class="offmsg">Heizung aus</div>`;
+      : this._offBody(s);
     this._root.innerHTML = `<div class="ga-body sp">${this._hdr(s, header)}${body}${this._modeRow(s)}</div>`;
   }
 

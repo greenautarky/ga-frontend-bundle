@@ -11,6 +11,18 @@
   title the running-state badge ("Bereit" / "Heizt") takes its place, on the
   left, in all three variants; with neither, no empty line is left. The
   `simple` fallback gets `header: false`; `core` never had a title.
+- **The mode row reads AUS · MANUEL · KI**, least heating to most, so it is one
+  scale rather than three unrelated buttons. Order is presentation only: each
+  button carries its own `data-mode` and the handler reads that, never a
+  position, so the services called are unchanged. A test pins both.
+- **An off room shows the frost-protection setpoint its own valves hold**,
+  not "Heizung aus". On a TRVZB `off` IS the anti-freeze state — the valve keeps
+  its own `frost_protection_temperature` and opens at it — so the number is READ
+  from the room's `valves` attribute, never assumed (measured 2026-09-30 on a
+  device: three valves at 7 °C, not the vendor's documented 5). Valves that
+  disagree are both named ("7 / 8 °C"); when no valve reports one the card falls
+  back to "Heizung aus" rather than promising protection it has not read.
+
 - **The running-state badge carries an icon next to its word:** `mdi:fire`
   for Heizt, `mdi:check-circle-outline` for Bereit, `mdi:power` for Aus (the
   same icon as the AUS mode button). The word stays — the icon reinforces it,
