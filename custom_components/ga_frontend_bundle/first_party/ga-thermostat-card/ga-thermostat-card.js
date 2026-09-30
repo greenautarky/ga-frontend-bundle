@@ -100,14 +100,7 @@ const STYLE = `
   ga-thermostat-card .modes .m.on { background: var(--primary-color, #03a9f4); color: #fff; }
   ga-thermostat-card .modes .m.on.heat { background: var(--ga-heat, #ff8a3d); }
   ga-thermostat-card .modes .m ha-icon { --mdc-icon-size: 20px; display: block; margin: 0 auto 2px; }
-  ga-thermostat-card .off, ga-thermostat-card .offmsg { text-align: center; opacity: .6; padding: 20px 0; }
-  /* AUS is not "nothing": the valve still opens on its own at its frost setpoint.
-     That number rides ALONG the normal body as one small line — the layout of an
-     off room must not differ from a heating one (asked for 2026-09-30), so the
-     big value and its −/+ stay exactly where they were. Icon, no word. */
-  ga-thermostat-card .frostline { text-align: center; font-size: 13px; opacity: .55;
-    margin-bottom: 4px; }
-  ga-thermostat-card .frostline ha-icon { --mdc-icon-size: 15px; vertical-align: -3px; }
+  ga-thermostat-card .off { text-align: center; opacity: .6; padding: 20px 0; }
   /* setpoint */
   ga-thermostat-card .sp .cur { text-align: center; opacity: .6; font-size: 13px; margin-bottom: 4px; }
   ga-thermostat-card .sp .big { display: flex; align-items: center; justify-content: center;
@@ -364,50 +357,18 @@ class GaThermostatCard extends HTMLElement {
         `<button data-delta="1" aria-label="wärmer">+</button></div>`
       : "";
     this._root.innerHTML = `<div class="ga-body">${this._hdr(s, header)}` +
-      `${this._frostLine(s)}${big}${setRow}${this._modeRow(s)}</div>`;
-  }
-
-  //: A valve's frost setpoint lives on its OWN `number` entity, named after the
-  //: valve: climate.0xIEEE -> number.0xIEEE_frost_protection_temperature. The
-  //: room entity lists its valves in `attributes.valves` (ga_heating climate.py),
-  //: so the card asks THIS room's valves and never a global sweep.
-  //:
-  //: READ, never assumed: on a TRVZB `off` IS the anti-freeze state, and the
-  //: setpoint is the hardware's, not ours. Measured on 100.126.209.15
-  //: (2026-09-30): all three valves hold 7 °C, not the 5 °C the vendor
-  //: documents — a hardcoded 5 would have shown a number this flat does not use.
-  _frostSetpoints(s) {
-    const states = (this._hass && this._hass.states) || {};
-    const valves = Array.isArray(s.attributes.valves) ? s.attributes.valves : [];
-    const vals = valves
-      .map((v) => states[`number.${String(v).split(".").pop()}_frost_protection_temperature`])
-      .filter(Boolean)
-      .map((e) => Number(e.state))
-      .filter((n) => Number.isFinite(n));
-    return Array.from(new Set(vals)).sort((a, b) => a - b);
-  }
-
-  //: The one line an off room adds. Nothing when no valve reports a setpoint:
-  //: promising frost protection we have not read is the one sentence a cold flat
-  //: could not forgive. Shown only while off — while heating it is noise.
-  _frostLine(s) {
-    if (s.state !== "off") return "";
-    const v = this._frostSetpoints(s);
-    if (!v.length) return "";
-    return `<div class="frostline"><ha-icon icon="mdi:snowflake"></ha-icon> ` +
-      `${v.join(" / ")} °C</div>`;
+      `${big}${setRow}${this._modeRow(s)}</div>`;
   }
 
   _renderSetpoint(s, header) {
     const cur = s.attributes.current_temperature;
     const target = s.attributes.temperature;
-    //: One body for every state. See `setRow` in _renderClassic for why an off
-    //: room keeps its −/+.
+    //: One body for every state — an off room renders exactly like a heating one.
+    //: See `setRow` in _renderClassic for why its −/+ stay live.
     const body =
       (this._showCurrent
         ? `<div class="cur">aktuell ${cur != null ? Number(cur).toFixed(1) : "–"} °C</div>`
         : "") +
-      this._frostLine(s) +
       `<div class="big"><button data-delta="-1">−</button>` +
       `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
       `<button data-delta="1">+</button></div>`;

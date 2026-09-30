@@ -17,16 +17,12 @@
   position, so the services called are unchanged. A test pins both.
 - **An off room keeps the layout of a heating one.** It used to lose its whole
   body — no value, no −/+, just "Heizung aus" — so the card jumped every time
-  someone pressed AUS. Now the big value and both buttons stay exactly where they
-  were, and one small line is added: the frost-protection setpoint the room's own
-  valves hold, as a snowflake and a number, no word. A press on −/+ while off is
-  a setpoint like any other, so ga_heating takes the room out of AUS and heats —
-  the chosen behaviour (2026-09-30), on the control that was already there.
-  The frost number is READ from the room's `valves` attribute, never assumed: on
-  a TRVZB `off` IS the anti-freeze state and the setpoint is the hardware's
-  (measured on a device: three valves at 7 °C, not the vendor's documented 5).
-  Valves that disagree are both named ("7 / 8 °C"); with none reporting there is
-  no line at all, rather than a promise of protection nobody read.
+  someone pressed AUS. There is now ONE body for every state: the big value and
+  both buttons stay exactly where they were, and the badge is the only thing that
+  changes. A press on −/+ while off is a setpoint like any other, so ga_heating
+  takes the room out of AUS and heats — chosen deliberately (2026-09-30), on the
+  control that was already there. ("off" and "cannot be changed" are not the same
+  statement, and the card must not quietly make them one.)
 
 - **The room's temperature badge carries a thermometer.** Read off the ga_heating
   room entity, it inherited that entity's icon — the thermostat dial, which is the

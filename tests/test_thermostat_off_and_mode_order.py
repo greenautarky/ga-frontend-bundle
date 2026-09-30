@@ -1,8 +1,6 @@
-"""AUS sits first, and an off room says what still protects it.
+"""AUS sits first, and an off room looks exactly like a heating one.
 
 Asked for on 2026-09-30, on 100.126.209.15.
-
-Two things, and the second is the one with teeth:
 
   the ORDER    AUS ... MANUEL ... KI, left to right — least heating to most,
                so the row reads as one scale. This is PRESENTATION ONLY: every
@@ -12,20 +10,15 @@ Two things, and the second is the one with teeth:
                to the wrong room while looking perfectly correct on screen.
 
   the OFF BODY An off room used to lose its whole body: no value, no −/+, just
-               "Heizung aus". The layout jumped every time someone pressed AUS.
-               Since 2026-09-30 an off room renders EXACTLY like a heating one —
-               same big value, same −/+ — and adds one small line: the frost
-               setpoint its own valves hold, as an icon and a number, no word.
-               A press on −/+ while off is a setpoint, so ga_heating takes the
-               room out of AUS and heats; that is the chosen behaviour, and the
-               test below pins that the buttons are really there.
+               "Heizung aus". The card jumped every time someone pressed AUS.
+               Now there is ONE body for every state — same big value, same
+               −/+, nothing added and nothing taken away.
 
-               The frost number is READ from this room's valves, never assumed:
-               a TRVZB's `off` IS its anti-freeze state and the setpoint is the
-               hardware's. Measured on the device: three valves at 7 °C, not the
-               5 °C the vendor documents. With no valve reporting one, no line —
-               promising frost protection we have not read is the one sentence a
-               cold flat could not forgive.
+               A press on −/+ while off is a setpoint like any other, so
+               ga_heating takes the room out of AUS and heats. Chosen
+               deliberately; the test below pins that the buttons are really
+               there, because "off" and "cannot be changed" are not the same
+               statement and the card must not quietly make them one.
 
 These run the SHIPPED bytes in a VM (tests/js/eval.mjs).
 """
@@ -41,44 +34,29 @@ from test_rendered_output import run_js
 
 CARD = PKG / "first_party" / "ga-thermostat-card" / "ga-thermostat-card.js"
 
-IEEE = ["0xc4d8c8fffe48c786", "0xd44867fffe1155d9"]
 METHODS = {"classic": "_renderClassic", "setpoint": "_renderSetpoint"}
 
-
-def _off_state(valves):
-    return {
-        "state": "off",
-        "attributes": {
-            "current_temperature": 18.4,
-            "temperature": 21.5,
-            "hvac_modes": ["off", "heat", "auto"],
-            "hvac_action": "off",
-            "min_temp": 5,
-            "max_temp": 30,
-            "valves": [f"climate.{i}" for i in valves],
-        },
-    }
+ATTRS = {
+    "hvac_modes": ["off", "heat", "auto"],
+    "temperature": 21.5,
+    "current_temperature": 18.4,
+    "min_temp": 5,
+    "max_temp": 30,
+}
 
 
-def _states(frost):
-    """`frost` maps an IEEE to the state its frost `number` entity reports."""
-    st = {}
-    for ieee, val in frost.items():
-        st[f"number.{ieee}_frost_protection_temperature"] = {"state": val}
-    return st
-
-
-def render_off(variant, valves, frost):
+def render(variant, state, hvac_action):
+    st = {"state": state, "attributes": {**ATTRS, "hvac_action": hvac_action}}
     return run_js(
         CARD,
         "(() => {"
         " const c = Object.create(GaThermostatCard.prototype);"
         f" c._variant = {variant!r};"
         " c._showCurrent = false;"
-        " c._config = { entity: 'climate.schlafzimmer' };"
-        f" c._hass = {{ states: {json.dumps(_states(frost))} }};"
+        " c._config = { entity: 'climate.badezimmer' };"
+        " c._hass = { states: {} };"
         " c._root = { innerHTML: '' };"
-        f" c.{METHODS[variant]}({json.dumps(_off_state(valves))}, '');"
+        f" c.{METHODS[variant]}({json.dumps(st)}, '');"
         " return c._root.innerHTML; })()",
     )
 
@@ -109,79 +87,49 @@ def test_each_button_still_carries_its_own_mode():
 def test_the_click_handler_reads_the_mode_off_the_button_not_an_index():
     src = CARD.read_text(encoding="utf-8")
     assert "this._setMode(target.dataset.mode);" in src
-    assert 'hvac_mode: mode' in src
+    assert "hvac_mode: mode" in src
 
 
-# ── the off body ────────────────────────────────────────────────────────────
+# ── one body for every state ────────────────────────────────────────────────
+
+
+def _normalise(html: str) -> str:
+    """Everything an off room is ALLOWED to differ in, removed.
+
+    Two things legitimately differ and nothing else may: the running-state badge
+    ("Aus" vs "Heizt"), and which mode button is marked active. Both are read off
+    the entity's state, which is the point. Normalising exactly these two is what
+    makes the rest an equality — a weaker strip would pass on a card that dropped
+    the value or the buttons again (it did, on the first attempt at this test).
+    """
+    html = re.sub(r'<span class="act[^>]*>.*?</span>', "", html, flags=re.S)
+    return re.sub(r'class="m[^"]*"', 'class="m"', html)
 
 
 @pytest.mark.parametrize("variant", sorted(METHODS))
-def test_an_off_room_keeps_the_body_a_heating_room_has(variant):
-    """THE RED ONE for the jump: value and both buttons, exactly as when heating."""
-    html = render_off(variant, IEEE, {IEEE[0]: "7", IEEE[1]: "7"})
-    assert "21.5" in html, "the target is still the big value"
+def test_an_off_room_renders_exactly_like_a_heating_one(variant):
+    """THE RED ONE for the jump."""
+    assert _normalise(render(variant, "off", "off")) == _normalise(
+        render(variant, "heat", "heating")
+    )
+
+
+@pytest.mark.parametrize("variant", sorted(METHODS))
+def test_an_off_room_keeps_its_value_and_both_buttons(variant):
+    html = render(variant, "off", "off")
+    assert "21.5" in html
     assert 'data-delta="-1"' in html and 'data-delta="1"' in html
+
+
+@pytest.mark.parametrize("variant", sorted(METHODS))
+def test_nothing_is_added_to_an_off_room(variant):
+    """The frost line lived here for one afternoon (2026-09-30) and was dropped."""
+    html = render(variant, "off", "off")
+    assert "Frostschutz" not in html
+    assert "frostline" not in html
     assert "Heizung aus" not in html
 
 
-@pytest.mark.parametrize("variant", sorted(METHODS))
-def test_the_frost_line_is_an_icon_and_a_number_without_the_word(variant):
-    html = render_off(variant, IEEE, {IEEE[0]: "7", IEEE[1]: "7"})
-    assert '<div class="frostline"><ha-icon icon="mdi:snowflake"></ha-icon> 7 °C</div>' in html
-    assert "Frostschutz" not in html
-
-
-@pytest.mark.parametrize("variant", sorted(METHODS))
-def test_valves_that_disagree_are_both_named(variant):
-    assert "7 / 8 °C" in render_off(variant, IEEE, {IEEE[0]: "7", IEEE[1]: "8"})
-
-
-@pytest.mark.parametrize("variant", sorted(METHODS))
-def test_no_valve_reports_a_setpoint_means_no_line_and_no_promise(variant):
-    html = render_off(variant, IEEE, {})
-    assert "frostline" not in html
-    assert "Frostschutz" not in html
-    # …and the body is STILL the normal one: the line is an addition, not the body
-    assert "21.5" in html and 'data-delta="1"' in html
-
-
-@pytest.mark.parametrize("variant", sorted(METHODS))
-def test_an_unreadable_setpoint_is_dropped_rather_than_shown_as_nan(variant):
-    html = render_off(variant, IEEE, {IEEE[0]: "unavailable", IEEE[1]: "7"})
-    assert "NaN" not in html
-    assert "7 °C" in html
-
-
-def test_only_this_rooms_valves_are_asked():
-    """A global sweep would show the neighbour's valve in this room's card."""
-    html = render_off("setpoint", [IEEE[0]], {IEEE[0]: "7", "0xf84477fffe0f93e9": "12"})
-    assert "12" not in html
-    assert "7 °C" in html
-
-
-def test_a_heating_room_gets_no_frost_line():
-    """While the heating runs, the frost setpoint is noise."""
-    html = run_js(
-        CARD,
-        "(() => { const c = Object.create(GaThermostatCard.prototype);"
-        " c._variant = 'setpoint'; c._showCurrent = false;"
-        " c._config = { entity: 'climate.schlafzimmer' };"
-        f" c._hass = {{ states: {json.dumps(_states({IEEE[0]: '7'}))} }};"
-        " c._root = { innerHTML: '' };"
-        " c._renderSetpoint({ state: 'heat', attributes: { temperature: 21.5,"
-        " current_temperature: 18.4, hvac_modes: ['off','heat','auto'],"
-        f" valves: ['climate.{IEEE[0]}'] }} }}, '');"
-        " return c._root.innerHTML; })()",
-    )
-    assert "frostline" not in html
-    assert "21.5" in html
-
-
-def test_a_room_without_a_valves_attribute_does_not_crash():
-    html = run_js(
-        CARD,
-        "(() => { const c = Object.create(GaThermostatCard.prototype);"
-        " c._hass = { states: {} };"
-        " return JSON.stringify(c._frostSetpoints({ attributes: {} })); })()",
-    )
-    assert json.loads(html) == []
+def test_the_badge_is_the_only_difference():
+    assert 'act-off' in render("setpoint", "off", "off")
+    assert 'act-heating' in render("setpoint", "heat", "heating")
