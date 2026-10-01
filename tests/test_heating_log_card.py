@@ -197,19 +197,27 @@ def test_nothing_to_report_and_nothing_readable_are_different_sentences():
     assert empty != broken
 
 
-def test_only_the_last_n_are_rendered_newest_first():
+def test_only_the_first_n_are_rendered():
+    """`_entries` is NEWEST FIRST whichever source filled it — the component's
+    attribute already is, and the history diff reverses. So the card takes the
+    HEAD of the list, and a card that took the tail would show the three oldest
+    changes under a heading promising the last three."""
     html = run_js(
         CARD,
         "(() => { const c = Object.create(GaHeatingLogCard.prototype);"
         " c._count = 3; c._hours = 72; c._config = {};"
-        " c._entries = [1,2,3,4,5].map(i => ({ when: `2026-09-30T0${i}:00:00`,"
+        " c._entries = [5,4,3,2,1].map(i => ({ when: `2026-09-30T0${i}:00:00`,"
         " kind: 'target', from: 20, to: 20 + i }));"
         " return c._listHtml(); })()",
     )
     assert html.count("<li>") == 3
-    # newest first: 05:00 (to 25) before 04:00 (to 24) before 03:00 (to 23)
     assert html.index("25,0") < html.index("24,0") < html.index("23,0")
     assert "21,0" not in html and "22,0" not in html
+
+
+def test_the_history_diff_is_reversed_into_the_same_order():
+    src = CARD.read_text(encoding="utf-8")
+    assert "changesFrom(points).reverse()" in src
 
 
 # ── the strategy ────────────────────────────────────────────────────────────

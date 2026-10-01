@@ -99,7 +99,11 @@ function changesFrom(points) {
   for (const p of points || []) {
     if (!p || typeof p.state !== "string") continue;
     const a = p.attributes || {};
-    const t = Number(a.temperature);
+    // `Number(null)` is 0, not NaN — so a thermostat reporting no setpoint used
+    // to enter the log as "Soll 0,0 °C", a temperature nobody set and the valve
+    // cannot hold. Caught by CI, 2026-10-01.
+    const raw = a.temperature;
+    const t = raw == null ? NaN : Number(raw);
     const cur = { mode: p.state, target: Number.isFinite(t) ? t : null };
     const when = p.last_changed || p.last_updated;
     if (prev) {
