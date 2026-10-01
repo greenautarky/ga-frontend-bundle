@@ -15,14 +15,15 @@
  * So this reads `history/period`, which records state AND attributes, and diffs
  * consecutive points itself.
  *
- * WHAT THIS CARD CANNOT SAY, and must not pretend to. History knows THAT the
- * setpoint moved; only ga_heating knows WHY — the resident, the weekly plan, a
- * boost, an open window, a dial turned on the radiator. The entries here are
- * therefore phrased as observations ("Soll 21 → 23 °C"), never as attributions
- * ("Du hast …"). The reason belongs in the integration, which already models it
- * (`override`, `manual_until`, `valve_control`); when it publishes a change log,
- * this card renders that instead and the guessing disappears rather than getting
- * cleverer.
+ * TWO SOURCES, AND THE BETTER ONE WINS. Since ga_heating 0.12.0 the room entity
+ * publishes `attributes.changes` — the same events, each carrying WHY it happened
+ * (resident, plan, boost, window, absence, a hand on the radiator, a manual period
+ * expiring). That is knowledge only the component has: in the recorder, a boost and
+ * a resident pressing + are the same two numbers. When the attribute is there the
+ * card renders it and makes no request at all; where it is missing — an older
+ * device — it falls back to diffing `history/period`, and then says only WHAT
+ * changed, never why, because guessing the reason is exactly the failure this card
+ * would otherwise institutionalise.
  *
  * Config:
  *   type: custom:ga-heating-log-card
@@ -38,6 +39,19 @@ const DEFAULT_HOURS = 72;
 //: A room's own modes, in the resident's words. Same mapping as
 //: ga-thermostat-card: KI = auto, MANUEL = heat, AUS = off.
 const MODE_WORDS = { auto: "KI", heat: "MANUEL", off: "AUS" };
+
+//: ga_heating's `source` vocabulary, in the resident's words. A source we do not
+//: know is rendered as nothing rather than as its raw key: a newer component
+//: inventing a reason must not put "window_contact_2" on someone's wall.
+const SOURCE_WORDS = {
+  resident: "Bedienung",
+  valve: "am Heizkörper",
+  plan: "Heizplan",
+  boost: "Boost",
+  absence: "Urlaub",
+  window: "Fenster",
+  expiry: "manuelle Zeit abgelaufen",
+};
 
 //: Re-reading the whole window on every state update would hammer the recorder
 //: for a card that changes a few times a day. A refetch is scheduled only when
@@ -57,6 +71,7 @@ const STYLE = `
   ga-heating-log-card .what { flex: 1 1 auto; }
   ga-heating-log-card .what ha-icon { --mdc-icon-size: 16px; vertical-align: -3px;
     opacity: .7; margin-right: 4px; }
+  ga-heating-log-card .why { opacity: .55; }
   ga-heating-log-card .quiet { opacity: .6; font-size: 13px; padding: 4px 0; }
 `;
 
@@ -103,16 +118,32 @@ function changesFrom(points) {
   return out;
 }
 
-/** One entry as `{icon, text}` — the words a resident reads. */
+/**
+ * The component's own entries, in this card's shape.
+ *
+ * `attributes.changes` is already newest-first (changelog.recent reverses the
+ * ring), and `at` is its timestamp. Renaming it here rather than at every use
+ * keeps one shape in the renderer whichever source answered.
+ */
+function fromAttribute(changes) {
+  if (!Array.isArray(changes)) return null;
+  return changes
+    .filter((e) => e && (e.kind === "mode" || e.kind === "target"))
+    .map((e) => ({ when: e.at, kind: e.kind, from: e.from, to: e.to, source: e.source }));
+}
+
+/** One entry as `{icon, text, why}` — the words a resident reads. */
 function describe(entry) {
+  const why = SOURCE_WORDS[entry.source] || "";
   if (entry.kind === "mode") {
     const from = MODE_WORDS[entry.from] || entry.from;
     const to = MODE_WORDS[entry.to] || entry.to;
-    return { icon: "mdi:tune-variant", text: `${from} → ${to}` };
+    return { icon: "mdi:tune-variant", text: `${from} → ${to}`, why };
   }
   return {
     icon: "mdi:thermometer",
     text: `Soll ${entry.from == null ? "–" : temp(entry.from)} → ${temp(entry.to)} °C`,
+    why,
   };
 }
 
@@ -152,6 +183,16 @@ class GaHeatingLogCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     const s = hass && hass.states[this._config.entity];
+    const published = s && fromAttribute(s.attributes && s.attributes.changes);
+    if (published) {
+      // The component answered. No request, no recorder read, and every entry
+      // carries its reason — so the history path below is never entered on a
+      // device running ga_heating 0.12.0 or newer.
+      this._entries = published;
+      this._error = null;
+      this._render();
+      return;
+    }
     const stamp = s && (s.last_updated || s.last_changed);
     if (this._entries === null && !this._loading) {
       this._load();
@@ -173,7 +214,9 @@ class GaHeatingLogCard extends HTMLElement {
     try {
       const res = await this._hass.callApi("get", path);
       const points = Array.isArray(res) && Array.isArray(res[0]) ? res[0] : [];
-      this._entries = changesFrom(points);
+      // Oldest-first from the diff; the renderer wants newest-first, which is the
+      // order the component's own attribute already uses.
+      this._entries = changesFrom(points).reverse();
       this._error = null;
     } catch (e) {
       // A window with nothing in it and a window we could not read are different
@@ -213,11 +256,12 @@ class GaHeatingLogCard extends HTMLElement {
       return `<div class="quiet">Keine Änderungen in den letzten ${this._hours} Stunden.</div>`;
     }
     const now = new Date();
-    const last = this._entries.slice(-this._count).reverse();
+    const last = this._entries.slice(0, this._count);
     return `<ul>${last.map((e) => {
       const d = describe(e);
+      const why = d.why ? `<span class="why"> · ${d.why}</span>` : "";
       return `<li><span class="when">${formatWhen(e.when, now)}</span>` +
-        `<span class="what"><ha-icon icon="${d.icon}"></ha-icon>${d.text}</span></li>`;
+        `<span class="what"><ha-icon icon="${d.icon}"></ha-icon>${d.text}${why}</span></li>`;
     }).join("")}</ul>`;
   }
 }

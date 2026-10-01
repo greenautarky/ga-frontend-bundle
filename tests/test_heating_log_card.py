@@ -219,3 +219,62 @@ def test_the_strategy_places_it_under_the_thermostat_behind_an_option():
     src = STRATEGY.read_text(encoding="utf-8")
     assert 'if (opt.changeLog) cards.push({ type: "custom:ga-heating-log-card", entity });' in src
     assert "changeLog: c.change_log === true," in src, "must default OFF while new"
+
+
+# ── the component's own entries win (ga_heating 0.12.0) ─────────────────────
+
+
+PUBLISHED = [
+    {"at": "2026-10-01T12:45:37", "kind": "mode", "from": "off", "to": "auto",
+     "source": "resident"},
+    {"at": "2026-10-01T09:00:00", "kind": "target", "from": 21, "to": 19,
+     "source": "plan"},
+]
+
+
+def test_the_attribute_is_rendered_with_its_reason():
+    """The one thing the recorder cannot supply. A boost and a resident pressing
+    + are the same two numbers in history; only ga_heating knows which."""
+    html = run_js(
+        CARD,
+        "(() => { const c = Object.create(GaHeatingLogCard.prototype);"
+        f" c._entries = fromAttribute({json.dumps(PUBLISHED)});"
+        " c._count = 3; c._hours = 72; c._config = {};"
+        " return c._listHtml(); })()",
+    )
+    assert "AUS → KI" in html and "Bedienung" in html
+    assert "Soll 21,0 → 19,0 °C" in html and "Heizplan" in html
+
+
+def test_a_source_we_do_not_know_is_rendered_as_nothing_not_as_its_key():
+    """A newer component inventing a reason must not put "window_contact_2" on
+    someone's wall."""
+    why = json.loads(run_js(
+        CARD,
+        'JSON.stringify(describe({kind:"mode", from:"auto", to:"heat",'
+        ' source:"window_contact_2"}).why)',
+    ))
+    assert why == ""
+
+
+def test_no_attribute_means_fall_back_to_history():
+    """An older device still gets a log — just without the reasons."""
+    assert json.loads(run_js(CARD, "JSON.stringify(fromAttribute(undefined))")) is None
+    assert json.loads(run_js(CARD, "JSON.stringify(fromAttribute(null))")) is None
+
+
+def test_junk_in_the_attribute_is_filtered_rather_than_rendered():
+    out = json.loads(run_js(
+        CARD,
+        'JSON.stringify(fromAttribute([{kind:"mode",at:"x",from:"a",to:"b"},'
+        ' null, {kind:"colour"}, "nonsense"]))',
+    ))
+    assert [e["kind"] for e in out] == ["mode"]
+
+
+def test_the_attribute_path_makes_no_request():
+    """A card that fetched anyway would read the recorder on every room view —
+    the cost this attribute exists to remove."""
+    src = CARD.read_text(encoding="utf-8")
+    body = src.split("set hass(hass)")[1].split("async _load")[0]
+    assert "this._render();\n      return;" in body, "the published path must return early"
