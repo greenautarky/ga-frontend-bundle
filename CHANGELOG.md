@@ -24,6 +24,28 @@
   control that was already there. ("off" and "cannot be changed" are not the same
   statement, and the card must not quietly make them one.)
 
+- **New: `ga-heating-log-card` — the last few changes to a room, with timestamps.**
+  Asked for on 2026-09-30, and the core logbook card cannot answer it here for two
+  independent reasons: a GA device loads `history:` but not `logbook:`, so
+  `/api/logbook` answers 404; and even loaded, the logbook records STATE changes
+  while a room's setpoint is an ATTRIBUTE — "21 → 23 °C", the thing a resident
+  actually did, would never appear in it. The card reads `history/period` and
+  diffs the points itself: a mode change ("KI → MANUEL") or a setpoint move
+  ("Soll 21,0 → 23,0 °C"), never the measured temperature drifting a tenth, and
+  one entry rather than two when AUS takes the target with it. Times read "Heute
+  14:32" / "Gestern 09:15" / "Mo 07:00". "Nothing happened" and "could not read
+  the history" are different sentences, because a card that renders a failed read
+  as "keine Änderungen" lies about one of them.
+
+  **It states what happened, never who did it.** History knows THAT the setpoint
+  moved; only ga_heating knows whether it was the resident, the plan, a boost or
+  an open window. The entries are observations for exactly that reason — the
+  reason belongs in the integration, which already models it.
+
+  Placed under the thermostat by the strategy behind `change_log: true`, DEFAULT
+  OFF while the feature is new: a card that reads the recorder on every room view
+  is a cost every device would otherwise pay for something nobody has judged yet.
+
 - **The 24 h temperature curve draws the room, not the radiator.** A TRV publishes
   its own `_local_temperature`, which is a temperature sensor in the room like any
   other — so the chart drew two curves and the legend gave no hint that the upper

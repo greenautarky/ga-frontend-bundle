@@ -151,6 +151,9 @@ function historyAvailable(hass) {
  *                               it — the "Heizung" heading directly above
  *                               already names the section. Any other string
  *                               replaces it. ("core" style has no title.)
+ *   change_log        false     show the last changes to a room under its
+ *                               thermostat (ga-heating-log-card). DEFAULT OFF
+ *                               while the feature is new.
  *   hide_household    true      drop the "Haushalt" overview view. DEFAULT hidden
  *                               (resident-clean UI); set false to show it.
  *   hide_roomless     true      drop the "Ohne Raum" view. DEFAULT hidden; set
@@ -179,6 +182,9 @@ function gaOptions(config) {
     hideRoomless: c.hide_roomless !== false,
     // Unset keeps the fleet look; "" is a deliberate "no title", not unset.
     thermostatHeader: typeof c.thermostat_header === "string" ? c.thermostat_header : "Steuerung",
+    // DEFAULT OFF while it is new: a card that reads the recorder on every room
+    // view is a cost every device would pay for a feature nobody has judged yet.
+    changeLog: c.change_log === true,
   };
 }
 
@@ -301,7 +307,14 @@ function roomSections(room, opt, hass) {
   // Heating — the control MyVibe called KI / MANUEL / AUS.
   if (climate.length) {
     const cards = [{ type: "heading", heading: "Heizung", heading_style: "title", badges }];
-    for (const entity of climate) cards.push(thermostatCard(entity, room.name, opt.thermostatStyle, opt.thermostatHeader));
+    for (const entity of climate) {
+      cards.push(thermostatCard(entity, room.name, opt.thermostatStyle, opt.thermostatHeader));
+      // Under the control, the last few things that happened to this room
+      // (2026-09-30). Directly under it on purpose: "was heating on last night"
+      // is a question about the thing you are looking at, and a log on a tab of
+      // its own is a log nobody opens.
+      if (opt.changeLog) cards.push({ type: "custom:ga-heating-log-card", entity });
+    }
     sections.push({ type: "grid", cards });
   }
 
