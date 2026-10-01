@@ -290,9 +290,32 @@ function roomSections(room, opt, hass) {
   //: A thermometer, stated rather than inherited. Read off the CLIMATE entity the
   //: badge would otherwise take its icon from a thermostat — the dial glyph, which
   //: is the control, not the reading (seen on 100.126.209.15, 2026-09-30). Set on
-  //: the sensor branch too, so the badge looks the same whichever source answers.
+  //: every branch, so the badge looks the same whichever source answers.
+  //
+  // THE SENSOR ITSELF, where ga_heating names one. A badge on the climate entity
+  // reads `current_temperature`, and an entity badge falls back to the ENTITY'S
+  // STATE when that attribute is missing — so a room whose thermometer has not
+  // reported shows the hvac mode where a temperature belongs: "Heat" next to a
+  // thermometer icon (seen during boot on 100.126.209.15, 2026-10-01, and it
+  // would sit there for as long as a sensor stayed offline, not only while
+  // booting).
+  //
+  // `temperature_source` is ga_heating's own answer to "which thermometer is this
+  // room's" — room sensor first, the valve's as fallback, decided in one place.
+  // Reading THAT keeps the 2026-09-25 rule (badge, heating and calibration agree)
+  // while giving the badge an entity whose STATE is the temperature, so an absent
+  // reading shows as "–" rather than as a word.
   const clim = climate.length && hass && hass.states ? hass.states[climate[0]] : null;
-  if (clim && typeof (clim.attributes || {}).current_temperature === "number") {
+  const source = clim && (clim.attributes || {}).temperature_source;
+  const sourceIsEntity = typeof source === "string" && source.includes(".");
+  if (sourceIsEntity) {
+    badges.push({ type: "entity", entity: source, name: "Temperatur",
+      icon: "mdi:thermometer" });
+  } else if (clim && typeof (clim.attributes || {}).current_temperature === "number") {
+    // No named source — an older ga_heating, or a room reading its valve
+    // ("temperature_source": "valve"). The climate entity still carries the
+    // number ga_heating decided on, which is better than picking a sensor
+    // ourselves and disagreeing with the heating.
     badges.push({ type: "entity", entity: climate[0], name: "Temperatur",
       icon: "mdi:thermometer", state_content: "current_temperature" });
   } else if (temps.length) {

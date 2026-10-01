@@ -196,3 +196,66 @@ def test_the_humidity_curve_is_named_too_so_no_mean_suffix_leaks():
     assert g is not None, "no humidity graph built — the test would be vacuous"
     assert g["entities"] == [{"entity": "sensor.wz_h", "name": "Raum Luftfeuchtigkeit"}]
     assert g["title"] == "Luftfeuchtigkeit letzte 24h"
+
+
+# ── the badge reads the sensor ga_heating named (2026-10-01) ────────────────
+
+
+_SOURCED = """{
+  "climate.wz": { state: "heat", attributes: { current_temperature: 19.5, temperature: 21,
+                  temperature_source: "sensor.wz_t" } },
+  "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } },
+  "sensor.wz_h": { state: "48", attributes: { device_class: "humidity" } }
+}"""
+
+_ROOM_SRC = ('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+             ' hums: ["sensor.wz_h"], batts: [], lights: [], switches: [] }')
+
+
+def test_the_badge_is_the_sensor_ga_heating_named():
+    """THE RED ONE for "Heat" where a temperature belongs.
+
+    An entity badge on a climate entity reads `current_temperature` and falls
+    back to the ENTITY'S STATE when that attribute is missing — so a room whose
+    thermometer has not reported shows its hvac mode next to a thermometer icon
+    (seen during boot on a device 2026-10-01; it would sit there for as long as a
+    sensor stayed offline, not only while booting).
+
+    `temperature_source` is ga_heating's own answer to which thermometer is this
+    room's, so reading it keeps the one-place rule AND gives the badge an entity
+    whose state IS the temperature.
+    """
+    b = _badges(_ROOM_SRC, _SOURCED)
+    assert b is not None, "no Heizung heading built — the test would be vacuous"
+    assert b[0] == {"type": "entity", "entity": "sensor.wz_t", "name": "Temperatur",
+                    "icon": "mdi:thermometer"}, b
+    assert "state_content" not in b[0], (
+        "a sensor's own state is the temperature; asking for an attribute would "
+        "reintroduce the fallback this fixes"
+    )
+
+
+def test_a_room_reading_its_valve_keeps_the_climate_entity():
+    """ga_heating reports `temperature_source: "valve"` — not an entity id, so
+    there is no sensor to point at. The climate entity still carries the number
+    ga_heating decided on, which beats picking a sensor ourselves and disagreeing
+    with the heating."""
+    states = """{
+      "climate.wz": { state: "heat", attributes: { current_temperature: 23.9,
+                      temperature: 21, temperature_source: "valve" } },
+      "sensor.wz_h": { state: "48", attributes: { device_class: "humidity" } }
+    }"""
+    room = ('{ name: "WZ", climate: ["climate.wz"], temps: [],'
+            ' hums: ["sensor.wz_h"], batts: [], lights: [], switches: [] }')
+    b = _badges(room, states)
+    assert b[0]["entity"] == "climate.wz"
+    assert b[0]["state_content"] == "current_temperature"
+
+
+def test_an_older_ga_heating_without_the_attribute_still_gets_a_badge():
+    """The attribute is not guaranteed; a device one release behind must not lose
+    its temperature badge over it."""
+    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: [],'
+                ' batts: [], lights: [], switches: [] }', _STATES)
+    assert b[0]["entity"] == "climate.wz"
+    assert b[0]["icon"] == "mdi:thermometer"

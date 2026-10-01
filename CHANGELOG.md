@@ -68,6 +68,18 @@
   falling back to "Heizplan" only moved the duplication one line up. A
   hand-written config that sets a `title` still gets it.
 
+- **The temperature badge reads the sensor ga_heating named, not the thermostat.**
+  An entity badge on a climate entity shows `current_temperature` and falls back to
+  the ENTITY'S STATE when that attribute is missing — so a room whose thermometer
+  had not reported showed its hvac mode where a temperature belongs: "Heat" beside
+  a thermometer icon (seen during boot on a device 2026-10-01, and it would stay
+  for as long as a sensor was offline, not only while booting). The badge now
+  points at `temperature_source`, which is ga_heating's own answer to which
+  thermometer is this room's — so the one-place rule still holds, and the badge has
+  an entity whose state IS the temperature and reads "–" when there is none. A room
+  reading its valve ("temperature_source": "valve") and an older ga_heating without
+  the attribute keep the climate entity.
+
 - **The room's temperature badge carries a thermometer.** Read off the ga_heating
   room entity, it inherited that entity's icon — the thermostat dial, which is the
   control, not the reading (seen on a device 2026-09-30). `mdi:thermometer` is now
