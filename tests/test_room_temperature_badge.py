@@ -280,6 +280,9 @@ def test_every_graph_card_styles_away_HAs_history_chevron():
     assert cards, "no graph built — the test would be vacuous"
     for title, style in cards:
         assert title, "the title belongs on the card"
-        assert style == ".card-header a { display: none; }", (
+        assert "a { display: none; }" in style, (
             f"{title!r} would show HA's history chevron"
         )
+        # that header is an <h1>, styled for a page title; it sits under two
+        # headings on a room view and must not shout over them
+        assert "font-size: 16px" in style, f"{title!r} keeps HA's page-title size"

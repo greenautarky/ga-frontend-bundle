@@ -217,17 +217,30 @@ async function fetchHomeModel(hass) {
  * server, so there are no null reads and no client-side category logic.
  * ------------------------------------------------------------------------- */
 
-//: A graph card's TITLE belongs on the card — but Home Assistant puts a chevron
-//: in that header, linking to the History panel filtered to the card's entities.
-//: `hui-history-graph-card` renders the `<a>` whenever a title exists and offers
-//: no way to turn it off, so a resident's room view grows a one-way door into an
-//: admin-shaped page.
+//: What a graph card needs beyond its data, and why each line is here.
+//:
+//: THE LINK. Home Assistant puts a chevron in a titled card's header, linking to
+//: the History panel filtered to that card's entities. `hui-history-graph-card`
+//: renders the `<a>` whenever a title exists and offers no way to turn it off, so
+//: a resident's room view grows a one-way door into an admin-shaped page. The
+//: title belongs on the card, so the LINK is what goes.
+//:
+//: THE HEADER SIZE. That header is an `<h1>`, styled for a page title: on a room
+//: view it shouted over the "Heizung" and "Verlauf" headings it sits under. 16px
+//: matches those headings and our own cards' `.hdr`.
 //:
 //: card-mod is already injected on every GA dashboard (const.COMMUNITY_INJECT_
-//: ASSET_IDS) for exactly this class of problem, so the link is styled away and
-//: the title stays where it reads best: inside the box.
-const NO_HISTORY_LINK = {
-  card_mod: { style: ".card-header a { display: none; }" },
+//: ASSET_IDS) for exactly this class of problem.
+const GRAPH_CHROME = {
+  card_mod: {
+    style: ".card-header { font-size: 16px; font-weight: 600; line-height: 1.4; "
+      + "padding: 12px 16px 0; } .card-header a { display: none; }",
+  },
+  //: Both 24 h charts and the thermostat above them on ONE screen, without
+  //: scrolling — the whole room at a glance is the point of the view. `rows` is
+  //: the sections grid's own height unit, so the chart is sized by the layout
+  //: rather than by a pixel height that a different screen would get wrong.
+  grid_options: { columns: 12, rows: 4 },
 };
 
 /** The heating control card for one climate entity, per the chosen style. */
@@ -427,7 +440,7 @@ function roomSections(room, opt, hass) {
       ? [{ entity: graphTemps[0], name: "Raum Temperatur" }]
       : graphTemps;
     history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
-      stat_types: ["mean"], days_to_show: 1, period: "hour", ...NO_HISTORY_LINK });
+      stat_types: ["mean"], days_to_show: 1, period: "hour", ...GRAPH_CHROME });
   }
   if (hasHistory && hums.length) {
     // Named for the same reason the temperature curve is: left to itself the card
@@ -439,7 +452,7 @@ function roomSections(room, opt, hass) {
       : hums;
     history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h",
       entities, stat_types: ["mean"], days_to_show: 1, period: "hour",
-      ...NO_HISTORY_LINK });
+      ...GRAPH_CHROME });
   }
   if (history.length) {
     sections.push({ type: "grid", cards: [

@@ -350,4 +350,6 @@ def test_the_curves_are_still_there():
         assert card["entities"], f"{card['title']!r} charts nothing"
         assert card["days_to_show"] == 1 and card["period"] == "hour"
         # the title brings HA's history chevron with it; card-mod takes it away
-        assert card["card_mod"]["style"] == ".card-header a { display: none; }"
+        assert "a { display: none; }" in card["card_mod"]["style"]
+        # …and both charts have to fit on one screen with the control above them
+        assert card["grid_options"] == {"columns": 12, "rows": 4}

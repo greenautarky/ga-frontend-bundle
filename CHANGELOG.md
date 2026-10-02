@@ -34,7 +34,12 @@
   resident's room view into an admin-shaped page. Moving the words to a heading above
   the card took the chevron away but also took the title out of the box, so the LINK
   is what goes instead. card-mod is already injected on every GA dashboard for
-  exactly this class of problem.
+  exactly this class of problem. The same rule brings that header down to 16px: it
+  is an `<h1>` styled for a page title, and on a room view it shouted over the
+  "Heizung" and "Verlauf" headings it sits under. The cards also carry
+  `grid_options: {columns: 12, rows: 4}`, so both 24 h charts and the control above
+  them fit on one screen without scrolling — sized in the sections grid's own unit
+  rather than a pixel height that a different screen would get wrong.
 
 - **New: `ga-heating-log-card` — the last few changes to a room, with timestamps.**
   Asked for on 2026-09-30, and the core logbook card cannot answer it here for two
