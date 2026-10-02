@@ -343,14 +343,11 @@ def test_the_curves_are_still_there():
     chart is the correct answer here — asserting two would pin the FIXTURE
     rather than the behaviour.
 
-    The chart is found by POSITION, not by title: a graph card carrying a title
-    is what makes Home Assistant add its history chevron, so the title lives on
-    a `heading` card above it (see test_room_temperature_badge).
     """
     cards = _history_cards()
-    assert len(cards) == 1, cards
+    assert [c["title"] for c in cards] == ["Temperatur letzte 24h"], cards
     for card in cards:
-        assert not card.get("title"), "a title here brings HA's history chevron back"
-        assert card["entities"], "the chart charts nothing"
+        assert card["entities"], f"{card['title']!r} charts nothing"
         assert card["days_to_show"] == 1 and card["period"] == "hour"
-    assert _history_headings() == ["Temperatur letzte 24h"]
+        # the title brings HA's history chevron with it; card-mod takes it away
+        assert card["card_mod"]["style"] == ".card-header a { display: none; }"

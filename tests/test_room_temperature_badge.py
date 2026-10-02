@@ -118,23 +118,11 @@ def test_the_temperature_badge_carries_a_thermometer_from_either_source():
 
 
 def _temp_graph(room: str, states: str):
-    """The temperature chart, found by the SUBTITLE above it.
-
-    Not by `c.title`: a graph card carrying a title is exactly what makes Home
-    Assistant render its history chevron, so the words live on a `heading` card
-    and the chart that follows it is the one meant.
-    """
     expr = f"""(() => {{
       const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
-      const cards = roomSections({room}, gaOptions({{}}), hass)
-        .flatMap(s => s.cards || []);
-      let wanted = false;
-      for (const c of cards) {{
-        if (c.type === "heading" && /Temperatur/.test(c.heading || "")) wanted = true;
-        else if (c.type === "heading") wanted = false;
-        else if (wanted && c.type === "statistics-graph") return c;
-      }}
-      return null;
+      const secs = roomSections({room}, gaOptions({{}}), hass);
+      return secs.flatMap(s => s.cards || [])
+        .find(c => c.type === "statistics-graph" && /Temperatur/.test(c.title)) || null;
     }})()"""
     return run_js(STRATEGY, expr)
 
@@ -160,15 +148,7 @@ def test_the_valves_own_thermometer_is_not_a_second_curve():
 
 
 def test_the_title_says_letzte_24h():
-    """On the heading now — see `_temp_graph`."""
-    headings = run_js(STRATEGY, f"""(() => {{
-      const hass = {{ config: {{ components: ["history"] }}, states: {_VALVE_STATES} }};
-      return roomSections({_ROOM}, gaOptions({{}}), hass)
-        .flatMap(s => s.cards || [])
-        .filter(c => c.type === "heading" && c.heading_style === "subtitle")
-        .map(c => c.heading);
-    }})()""")
-    assert "Temperatur letzte 24h" in headings
+    assert _temp_graph(_ROOM, _VALVE_STATES)["title"] == "Temperatur letzte 24h"
 
 
 def test_a_room_whose_only_thermometer_is_the_valve_keeps_it_unrenamed():
@@ -281,23 +261,25 @@ def test_an_older_ga_heating_without_the_attribute_still_gets_a_badge():
     assert b[0]["icon"] == "mdi:thermometer"
 
 
-def test_a_graph_card_carries_no_title_so_HA_adds_no_history_link():
-    """Home Assistant gives a graph card with a `title` a header, and inside it a
-    chevron linking to the History panel filtered to those entities. It is not
-    configurable — `hui-history-graph-card` renders the <a> whenever a title
-    exists — and it is a link into an admin-shaped page from a resident's room
-    view. The words move to a `heading` card, which carries nothing."""
+def test_every_graph_card_styles_away_HAs_history_chevron():
+    """A graph card with a `title` gets a header, and inside it a chevron linking
+    to the History panel filtered to those entities: `hui-history-graph-card`
+    renders that `<a>` whenever a title exists, with no way to turn it off. It is
+    a one-way door from a resident's room view into an admin-shaped page.
+
+    The title belongs on the card, so the LINK is what goes. card-mod is already
+    injected on every GA dashboard for exactly this class of problem.
+    """
     cards = run_js(STRATEGY, f"""(() => {{
       const hass = {{ config: {{ components: ["history"] }}, states: {_SOURCED} }};
       return roomSections({_ROOM_SRC}, gaOptions({{}}), hass)
         .flatMap(s => s.cards || [])
-        .filter(c => c.type === "statistics-graph" || c.type === "heading")
-        .map(c => [c.type, c.title || c.heading, c.heading_style || ""]);
+        .filter(c => c.type === "statistics-graph")
+        .map(c => [c.title, (c.card_mod || {{}}).style || ""]);
     }})()""")
-    graphs = [c for c in cards if c[0] == "statistics-graph"]
-    assert graphs, "no graph built — the test would be vacuous"
-    for g in graphs:
-        assert not g[1], f"a graph card still carries a title: {g}"
-    subtitles = [c[1] for c in cards if c[2] == "subtitle"]
-    assert "Temperatur letzte 24h" in subtitles
-    assert "Luftfeuchtigkeit letzte 24h" in subtitles
+    assert cards, "no graph built — the test would be vacuous"
+    for title, style in cards:
+        assert title, "the title belongs on the card"
+        assert style == ".card-header a { display: none; }", (
+            f"{title!r} would show HA's history chevron"
+        )

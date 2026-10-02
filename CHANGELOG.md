@@ -27,12 +27,14 @@
 - **AUS is a dark neutral, not the brand colour.** Painted in the theme's primary
   like KI, "off" read as a state somebody was pleased about; `--ga-off` (default
   `#616161`) says only that the room is off.
-- **The 24 h graph cards carry no title, so Home Assistant adds no history link.**
+- **The 24 h graph cards keep their title and lose Home Assistant's history link.**
   A graph card with a `title` gets a header, and inside it a chevron linking to the
   History panel filtered to those entities — `hui-history-graph-card` renders that
-  `<a>` whenever a title exists, with no option to suppress it. It was a one-way door
-  from a resident's room view into an admin-shaped page. The words move to a
-  `heading` card above each graph, which carries nothing.
+  `<a>` whenever a title exists, with no option to suppress it: a one-way door from a
+  resident's room view into an admin-shaped page. Moving the words to a heading above
+  the card took the chevron away but also took the title out of the box, so the LINK
+  is what goes instead. card-mod is already injected on every GA dashboard for
+  exactly this class of problem.
 
 - **New: `ga-heating-log-card` — the last few changes to a room, with timestamps.**
   Asked for on 2026-09-30, and the core logbook card cannot answer it here for two

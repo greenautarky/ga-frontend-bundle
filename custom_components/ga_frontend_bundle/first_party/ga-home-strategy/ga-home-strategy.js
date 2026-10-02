@@ -217,6 +217,19 @@ async function fetchHomeModel(hass) {
  * server, so there are no null reads and no client-side category logic.
  * ------------------------------------------------------------------------- */
 
+//: A graph card's TITLE belongs on the card — but Home Assistant puts a chevron
+//: in that header, linking to the History panel filtered to the card's entities.
+//: `hui-history-graph-card` renders the `<a>` whenever a title exists and offers
+//: no way to turn it off, so a resident's room view grows a one-way door into an
+//: admin-shaped page.
+//:
+//: card-mod is already injected on every GA dashboard (const.COMMUNITY_INJECT_
+//: ASSET_IDS) for exactly this class of problem, so the link is styled away and
+//: the title stays where it reads best: inside the box.
+const NO_HISTORY_LINK = {
+  card_mod: { style: ".card-header a { display: none; }" },
+};
+
 /** The heating control card for one climate entity, per the chosen style. */
 function thermostatCard(entity, roomName, style, header = "Steuerung") {
   if (["classic", "dial", "setpoint"].includes(style)) {
@@ -413,16 +426,8 @@ function roomSections(room, opt, hass) {
     const entities = (graphTemps.length === 1 && roomTemps.length)
       ? [{ entity: graphTemps[0], name: "Raum Temperatur" }]
       : graphTemps;
-    // TITLE ABOVE THE CARD, NOT ON IT. Home Assistant gives a graph card with a
-    // `title` a header — and inside that header, a chevron linking to the History
-    // panel filtered to these entities. It is not configurable (hui-history-graph
-    // -card renders the <a> whenever a title exists), and it is a link into an
-    // admin-shaped page from a resident's room view. A `heading` card carries the
-    // same words with nothing attached.
-    history.push({ type: "heading", heading: "Temperatur letzte 24h",
-      heading_style: "subtitle" });
-    history.push({ type: "statistics-graph", entities,
-      stat_types: ["mean"], days_to_show: 1, period: "hour" });
+    history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
+      stat_types: ["mean"], days_to_show: 1, period: "hour", ...NO_HISTORY_LINK });
   }
   if (hasHistory && hums.length) {
     // Named for the same reason the temperature curve is: left to itself the card
@@ -432,10 +437,9 @@ function roomSections(room, opt, hass) {
     const entities = hums.length === 1
       ? [{ entity: hums[0], name: "Raum Luftfeuchtigkeit" }]
       : hums;
-    history.push({ type: "heading", heading: "Luftfeuchtigkeit letzte 24h",
-      heading_style: "subtitle" });
-    history.push({ type: "statistics-graph", entities,
-      stat_types: ["mean"], days_to_show: 1, period: "hour" });
+    history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h",
+      entities, stat_types: ["mean"], days_to_show: 1, period: "hour",
+      ...NO_HISTORY_LINK });
   }
   if (history.length) {
     sections.push({ type: "grid", cards: [
