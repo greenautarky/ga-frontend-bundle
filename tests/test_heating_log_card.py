@@ -225,8 +225,19 @@ def test_the_history_diff_is_reversed_into_the_same_order():
 
 def test_the_strategy_places_it_under_the_thermostat_behind_an_option():
     src = STRATEGY.read_text(encoding="utf-8")
-    assert 'if (opt.changeLog) cards.push({ type: "custom:ga-heating-log-card", entity });' in src
+    assert 'cards.push({ type: "custom:ga-heating-log-card", entity, title: "Aktivität" });' in src
     assert "changeLog: c.change_log === true," in src, "must default OFF while new"
+
+
+def test_the_title_is_home_assistants_own_german_for_this():
+    """HA's translation maps `panel.logbook` to "Aktivität" (it rebuilt the
+    Logbook as the Activity view); `panel.history` is "Verlauf", which is already
+    the heading over the 24 h charts. Taking HA's word means this card and a stock
+    HA page never call the same thing by two names — the reason the thermostat
+    card says "Leerlauf"."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert 'title: "Aktivität"' in src
+    assert 'title: "Verlauf"' not in src, "that is HA's word for the history panel"
 
 
 # ── the component's own entries win (ga_heating 0.12.0) ─────────────────────

@@ -362,7 +362,15 @@ function roomSections(room, opt, hass) {
       // (2026-09-30). Directly under it on purpose: "was heating on last night"
       // is a question about the thing you are looking at, and a log on a tab of
       // its own is a log nobody opens.
-      if (opt.changeLog) cards.push({ type: "custom:ga-heating-log-card", entity });
+      // "Aktivität" is Home Assistant's OWN German for this: its translation file
+      // maps `panel.logbook` to it (HA rebuilt the Logbook as the Activity view),
+      // while `panel.history` is "Verlauf" — already the heading over the 24 h
+      // charts. Taking HA's word means this card and a stock HA page never call
+      // the same thing by two names, the same reason the thermostat card says
+      // "Leerlauf". The title rides ON the card, like every other title here.
+      if (opt.changeLog) {
+        cards.push({ type: "custom:ga-heating-log-card", entity, title: "Aktivität" });
+      }
     }
     sections.push({ type: "grid", cards });
   }
