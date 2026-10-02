@@ -59,6 +59,12 @@
   an open window. The entries are observations for exactly that reason — the
   reason belongs in the integration, which already models it.
 
+  Titled **"Aktivität"** — Home Assistant's own German for this: its translation
+  file maps `panel.logbook` to it (HA rebuilt the Logbook as the Activity view),
+  while `panel.history` is "Verlauf", already the heading over the 24 h charts.
+  Taking HA's word means this card and a stock HA page never call the same thing by
+  two names, which is also why the thermostat card says "Leerlauf".
+
   Placed under the thermostat by the strategy behind `change_log: true`, DEFAULT
   OFF while the feature is new: a card that reads the recorder on every room view
   is a cost every device would otherwise pay for something nobody has judged yet.
