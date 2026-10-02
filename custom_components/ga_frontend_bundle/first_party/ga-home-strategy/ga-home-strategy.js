@@ -413,7 +413,15 @@ function roomSections(room, opt, hass) {
     const entities = (graphTemps.length === 1 && roomTemps.length)
       ? [{ entity: graphTemps[0], name: "Raum Temperatur" }]
       : graphTemps;
-    history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
+    // TITLE ABOVE THE CARD, NOT ON IT. Home Assistant gives a graph card with a
+    // `title` a header — and inside that header, a chevron linking to the History
+    // panel filtered to these entities. It is not configurable (hui-history-graph
+    // -card renders the <a> whenever a title exists), and it is a link into an
+    // admin-shaped page from a resident's room view. A `heading` card carries the
+    // same words with nothing attached.
+    history.push({ type: "heading", heading: "Temperatur letzte 24h",
+      heading_style: "subtitle" });
+    history.push({ type: "statistics-graph", entities,
       stat_types: ["mean"], days_to_show: 1, period: "hour" });
   }
   if (hasHistory && hums.length) {
@@ -424,7 +432,9 @@ function roomSections(room, opt, hass) {
     const entities = hums.length === 1
       ? [{ entity: hums[0], name: "Raum Luftfeuchtigkeit" }]
       : hums;
-    history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h", entities,
+    history.push({ type: "heading", heading: "Luftfeuchtigkeit letzte 24h",
+      heading_style: "subtitle" });
+    history.push({ type: "statistics-graph", entities,
       stat_types: ["mean"], days_to_show: 1, period: "hour" });
   }
   if (history.length) {

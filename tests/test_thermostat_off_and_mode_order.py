@@ -133,3 +133,21 @@ def test_nothing_is_added_to_an_off_room(variant):
 def test_the_badge_is_the_only_difference():
     assert 'act-off' in render("setpoint", "off", "off")
     assert 'act-heating' in render("setpoint", "heat", "heating")
+
+
+def test_the_off_button_is_a_neutral_not_the_brand_colour():
+    """Painted in the theme's primary like KI, "off" reads as a state somebody is
+    pleased about. A dark neutral says only that the room is off."""
+    src = CARD.read_text(encoding="utf-8")
+    assert "ga-thermostat-card .modes .m.on.off { background: var(--ga-off, #616161); }" in src
+    html = run_js(
+        CARD,
+        "(() => { const c = Object.create(GaThermostatCard.prototype);"
+        " c._manualRow = () => '';"
+        " return c._modeRow({ state: 'off', attributes:"
+        " { hvac_modes: ['off','heat','auto'] } }); })()",
+    )
+    assert 'class="m on off" data-mode="off"' in html
+    # …and the other two keep their own classes
+    assert 'class="m  heat" data-mode="heat"' in html
+    assert 'class="m  " data-mode="auto"' in html

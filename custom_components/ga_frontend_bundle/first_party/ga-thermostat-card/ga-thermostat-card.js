@@ -99,6 +99,10 @@ const STYLE = `
     color: var(--primary-text-color, #212121); }
   ga-thermostat-card .modes .m.on { background: var(--primary-color, #03a9f4); color: #fff; }
   ga-thermostat-card .modes .m.on.heat { background: var(--ga-heat, #ff8a3d); }
+  /* AUS is not a brand moment. Painted in the theme's primary like KI, "off"
+     reads as a state somebody is pleased about; a dark neutral says only that
+     the room is off, which is all it means. */
+  ga-thermostat-card .modes .m.on.off { background: var(--ga-off, #616161); }
   ga-thermostat-card .modes .m ha-icon { --mdc-icon-size: 20px; display: block; margin: 0 auto 2px; }
   ga-thermostat-card .off { text-align: center; opacity: .6; padding: 20px 0; }
   /* setpoint */
@@ -307,7 +311,7 @@ class GaThermostatCard extends HTMLElement {
     return `<div class="modes">` + MODE_LABELS
       .filter(([m]) => modes.includes(m))
       .map(([m, label, icon]) =>
-        `<button class="m ${s.state === m ? "on" : ""} ${m === "heat" ? "heat" : ""}" data-mode="${m}">` +
+        `<button class="m ${s.state === m ? "on" : ""} ${m === "heat" || m === "off" ? m : ""}" data-mode="${m}">` +
         `<ha-icon icon="${icon}"></ha-icon>${label}</button>`)
       .join("") + `</div>` + this._manualRow(s);
   }

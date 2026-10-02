@@ -259,3 +259,25 @@ def test_an_older_ga_heating_without_the_attribute_still_gets_a_badge():
                 ' batts: [], lights: [], switches: [] }', _STATES)
     assert b[0]["entity"] == "climate.wz"
     assert b[0]["icon"] == "mdi:thermometer"
+
+
+def test_a_graph_card_carries_no_title_so_HA_adds_no_history_link():
+    """Home Assistant gives a graph card with a `title` a header, and inside it a
+    chevron linking to the History panel filtered to those entities. It is not
+    configurable — `hui-history-graph-card` renders the <a> whenever a title
+    exists — and it is a link into an admin-shaped page from a resident's room
+    view. The words move to a `heading` card, which carries nothing."""
+    cards = run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {_SOURCED} }};
+      return roomSections({_ROOM_SRC}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => c.type === "statistics-graph" || c.type === "heading")
+        .map(c => [c.type, c.title || c.heading, c.heading_style || ""]);
+    }})()""")
+    graphs = [c for c in cards if c[0] == "statistics-graph"]
+    assert graphs, "no graph built — the test would be vacuous"
+    for g in graphs:
+        assert not g[1], f"a graph card still carries a title: {g}"
+    subtitles = [c[1] for c in cards if c[2] == "subtitle"]
+    assert "Temperatur letzte 24h" in subtitles
+    assert "Luftfeuchtigkeit letzte 24h" in subtitles

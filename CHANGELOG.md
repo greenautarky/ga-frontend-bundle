@@ -24,6 +24,16 @@
   control that was already there. ("off" and "cannot be changed" are not the same
   statement, and the card must not quietly make them one.)
 
+- **AUS is a dark neutral, not the brand colour.** Painted in the theme's primary
+  like KI, "off" read as a state somebody was pleased about; `--ga-off` (default
+  `#616161`) says only that the room is off.
+- **The 24 h graph cards carry no title, so Home Assistant adds no history link.**
+  A graph card with a `title` gets a header, and inside it a chevron linking to the
+  History panel filtered to those entities — `hui-history-graph-card` renders that
+  `<a>` whenever a title exists, with no option to suppress it. It was a one-way door
+  from a resident's room view into an admin-shaped page. The words move to a
+  `heading` card above each graph, which carries nothing.
+
 - **New: `ga-heating-log-card` — the last few changes to a room, with timestamps.**
   Asked for on 2026-09-30, and the core logbook card cannot answer it here for two
   independent reasons: a GA device loads `history:` but not `logbook:`, so
