@@ -118,11 +118,23 @@ def test_the_temperature_badge_carries_a_thermometer_from_either_source():
 
 
 def _temp_graph(room: str, states: str):
+    """The temperature chart, found by the SUBTITLE above it.
+
+    Not by `c.title`: a graph card carrying a title is exactly what makes Home
+    Assistant render its history chevron, so the words live on a `heading` card
+    and the chart that follows it is the one meant.
+    """
     expr = f"""(() => {{
       const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
-      const secs = roomSections({room}, gaOptions({{}}), hass);
-      return secs.flatMap(s => s.cards || [])
-        .find(c => c.type === "statistics-graph" && /Temperatur/.test(c.title)) || null;
+      const cards = roomSections({room}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || []);
+      let wanted = false;
+      for (const c of cards) {{
+        if (c.type === "heading" && /Temperatur/.test(c.heading || "")) wanted = true;
+        else if (c.type === "heading") wanted = false;
+        else if (wanted && c.type === "statistics-graph") return c;
+      }}
+      return null;
     }})()"""
     return run_js(STRATEGY, expr)
 
@@ -148,7 +160,15 @@ def test_the_valves_own_thermometer_is_not_a_second_curve():
 
 
 def test_the_title_says_letzte_24h():
-    assert _temp_graph(_ROOM, _VALVE_STATES)["title"] == "Temperatur letzte 24h"
+    """On the heading now — see `_temp_graph`."""
+    headings = run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {_VALVE_STATES} }};
+      return roomSections({_ROOM}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => c.type === "heading" && c.heading_style === "subtitle")
+        .map(c => c.heading);
+    }})()""")
+    assert "Temperatur letzte 24h" in headings
 
 
 def test_a_room_whose_only_thermometer_is_the_valve_keeps_it_unrenamed():

@@ -309,6 +309,17 @@ def _history_cards(hass: str = _HASS, room: str = _ROOM):
     return run_js(STRATEGY, expr)
 
 
+def _history_headings(hass: str = _HASS, room: str = _ROOM):
+    """The subtitles above the charts — where the titles went."""
+    expr = f"""(() => {{
+      const secs = roomSections({room}, gaOptions({{}}), {hass});
+      return secs.flatMap(s => (s.cards || [])
+        .filter(c => c.type === "heading" && c.heading_style === "subtitle")
+        .map(c => c.heading));
+    }})()"""
+    return run_js(STRATEGY, expr)
+
+
 def test_each_sensor_contributes_one_curve_not_three():
     """THE RED ONE. `statistics-graph` labels each series with the ENTITY's
     name and never says which statistic it is, so min/mean/max drew three
@@ -331,9 +342,15 @@ def test_the_curves_are_still_there():
     The fixture room carries a temperature sensor and no humidity one, so one
     chart is the correct answer here — asserting two would pin the FIXTURE
     rather than the behaviour.
+
+    The chart is found by POSITION, not by title: a graph card carrying a title
+    is what makes Home Assistant add its history chevron, so the title lives on
+    a `heading` card above it (see test_room_temperature_badge).
     """
     cards = _history_cards()
-    assert [c["title"] for c in cards] == ["Temperatur letzte 24h"], cards
+    assert len(cards) == 1, cards
     for card in cards:
-        assert card["entities"], f"{card['title']!r} charts nothing"
+        assert not card.get("title"), "a title here brings HA's history chevron back"
+        assert card["entities"], "the chart charts nothing"
         assert card["days_to_show"] == 1 and card["period"] == "hour"
+    assert _history_headings() == ["Temperatur letzte 24h"]
