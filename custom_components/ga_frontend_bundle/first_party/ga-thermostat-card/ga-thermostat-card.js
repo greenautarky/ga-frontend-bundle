@@ -25,7 +25,10 @@
  * Config:
  *   type: custom:ga-thermostat-card
  *   entity: climate.wohnzimmer
- *   header: "Steuerung"             # optional, default "Steuerung"
+ *   header: "Steuerung"             # optional, default "Steuerung"; "" = no
+ *                                  # title (the room heading above already
+ *                                  # says what the card is); the running-
+ *                                  # state badge then takes its place
  *   variant: classic|dial|setpoint  # optional, default "classic"
  *   show_current: true             # optional, default FALSE — the card shows the
  *                                  # TARGET only; true puts the measured room
@@ -45,10 +48,15 @@ const COMMIT_DELAY_MS = 400;
 //: nothing, so "wait for confirmation" is a wait that never ends.
 const PENDING_TTL_MS = 8000;
 
+//: AUS ... MANUEL ... KI, left to right — least heating to most, so the row
+//: reads as one scale instead of three unrelated buttons. Asked for 2026-09-30.
+//: ORDER IS PRESENTATION ONLY: each button carries its own `data-mode` and the
+//: click handler reads THAT (`_wireCommon`), never a position, so the services
+//: called are unchanged.
 const MODE_LABELS = [
-  ["auto", "KI", "mdi:brain"],
-  ["heat", "MANUEL", "mdi:hand-back-left"],
   ["off", "AUS", "mdi:power"],
+  ["heat", "MANUEL", "mdi:hand-back-left"],
+  ["auto", "KI", "mdi:brain"],
 ];
 
 // Dial geometry: a 270° arc with a 90° gap at the bottom (0° = top, clockwise).
@@ -57,11 +65,16 @@ const DIAL = { size: 200, c: 100, r: 82, start: -135, sweep: 270 };
 const STYLE = `
   ga-thermostat-card .ga-body { padding: 16px; }
   ga-thermostat-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 10px; }
+  /* No title: the badge takes the title's place, left. A float in an otherwise
+     empty line collapses the line and lets the value wrap up beside the badge. */
+  ga-thermostat-card .hdr.notitle .act { float: none; }
   /* The running state is a WORD first; the colour only reinforces it. A badge
      that says nothing without colour says nothing to a reader who cannot
      distinguish it. */
-  ga-thermostat-card .act { float: right; font-size: 12px; font-weight: 600;
+  ga-thermostat-card .act { float: right; display: inline-flex; align-items: center;
+    gap: 4px; font-size: 12px; font-weight: 600;
     padding: 1px 8px; border-radius: 10px; opacity: 1; }
+  ga-thermostat-card .act ha-icon { --mdc-icon-size: 14px; }
   ga-thermostat-card .act-heating { background: rgba(230,126,34,.16); color: #b95b0b; }
   ga-thermostat-card .act-idle { background: rgba(127,140,141,.16); color: #5d6d6e; }
   ga-thermostat-card .act-off { background: rgba(127,140,141,.12); color: #7f8c8d; }
@@ -86,8 +99,12 @@ const STYLE = `
     color: var(--primary-text-color, #212121); }
   ga-thermostat-card .modes .m.on { background: var(--primary-color, #03a9f4); color: #fff; }
   ga-thermostat-card .modes .m.on.heat { background: var(--ga-heat, #ff8a3d); }
+  /* AUS is not a brand moment. Painted in the theme's primary like KI, "off"
+     reads as a state somebody is pleased about; a dark neutral says only that
+     the room is off, which is all it means. */
+  ga-thermostat-card .modes .m.on.off { background: var(--ga-off, #616161); }
   ga-thermostat-card .modes .m ha-icon { --mdc-icon-size: 20px; display: block; margin: 0 auto 2px; }
-  ga-thermostat-card .off, ga-thermostat-card .offmsg { text-align: center; opacity: .6; padding: 20px 0; }
+  ga-thermostat-card .off { text-align: center; opacity: .6; padding: 20px 0; }
   /* setpoint */
   ga-thermostat-card .sp .cur { text-align: center; opacity: .6; font-size: 13px; margin-bottom: 4px; }
   ga-thermostat-card .sp .big { display: flex; align-items: center; justify-content: center;
@@ -294,7 +311,7 @@ class GaThermostatCard extends HTMLElement {
     return `<div class="modes">` + MODE_LABELS
       .filter(([m]) => modes.includes(m))
       .map(([m, label, icon]) =>
-        `<button class="m ${s.state === m ? "on" : ""} ${m === "heat" ? "heat" : ""}" data-mode="${m}">` +
+        `<button class="m ${s.state === m ? "on" : ""} ${m === "heat" || m === "off" ? m : ""}" data-mode="${m}">` +
         `<ha-icon icon="${icon}"></ha-icon>${label}</button>`)
       .join("") + `</div>` + this._manualRow(s);
   }
@@ -313,7 +330,8 @@ class GaThermostatCard extends HTMLElement {
       this._root.innerHTML = `<div class="ga-body off">Thermostat nicht verfügbar</div>`;
       return;
     }
-    const header = this._config.header || "Steuerung";
+    // `??`, not `||`: an empty string is a request for no title, not a missing one.
+    const header = this._config.header ?? "Steuerung";
     if (this._variant === "dial") this._renderDial(s, header);
     else if (this._variant === "setpoint") this._renderSetpoint(s, header);
     else this._renderClassic(s, header);
@@ -332,32 +350,37 @@ class GaThermostatCard extends HTMLElement {
     const big = this._showCurrent
       ? `<div class="val">${cur != null ? `${Number(cur).toFixed(1)}<small> °C</small>` : "–"}</div>`
       : `<div class="val target">${tTxt}</div>`;
-    const setRow = (target != null && heating)
+    //: `heating` is deliberately NOT a condition here any more. An off room keeps
+    //: the same body and the same −/+ (asked for 2026-09-30); pressing one is a
+    //: setpoint, which ga_heating treats as a manual change — so the room leaves
+    //: AUS and heats. That is the resident's intent, expressed on the one control
+    //: that was already there.
+    const setRow = (target != null)
       ? `<div class="set"><button data-delta="-1" aria-label="kälter">−</button>` +
         (this._showCurrent ? `<div class="target">${Number(target).toFixed(1)} °C</div>` : "") +
         `<button data-delta="1" aria-label="wärmer">+</button></div>`
       : "";
-    this._root.innerHTML = `<div class="ga-body"><div class="hdr">${header}${this._actionBadge(s)}</div>` +
+    this._root.innerHTML = `<div class="ga-body">${this._hdr(s, header)}` +
       `${big}${setRow}${this._modeRow(s)}</div>`;
   }
 
   _renderSetpoint(s, header) {
     const cur = s.attributes.current_temperature;
     const target = s.attributes.temperature;
-    const heating = s.state !== "off";
-    const body = heating
-      ? (this._showCurrent
-          ? `<div class="cur">aktuell ${cur != null ? Number(cur).toFixed(1) : "–"} °C</div>`
-          : "") +
-        `<div class="big"><button data-delta="-1">−</button>` +
-        `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
-        `<button data-delta="1">+</button></div>`
-      : `<div class="offmsg">Heizung aus</div>`;
-    this._root.innerHTML = `<div class="ga-body sp"><div class="hdr">${header}${this._actionBadge(s)}</div>${body}${this._modeRow(s)}</div>`;
+    //: One body for every state — an off room renders exactly like a heating one.
+    //: See `setRow` in _renderClassic for why its −/+ stay live.
+    const body =
+      (this._showCurrent
+        ? `<div class="cur">aktuell ${cur != null ? Number(cur).toFixed(1) : "–"} °C</div>`
+        : "") +
+      `<div class="big"><button data-delta="-1">−</button>` +
+      `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
+      `<button data-delta="1">+</button></div>`;
+    this._root.innerHTML = `<div class="ga-body sp">${this._hdr(s, header)}${body}${this._modeRow(s)}</div>`;
   }
 
   _renderDial(s, header) {
-    this._root.innerHTML = `<div class="ga-body dl"><div class="hdr">${header}${this._actionBadge(s)}</div>` +
+    this._root.innerHTML = `<div class="ga-body dl">${this._hdr(s, header)}` +
       `<div class="dialwrap">${this._dialSVG(s)}</div>${this._modeRow(s)}</div>`;
   }
 
@@ -388,19 +411,38 @@ class GaThermostatCard extends HTMLElement {
    * word it less definitely. Guessing is acceptable; presenting a guess as a
    * reading is not.
    */
+  //: One icon per running state, next to the word — never instead of it.
+  //: The radiator pair (2026-09-30) shows the THING, hot or cold, rather than a
+  //: generic symbol: a resident reads a radiator faster than a flame or a pause
+  //: bar. `off` keeps mdi:power, the AUS mode button's own icon.
+  //:
+  //: "Leerlauf" (2026-09-30) is Home Assistant's own German for `hvac_action:
+  //: idle`, so this card and a stock HA card never say different words about the
+  //: same reading. It also says only what was READ: a valve reports `idle` with
+  //: an open window too, where "Temperatur erreicht" or "Warm genug" would be a
+  //: claim about a room nobody measured.
+  static ACTION_ICONS = { heating: "mdi:radiator", idle: "mdi:radiator-off", off: "mdi:power" };
+
   _action(s) {
     if (s.state === "off") return { key: "off", label: "Aus", inferred: false };
     const action = s.attributes.hvac_action;
     if (action === "heating") return { key: "heating", label: "Heizt", inferred: false };
-    if (action === "idle") return { key: "idle", label: "Bereit", inferred: false };
+    if (action === "idle") return { key: "idle", label: "Leerlauf", inferred: false };
     if (action === "off") return { key: "off", label: "Aus", inferred: false };
     const cur = s.attributes.current_temperature, t = s.attributes.temperature;
     if (cur != null && t != null) {
       return Number(t) > Number(cur)
         ? { key: "heating", label: "Heizt", inferred: true }
-        : { key: "idle", label: "Bereit", inferred: true };
+        : { key: "idle", label: "Leerlauf", inferred: true };
     }
     return { key: "unknown", label: "", inferred: true };
+  }
+
+  /** The title line every variant shows: title, running-state badge, or both. */
+  _hdr(s, header) {
+    const badge = this._actionBadge(s);
+    if (header) return `<div class="hdr">${header}${badge}</div>`;
+    return badge ? `<div class="hdr notitle">${badge}</div>` : "";
   }
 
   /** The badge every variant shows. Empty string when there is nothing to say. */
@@ -410,7 +452,9 @@ class GaThermostatCard extends HTMLElement {
     const title = a.inferred
       ? ' title="abgeleitet aus Soll und Ist — dieses Thermostat meldet seinen Betriebszustand nicht"'
       : "";
-    return `<span class="act act-${a.key}"${title}>${a.label}</span>`;
+    const icon = GaThermostatCard.ACTION_ICONS[a.key];
+    const ico = icon ? `<ha-icon icon="${icon}"></ha-icon>` : "";
+    return `<span class="act act-${a.key}"${title}>${ico}${a.label}</span>`;
   }
 
   _actionLabel(s) { return this._action(s).label; }

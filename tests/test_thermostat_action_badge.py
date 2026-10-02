@@ -63,7 +63,7 @@ def test_an_idle_valve_is_not_called_heating_just_because_the_target_is_higher()
     what an open window or a closed valve looks like."""
     import json
     a = json.loads(_action(hvac_action="idle", current_temperature=21.0, temperature=22.0))
-    assert a["label"] == "Bereit"
+    assert a["label"] == "Leerlauf"
     assert a["key"] == "idle"
     assert a["inferred"] is False
 
@@ -117,10 +117,14 @@ def test_every_variant_renders_the_badge():
         "green on a card that renders nothing."
     )
     for variant, body in bodies.items():
-        assert "_actionBadge" in body, f"{variant} renders no running state"
+        assert "this._hdr(s, header)" in body, f"{variant} renders no running state"
+    # …and the shared title line carries the badge, with a title and without one
+    # (test_thermostat_header_optional.py renders both).
+    hdr = re.search(r"\n  _hdr\(s, header\) \{(.*?)\n  \}", src, re.S)
+    assert hdr and "_actionBadge" in hdr.group(1)
 
 
 def test_the_badge_carries_a_word_and_not_only_a_colour():
     """A state rendered as colour alone is not rendered for everyone."""
     assert "Heizt" in _badge(hvac_action="heating")
-    assert "Bereit" in _badge(hvac_action="idle")
+    assert "Leerlauf" in _badge(hvac_action="idle")

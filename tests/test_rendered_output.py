@@ -309,6 +309,17 @@ def _history_cards(hass: str = _HASS, room: str = _ROOM):
     return run_js(STRATEGY, expr)
 
 
+def _history_headings(hass: str = _HASS, room: str = _ROOM):
+    """The subtitles above the charts — where the titles went."""
+    expr = f"""(() => {{
+      const secs = roomSections({room}, gaOptions({{}}), {hass});
+      return secs.flatMap(s => (s.cards || [])
+        .filter(c => c.type === "heading" && c.heading_style === "subtitle")
+        .map(c => c.heading));
+    }})()"""
+    return run_js(STRATEGY, expr)
+
+
 def test_each_sensor_contributes_one_curve_not_three():
     """THE RED ONE. `statistics-graph` labels each series with the ENTITY's
     name and never says which statistic it is, so min/mean/max drew three
@@ -331,9 +342,14 @@ def test_the_curves_are_still_there():
     The fixture room carries a temperature sensor and no humidity one, so one
     chart is the correct answer here — asserting two would pin the FIXTURE
     rather than the behaviour.
+
     """
     cards = _history_cards()
-    assert [c["title"] for c in cards] == ["Temperatur (24 h)"], cards
+    assert [c["title"] for c in cards] == ["Temperatur letzte 24h"], cards
     for card in cards:
         assert card["entities"], f"{card['title']!r} charts nothing"
         assert card["days_to_show"] == 1 and card["period"] == "hour"
+        # the title brings HA's history chevron with it; card-mod takes it away
+        assert "a { display: none; }" in card["card_mod"]["style"]
+        # …and both charts have to fit on one screen with the control above them
+        assert card["grid_options"] == {"columns": 12, "rows": 4}

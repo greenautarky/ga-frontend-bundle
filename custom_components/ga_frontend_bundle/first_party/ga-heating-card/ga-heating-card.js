@@ -15,7 +15,10 @@
  * Config:
  *   type: custom:ga-heating-card
  *   entity: climate.wohnzimmer
- *   title: Wohnzimmer
+ *   title: Wohnzimmer            # optional, DEFAULT NONE. The card ships no
+ *                                # header: the view puts a "Heizplan" heading
+ *                                # above it and the tab is the room, so a
+ *                                # header inside would be a third telling.
  */
 
 const DAYS = [
@@ -239,9 +242,18 @@ class GaHeatingCard extends HTMLElement {
     this._t = setTimeout(() => { m.className = "msg"; }, 4000);
   }
 
+  //: No header unless a config asks for one (2026-09-30). It used to be the room
+  //: name, under a "Heizplan" heading, in a tab named after the room — the same
+  //: thing three times. Defaulting to "Heizplan" instead only moved the
+  //: duplication one line up, so the default is nothing at all.
+  _header() {
+    const title = this._config.title ?? "";
+    return title ? ` header="${title}"` : "";
+  }
+
   _build() {
     this.innerHTML = `
-      <ha-card header="${this._config.title || "Heizplan"}">
+      <ha-card${this._header()}>
         <div class="card-content">
           <div class="msg"></div>
           <div class="days"></div>
