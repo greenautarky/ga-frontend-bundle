@@ -872,3 +872,87 @@ def test_ending_a_sonderplan_on_nothing_does_not_report_zero_of_zero():
     """"Sonderplan in 0 von 0 Räumen aufgehoben" is a lie with a number in it."""
     got = _run({"allRooms": False, "rooms": []}, "_cancelAbsence")
     assert got["said"] == [{"kind": "err", "text": "Kein Raum ausgewählt."}]
+
+
+# --- the blocks say which buttons share a scope ------------------------------
+# "here at the beginneing we have boost and we explain it but this section isnt
+# only about boost and teh boost button is down along alle ki and..."
+# (2026-10-05).
+#
+# One heading said "Boost" over three actions, two of which are not a boost —
+# and the room picker under it governs the first and deliberately not the other
+# two. A reader had to KNOW that. It is why "Boost setzen ignores the picker"
+# went unnoticed for so long: nothing on screen claimed otherwise, and nothing
+# claimed it either.
+#
+# So the layout carries it: the picker and Boost in one block, the two whole-home
+# buttons in another under a heading that states their scope. These tests are the
+# ORDER, because order is the whole mechanism — every label here is unchanged.
+
+
+def _markup():
+    return run_js(CARD, BUILD_MARKUP)
+
+
+def _at(markup, needle):
+    """Where an ELEMENT is, not where its words are.
+
+    Anchored on the tag boundary because the first version of these tests was
+    not: a `<!-- … -->` in the template explaining why "Boost setzen ignores the
+    picker" was a defect sat earlier in the markup than the button, and the test
+    measured the prose. HTML comments are DOM.
+    """
+    i = markup.index(needle)
+    assert markup.count(needle) == 1, f"{needle!r} is not unique in the markup"
+    return i
+
+
+def test_boost_and_the_room_picker_are_one_block():
+    """The picker must come after the Boost heading and before Boost setzen, or
+    it is a control floating between two scopes again."""
+    m = _markup()
+    assert _at(m, ">Boost</h4>") < _at(m, 'class="rooms"') < _at(m, ">Boost setzen<")
+
+
+def test_the_whole_home_buttons_sit_under_their_own_heading():
+    """THE RED ONE: they were under "Boost", which is not what they do."""
+    m = _markup()
+    head = _at(m, ">Ganze Wohnung<")
+    assert _at(m, ">Boost setzen<") < head, "Boost belongs above the split"
+    assert head < _at(m, ">Alle → KI<") < _at(m, ">Alle AUS<")
+
+
+def test_the_room_picker_is_not_inside_the_whole_home_block():
+    """It does not govern those two buttons, so it must not look as though it
+    does — that mismatch is the defect this layout exists to make impossible."""
+    m = _markup()
+    assert _at(m, 'class="rooms"') < _at(m, ">Ganze Wohnung<")
+
+
+def test_ending_a_boost_stays_with_the_boost():
+    m = _markup()
+    assert _at(m, ">Boost beenden<") < _at(m, ">Ganze Wohnung<")
+
+
+def test_the_frost_line_sits_under_the_button_it_explains():
+    """It is about what AUS leaves behind, and it sat under a row where two of
+    three buttons were not AUS."""
+    m = _markup()
+    assert _at(m, ">Alle AUS<") < _at(m, "frosthint")
+
+
+def test_every_block_after_the_first_is_ruled_off():
+    """The blocks are what says which buttons share a scope, so they have to look
+    separate. A heading alone reads as a label on the row above it."""
+    m = _markup()
+    for head in ("Ganze Wohnung", "Sonderpläne (Krankheit und Urlaub)"):
+        before = m[max(0, _at(m, ">" + head + "<") - 120):_at(m, ">" + head + "<")]
+        assert "rule" in before, head
+
+
+def test_the_labels_are_untouched_by_the_regrouping():
+    """Must-not-flag. Moving buttons is not licence to rename them — these are
+    Ahmad's words from the previous system and residents read them there."""
+    m = _markup()
+    for label in ("Boost setzen", "Alle → KI", "Alle AUS"):
+        assert label in m, label

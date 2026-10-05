@@ -582,6 +582,25 @@ class GaHeatingActionsCard extends HTMLElement {
 
   // ─── UI ───────────────────────────────────────────────────────────────────
 
+  /**
+   * TWO BLOCKS, BECAUSE THERE ARE TWO SCOPES.
+   *
+   * One heading said "Boost" over three actions, two of which are not a boost —
+   * "this section isnt only about boost and teh boost button is down along alle
+   * ki and..." (2026-10-05). Worse, the room picker under that heading governs
+   * the first button and deliberately NOT the other two, whose labels say
+   * "Alle". A reader had to know that; nothing on screen said it, which is how
+   * "Boost setzen ignores the picker" stayed invisible for as long as it did.
+   *
+   * So the layout carries it: picker and Boost in one block, the two whole-home
+   * buttons in another under a heading that states their scope, and the frost
+   * line under the AUS button it explains rather than under a row where two of
+   * three buttons were not AUS. Every label is unchanged.
+   *
+   * Written here and not as an HTML comment in the template below: a comment in
+   * there is DOM. It reaches every browser, and a test looking for a button
+   * found this prose instead.
+   */
   _build() {
     this.innerHTML = `
       <ha-card header="${this._config.title || "Heizung — Ganzes Zuhause"}">
@@ -593,11 +612,14 @@ class GaHeatingActionsCard extends HTMLElement {
           <div class="quick">
             <button class="btn primary boost">Boost setzen</button>
             <button class="btn ghost end-boost" hidden>Boost beenden</button>
+          </div>
+          <h4 class="rule">Ganze Wohnung</h4>
+          <div class="quick">
             <button class="btn ki planall">Alle → KI</button>
             <button class="btn aus offall">Alle AUS</button>
           </div>
           <div class="hint frosthint"></div>
-          <h4 class="sph">Sonderpläne (Krankheit und Urlaub)</h4>
+          <h4 class="rule sph">Sonderpläne (Krankheit und Urlaub)</h4>
           <div class="status"></div>
           <div class="statusactions">
             <button class="btn ghost toggle-form"></button>
@@ -624,7 +646,10 @@ class GaHeatingActionsCard extends HTMLElement {
         ga-heating-actions-card .card-content { padding: 16px; display: grid; gap: 14px; }
         ga-heating-actions-card h4 { margin: 0; font-size: .82em; font-weight: 700;
           letter-spacing: .07em; text-transform: uppercase; color: var(--secondary-text-color, #6b7682); }
-        ga-heating-actions-card h4.sph { padding-top: 14px; border-top: 1px solid var(--divider-color, #e3e3e3); }
+        /* A rule above every block but the first — the blocks are the thing
+           that says which buttons share a scope, so they have to look separate. */
+        ga-heating-actions-card h4.rule { padding-top: 14px;
+          border-top: 1px solid var(--divider-color, #e3e3e3); }
         ga-heating-actions-card .msg { display:none; padding:9px 11px; border-radius:9px; font-size:.9em; }
         ga-heating-actions-card .msg.ok { display:block; background: rgba(76,175,80,.15); color: var(--success-color,#1d7a3a); }
         ga-heating-actions-card .msg.err { display:block; background: rgba(244,67,54,.15); color: var(--error-color,#c0392b); }
