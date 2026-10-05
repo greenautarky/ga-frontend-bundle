@@ -261,8 +261,8 @@ def test_the_attribute_is_rendered_with_its_reason():
         " c._count = 3; c._hours = 72; c._config = {};"
         " return c._listHtml(); })()",
     )
-    assert "AUS → KI" in html and "Bedienung" in html
-    assert "Soll 21,0 → 19,0 °C" in html and "Heizplan" in html
+    assert "AUS → KI" in html and "Benutzer" in html
+    assert "Soll 21,0 → 19,0 °C" in html and "System · Heizplan" in html
 
 
 def test_a_source_we_do_not_know_is_rendered_as_nothing_not_as_its_key():
@@ -318,3 +318,59 @@ def test_an_entry_with_an_offset_is_shown_in_the_viewers_clock(monkeypatch, tz, 
         " new Date('2026-10-05T16:00:00Z'))",
     )
     assert out == expected
+
+
+# ── who did it, then why (2026-10-04) ───────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("resident", "Benutzer"),
+        ("valve", "Benutzer"),
+        ("boost", "Benutzer · Boost"),
+        ("absence", "Benutzer · Urlaub"),
+        ("plan", "System · Heizplan"),
+        ("window", "System · Fenster"),
+        ("expiry", "System · Zeit abgelaufen"),
+    ],
+)
+def test_each_source_says_who_first_then_why(source, expected):
+    """"Was that me, or did the heating do it?" is the question a resident asks
+    of a log, so it is the first thing each line answers. A boost and a holiday
+    sit on the Benutzer side: somebody asked for them, even though the system
+    carried them out at a moment nobody picked."""
+    why = json.loads(run_js(
+        CARD,
+        f'JSON.stringify(describe({{kind:"mode", from:"auto", to:"heat",'
+        f' source:"{source}"}}).why)',
+    ))
+    assert why == expected
+
+
+def test_the_user_side_does_not_restate_itself():
+    """"Benutzer · Bedienung" says the same thing twice, and a hand on the
+    radiator is still the user — so neither carries a reason."""
+    for source in ("resident", "valve"):
+        why = json.loads(run_js(
+            CARD,
+            f'JSON.stringify(describe({{kind:"mode", from:"auto", to:"heat",'
+            f' source:"{source}"}}).why)',
+        ))
+        assert why == "Benutzer", why
+
+
+def test_manuell_is_not_used_for_the_user_side():
+    """MANUEL is a MODE on the thermostat card beside this one; a log saying
+    "Manuell" about a press that chose KI would read as a contradiction.
+
+    Asserted on the WORDS the card renders, not on the file: the comment above
+    `SOURCE_WORDS` explains this choice and therefore contains the word, which a
+    plain substring check reads as the defect it is there to prevent.
+    """
+    words = run_js(
+        CARD,
+        "JSON.stringify(Object.values(SOURCE_WORDS)"
+        ".flatMap(s => [s.who, s.why]).filter(Boolean))",
+    )
+    assert "Manuell" not in json.loads(words)
