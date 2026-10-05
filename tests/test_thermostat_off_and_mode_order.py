@@ -151,3 +151,31 @@ def test_the_off_button_is_a_neutral_not_the_brand_colour():
     # …and the other two keep their own classes
     assert 'class="m  heat" data-mode="heat"' in html
     assert 'class="m  " data-mode="auto"' in html
+
+
+# ── the seam with ga_heating ────────────────────────────────────────────────
+
+
+def test_a_press_on_an_off_room_sends_a_setpoint_and_nothing_else():
+    """What + on an off room puts on the wire: ONE `climate.set_temperature`,
+    no `set_hvac_mode`. The card leaves the mode change to the backend, so this
+    is only correct against ga_heating >= 0.12.0, which turns an OFF room on in
+    MANUEL for a setpoint. ga_heating 0.11.x drives the valves to `heat` and
+    leaves the room "off" — a radiator heating under an AUS label. The bundle
+    has no mechanism to declare that minimum; it is stated in CHANGELOG 1.22.0
+    and must be honoured by the OS pin (ship both in the same release)."""
+    calls = run_js(
+        CARD,
+        "(() => { const calls = [];"
+        " const c = Object.create(GaThermostatCard.prototype);"
+        " c._config = { entity: 'climate.badezimmer' };"
+        " c._hass = { callService: (d, s, data) => calls.push([d, s, data]),"
+        "   states: { 'climate.badezimmer': { state: 'off', attributes: "
+        + json.dumps(ATTRS) + " } } };"
+        " c._root = null;"
+        " c._setTemp(1); clearTimeout(c._commitTimer); c._flushTemp();"
+        " return calls; })()",
+    )
+    assert calls == [
+        ["climate", "set_temperature", {"entity_id": "climate.badezimmer", "temperature": 22}]
+    ]

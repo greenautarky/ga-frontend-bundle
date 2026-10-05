@@ -297,3 +297,24 @@ def test_the_attribute_path_makes_no_request():
     src = CARD.read_text(encoding="utf-8")
     body = src.split("set hass(hass)")[1].split("async _load")[0]
     assert "this._render();\n      return;" in body, "the published path must return early"
+
+
+# ── the timestamp is an instant ─────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("tz", "expected"),
+    [("Europe/Berlin", "Heute 14:32"), ("UTC", "Heute 12:32"), ("America/New_York", "Heute 08:32")],
+)
+def test_an_entry_with_an_offset_is_shown_in_the_viewers_clock(monkeypatch, tz, expected):
+    """ga_heating >= 0.12.0 stamps entries WITH their offset. The card renders
+    the same instant in whatever zone the browser is in — not the device's wall
+    clock re-read as local, which is what a naive timestamp did."""
+    monkeypatch.setenv("TZ", tz)
+    out = run_js(
+        CARD,
+        "formatWhen(fromAttribute([{ at: '2026-10-05T14:32:00+02:00', kind: 'target',"
+        " from: 20, to: 21, source: 'resident' }])[0].when,"
+        " new Date('2026-10-05T16:00:00Z'))",
+    )
+    assert out == expected

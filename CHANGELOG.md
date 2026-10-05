@@ -2,6 +2,18 @@
 
 ## 1.22.0
 
+> **Requires ga_heating 0.12.0 or newer — ship them together.** This release
+> shows −/+ on an off room, and a press there sends only
+> `climate.set_temperature`. ga_heating 0.12.0 turns an OFF room on in MANUEL
+> for that; on 0.11.x the radiators go to `heat` while the room stays "off", so
+> the card shows AUS over a radiator that is heating, with no manual period to
+> end it. The bundle has no mechanism to declare a minimum ga_heating version
+> (`manifest.json` `dependencies` take no versions, and listing ga_heating there
+> would stop the bundle loading on a device without it), so this is enforced
+> only by pinning both in the same OS release. The change-log card also expects
+> ga_heating 0.12.0's `changes` attribute; without it the card falls back to
+> history, which is correct but carries no reasons.
+
 - **The thermostat card's "Steuerung" title can be turned off.** It sits
   directly under the room's "Heizung" heading and says the same thing twice.
   New strategy option `thermostat_header`: unset keeps "Steuerung" (no fleet
