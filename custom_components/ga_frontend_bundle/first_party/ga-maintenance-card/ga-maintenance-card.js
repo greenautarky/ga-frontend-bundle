@@ -1,0 +1,224 @@
+/**
+ * Wartung — what in this room needs a person, and nothing else.
+ *
+ * Asked for on 2026-10-05: the battery reading had been a single badge at the
+ * top of the room, `batts.slice(0, 1)` — one number for a room that may hold
+ * three battery devices, with no way to tell WHICH one it came from. A room
+ * with a healthy valve and a dying thermometer showed 100 %.
+ *
+ * So the reading moves here and becomes a STATEMENT instead of a number: a line
+ * appears only when something is actually low, and it names the device. A
+ * resident does not want to read five percentages and do the comparing; they
+ * want to be told when to buy batteries.
+ *
+ * WHOSE BATTERIES. Only the room's own heating devices — its valves and its
+ * thermometers — and the card is given that list rather than finding one. "Any
+ * battery entity in this area" would have swept up the Home Assistant companion
+ * app: on the first device this was written against, `sensor.nokhtari_battery_
+ * level` sat at 15 %, which is a person's phone. Telling a resident their
+ * heating needs maintenance because someone's phone is flat is worse than
+ * saying nothing.
+ *
+ * ROOM FOR WHAT COMES NEXT. Heating malfunctions belong in this section too (a
+ * valve that stopped answering, a plan that will not mirror) — `_rows()` is
+ * where they join, and the empty state already speaks for the whole section
+ * rather than for batteries alone.
+ */
+
+/**
+ * What a battery reading MEANS, because a percentage does not mean anything.
+ *
+ * "i want to have classes and not show numbers" (2026-10-05), and the reading
+ * on screen the day that was said proves the point: 46 %. Is that fine? Worth a
+ * trip to the shop? A resident cannot know, and neither can we — a TRVZB at
+ * 46 % may run all winter. The number is the card's working, not its answer.
+ *
+ * TWO BANDS, because there are two different actions:
+ *
+ *   NIEDRIG     put batteries on the shopping list. Home Assistant's own German
+ *               for a `battery` binary_sensor in its low state is "Niedrig", so
+ *               taking that word means this card and a stock HA page never call
+ *               the same condition two things — the same rule that gave us
+ *               "Leerlauf" and "Aktivität".
+ *   FAST LEER   change them now. Said in plain German rather than "kritisch":
+ *               it tells a resident what is true of the battery instead of how
+ *               alarmed to be, and "kritisch" on a heating dashboard reads like
+ *               a fault in the heating.
+ *
+ * 30 AND 20, decided by the product owner on 2026-10-05. A resident gets a
+ * month or so of "niedrig" to buy batteries and a clear second warning once a
+ * valve is genuinely near the end.
+ *
+ * The known cost, written down so nobody rediscovers it as a bug: a TRVZB
+ * reports coarsely — 100, 97, 80, 46 observed across one flat in one afternoon
+ * — so a valve can step from above 30 straight into the critical band and the
+ * "niedrig" warning is never seen for that device. The second band still fires,
+ * which is the one that must not be missed. If that turns out to happen often,
+ * widening the gap is the fix, not lowering both.
+ */
+const BATTERY_BANDS = [
+  { at: 20, level: "critical", word: "Batterie fast leer",
+    icon: "mdi:battery-alert-variant-outline" },
+  { at: 30, level: "low", word: "Batterie niedrig", icon: "mdi:battery-low" },
+];
+
+//: The reading above which nothing is said at all — the widest band's edge, so
+//: the threshold cannot drift away from the bands it is meant to match.
+const LOW_BATTERY_PCT = Math.max(...BATTERY_BANDS.map((b) => b.at));
+
+/** The band a reading falls in, or null when the battery is fine. */
+function batteryBand(pct) {
+  return BATTERY_BANDS.find((b) => pct <= b.at) || null;
+}
+
+/**
+ * A GA asset label, tidied — `THD-SON-00000202` becomes `THD-SON-202`.
+ *
+ * Returns null for anything that is not one. The zeros are padding for a
+ * database key, and reading them off a sticker to compare with a screen is work
+ * the screen should have done.
+ */
+function gaLabel(text) {
+  const m = /^([A-Z]{2,4})-([A-Z]{2,4})-0*(\d+)$/.exec(String(text || "").trim());
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/**
+ * What to call the device this battery belongs to.
+ *
+ * In order: a GA label if anything carries one, then the name a person gave it,
+ * then the sensor's own name with its " Batterie" suffix removed — and never
+ * the radio address, which is the one answer that cannot help anybody standing
+ * in the room holding a screwdriver.
+ *
+ * No device on the fleet publishes a label yet (checked 2026-10-05: no label
+ * registry, devices named "Thermostat 1"). The chain is written so that the day
+ * one does, it is used without a second change.
+ */
+function deviceName(state) {
+  const a = (state && state.attributes) || {};
+  // STRIPPED BEFORE the label is looked for, not after. A battery sensor is
+  // named after its device plus " Batterie", so `THD-SON-00000202 Batterie`
+  // never matched the label shape and fell through to the raw name — the padded
+  // form, which is the one thing this was asked to stop showing (caught in a
+  // browser, 2026-10-05).
+  const friendly = String(a.friendly_name || "").trim()
+    .replace(/\s*(Batterie|Battery( level)?)\s*$/i, "").trim();
+  return gaLabel(a.ga_label) || gaLabel(friendly) || friendly || null;
+}
+
+/**
+ * The maintenance lines for one room: `[{ kind, name, detail, sort }]`.
+ *
+ * Worst first, because a resident reads the first line. Exported shape rather
+ * than markup so the ordering and the thresholds can be tested without a DOM.
+ */
+function maintenanceRows(states, batteries) {
+  const rows = [];
+  for (const id of batteries || []) {
+    const s = states[id];
+    if (!s) continue;
+    // A sensor that has not reported is not a flat battery, and saying "0 %"
+    // for one would send somebody to a radiator that is fine. Silence here is
+    // honest; a device that has genuinely stopped answering is a MALFUNCTION,
+    // which is the next thing this section learns to say.
+    //
+    // `Number()` IS NOT THE TEST. `Number("")` is 0, and so are `Number(null)`
+    // and `Number("   ")` — all finite, all rendering "Batterie 0 %" for a
+    // sensor that said nothing at all (caught in a browser, 2026-10-05; the
+    // same shape as the missing setpoint that logged "Soll 0,0 °C"). A real
+    // `"0"` is a reading and must still count, so the emptiness is tested
+    // before the number is.
+    if (s.state == null) continue;
+    const text = String(s.state).trim();
+    if (text === "") continue;
+    const pct = Number(text);
+    if (!Number.isFinite(pct)) continue;
+    const band = batteryBand(pct);
+    if (!band) continue;
+    rows.push({
+      kind: "battery",
+      level: band.level,
+      icon: band.icon,
+      name: deviceName(s) || "Gerät",
+      // The percentage never reaches the screen. It stays here as the sort key
+      // so two devices in the same band still come out worst-first.
+      detail: band.word,
+      sort: pct,
+    });
+  }
+  rows.sort((a, b) => a.sort - b.sort);
+  return rows;
+}
+
+class GaMaintenanceCard extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._batteries = Array.isArray(config.batteries) ? config.batteries : [];
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  getCardSize() {
+    return 2;
+  }
+
+  _rows() {
+    const states = (this._hass && this._hass.states) || {};
+    return maintenanceRows(states, this._batteries);
+  }
+
+  _render() {
+    if (!this._hass) return;
+    const rows = this._rows();
+    const title = this._config.title == null ? "Wartung" : this._config.title;
+    const head = title ? `<div class="hdr">${title}</div>` : "";
+    // "Nothing to do" is said out loud. A card that renders empty reads as one
+    // that failed to load, which is the complaint the actions card's own status
+    // line exists to answer — and here it is the difference between "we checked"
+    // and "nobody is checking".
+    const body = rows.length
+      ? `<ul>${rows.map((r) =>
+          `<li class="${r.level}"><ha-icon icon="${r.icon}"></ha-icon>` +
+          `<span class="who">${r.name}</span>` +
+          `<span class="what">${r.detail}</span></li>`).join("")}</ul>`
+      : `<p class="quiet">Keine Auffälligkeiten.</p>`;
+    this.innerHTML = `<ha-card><div class="card-content">${head}${body}</div></ha-card>
+      <style>
+        /* MATCHED TO THE ACTIVITY CARD ABOVE IT, deliberately: the two sit one
+           under the other in the same room view, and a title set in the browser
+           default h2 next to one at body size read as a different level of
+           heading ("make the font and size of wartung similar to aktivitat",
+           2026-10-05). These are ga-heating-log-card's own numbers. */
+        ga-maintenance-card .card-content { padding: 12px 16px 14px; }
+        ga-maintenance-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 8px; }
+        ga-maintenance-card ul { list-style: none; margin: 0; padding: 0;
+          display: grid; gap: 8px; }
+        ga-maintenance-card li { display: flex; align-items: center; gap: 10px;
+          font-size: .95em; }
+        /* The colour carries the same split as the word, so the two bands are
+           told apart before either is read. */
+        ga-maintenance-card ha-icon { --mdc-icon-size: 20px; flex: none; }
+        ga-maintenance-card li.critical ha-icon { color: var(--error-color, #b3261e); }
+        ga-maintenance-card li.low ha-icon { color: var(--warning-color, #f9a825); }
+        ga-maintenance-card li.critical .what { color: var(--error-color, #b3261e); }
+        /* The name carries the weight: it is the thing a resident has to find
+           in the room. The reading is the reason, not the instruction. */
+        ga-maintenance-card .who { font-weight: 600; }
+        ga-maintenance-card .what { color: var(--secondary-text-color, #5a6b68); }
+        ga-maintenance-card .quiet { margin: 0; font-size: .95em;
+          color: var(--secondary-text-color, #5a6b68); }
+      </style>`;
+  }
+}
+
+customElements.define("ga-maintenance-card", GaMaintenanceCard);
+window.customCards = window.customCards || [];
+window.customCards.push({
+  type: "ga-maintenance-card",
+  name: "GA Maintenance Card",
+  description: "What in a room needs a person: low batteries now, heating faults next — first-party.",
+});
