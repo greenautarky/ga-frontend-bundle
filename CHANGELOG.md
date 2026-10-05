@@ -1,5 +1,170 @@
 # Changelog
 
+## 1.22.0
+
+> **Requires ga_heating 0.12.0 or newer — ship them together.** This release
+> shows −/+ on an off room, and a press there sends only
+> `climate.set_temperature`. ga_heating 0.12.0 turns an OFF room on in MANUEL
+> for that; on 0.11.x the radiators go to `heat` while the room stays "off", so
+> the card shows AUS over a radiator that is heating, with no manual period to
+> end it. The bundle has no mechanism to declare a minimum ga_heating version
+> (`manifest.json` `dependencies` take no versions, and listing ga_heating there
+> would stop the bundle loading on a device without it), so this is enforced
+> only by pinning both in the same OS release. The change-log card also expects
+> ga_heating 0.12.0's `changes` attribute; without it the card falls back to
+> history, which is correct but carries no reasons.
+
+- **The thermostat card's "Steuerung" title can be turned off.** It sits
+  directly under the room's "Heizung" heading and says the same thing twice.
+  New strategy option `thermostat_header`: unset keeps "Steuerung" (no fleet
+  change), `""` drops the title, any other string replaces it. The card itself
+  now honours `header: ""` — before, `||` turned an empty string back into
+  "Steuerung", so there was no way to switch it off even by hand. Without a
+  title the running-state badge ("Bereit" / "Heizt") takes its place, on the
+  left, in all three variants; with neither, no empty line is left. The
+  `simple` fallback gets `header: false`; `core` never had a title.
+- **The mode row reads AUS · MANUEL · KI**, least heating to most, so it is one
+  scale rather than three unrelated buttons. Order is presentation only: each
+  button carries its own `data-mode` and the handler reads that, never a
+  position, so the services called are unchanged. A test pins both.
+- **An off room keeps the layout of a heating one.** It used to lose its whole
+  body — no value, no −/+, just "Heizung aus" — so the card jumped every time
+  someone pressed AUS. There is now ONE body for every state: the big value and
+  both buttons stay exactly where they were, and the badge is the only thing that
+  changes. A press on −/+ while off is a setpoint like any other, so ga_heating
+  takes the room out of AUS and heats — chosen deliberately (2026-09-30), on the
+  control that was already there. ("off" and "cannot be changed" are not the same
+  statement, and the card must not quietly make them one.)
+
+- **AUS is a dark neutral, not the brand colour.** Painted in the theme's primary
+  like KI, "off" read as a state somebody was pleased about; `--ga-off` (default
+  `#616161`) says only that the room is off.
+- **The 24 h graph cards keep their title and lose Home Assistant's history link.**
+  A graph card with a `title` gets a header, and inside it a chevron linking to the
+  History panel filtered to those entities — `hui-history-graph-card` renders that
+  `<a>` whenever a title exists, with no option to suppress it: a one-way door from a
+  resident's room view into an admin-shaped page. Moving the words to a heading above
+  the card took the chevron away but also took the title out of the box, so the LINK
+  is what goes instead. card-mod is already injected on every GA dashboard for
+  exactly this class of problem. The same rule brings that header down to 16px: it
+  is an `<h1>` styled for a page title, and on a room view it shouted over the
+  "Heizung" and "Verlauf" headings it sits under. The cards also carry
+  `grid_options: {columns: 12, rows: 4}`, so both 24 h charts and the control above
+  them fit on one screen without scrolling — sized in the sections grid's own unit
+  rather than a pixel height that a different screen would get wrong.
+
+- **The Heizplan card shows what an edit changes.** Editing a value overwrote the
+  number it replaced and then asked the resident to remember it (reported
+  2026-10-02). Every render now answers what the plan WILL be and what it IS, in
+  three places: an edited field is marked and carries "jetzt 18 °C"; the hour's
+  current setpoint is drawn as a dashed line behind the new bar on the day curve
+  ("warmer or colder than now" is the real question, and two heights in one column
+  answer it better than two numbers in a list); and a line names every day with
+  unsaved edits, because Speichern writes the WHOLE week and the day on screen
+  cannot say that. `Verwerfen` puts the week back — showing a diff without a way
+  back is half the job. Rows that would disappear on save say so.
+  The comparison is by POSITION, row against row: a time moved past its neighbour
+  reports as two changes rather than a reorder, because the alternative guesses at
+  an intent nobody expressed.
+- **Plan times sit on the half hour.** `step="1800"` moves the picker, and every
+  edit is snapped where it passes — a resident can still type 06:14, and a phone's
+  own picker ignores `step` entirely. 23:45 rounds DOWN: rounding it up would move
+  the slot to the start of the day and reorder the plan under the resident's hands.
+- **An outdoor series, where a device names one.** New strategy options
+  `outdoor_temperature` / `outdoor_humidity`, drawn beside the room's own curve —
+  two series answer "is it cold outside or is the heating failing", which one
+  cannot. The entity is NAMED, never sniffed for: guessing at `sensor.aussen*`
+  breaks when somebody renames a sensor and would draw a stranger's thermometer on
+  a resident's wall. A named entity that does not exist is left off the chart.
+- **The log says WHO first, then why.** "Benutzer" / "System" is the question a
+  resident asks of a log — was that me, or did the heating do it? A boost and a
+  holiday sit on the Benutzer side: somebody asked for them, even though the system
+  carried them out at a moment nobody picked. The reason is kept where it adds
+  something ("System · Heizplan", "Benutzer · Boost") and dropped where it would
+  restate the actor. "Manuell" is deliberately not used for the user side: MANUEL is
+  a MODE on the thermostat card beside this one.
+
+- **New: `ga-heating-log-card` — the last few changes to a room, with timestamps.**
+  Asked for on 2026-09-30, and the core logbook card cannot answer it here for two
+  independent reasons: a GA device loads `history:` but not `logbook:`, so
+  `/api/logbook` answers 404; and even loaded, the logbook records STATE changes
+  while a room's setpoint is an ATTRIBUTE — "21 → 23 °C", the thing a resident
+  actually did, would never appear in it. The card reads `history/period` and
+  diffs the points itself: a mode change ("KI → MANUEL") or a setpoint move
+  ("Soll 21,0 → 23,0 °C"), never the measured temperature drifting a tenth, and
+  one entry rather than two when AUS takes the target with it. Times read "Heute
+  14:32" / "Gestern 09:15" / "Mo 07:00". "Nothing happened" and "could not read
+  the history" are different sentences, because a card that renders a failed read
+  as "keine Änderungen" lies about one of them.
+
+  **It states what happened, never who did it.** History knows THAT the setpoint
+  moved; only ga_heating knows whether it was the resident, the plan, a boost or
+  an open window. The entries are observations for exactly that reason — the
+  reason belongs in the integration, which already models it.
+
+  Titled **"Aktivität"** — Home Assistant's own German for this: its translation
+  file maps `panel.logbook` to it (HA rebuilt the Logbook as the Activity view),
+  while `panel.history` is "Verlauf", already the heading over the 24 h charts.
+  Taking HA's word means this card and a stock HA page never call the same thing by
+  two names, which is also why the thermostat card says "Leerlauf".
+
+  Placed under the thermostat by the strategy behind `change_log: true`, DEFAULT
+  OFF while the feature is new: a card that reads the recorder on every room view
+  is a cost every device would otherwise pay for something nobody has judged yet.
+
+- **The 24 h temperature curve draws the room, not the radiator.** A TRV publishes
+  its own `_local_temperature`, which is a temperature sensor in the room like any
+  other — so the chart drew two curves and the legend gave no hint that the upper
+  one was the valve (measured 2026-09-30: 23.65 °C at the valve against 23.40 °C
+  in the room). A valve reads warm because it sits on the radiator; that is what
+  `calibration.py` exists for, and it is not what a resident means by "how warm was
+  it". The valves are read from the room entity's `valves` attribute and their
+  sensors dropped; a room whose only thermometer IS a valve keeps it, under its own
+  name, rather than showing an empty card. The remaining single curve is labelled
+  "Raum Temperatur", and the card is titled "Temperatur letzte 24h".
+- **The humidity curve loses its "(mean)" suffix.** Unnamed, the card labelled the
+  single series "… Luftfeuchtigkeit (mean)" — the card's own arithmetic leaking
+  into a resident's legend, answering a question nobody asked and reading like
+  part of the sensor's name. It is named "Raum Luftfeuchtigkeit", and the card is
+  titled "Luftfeuchtigkeit letzte 24h" to match the temperature one.
+
+- **The Heizplan card ships no header.** It carried the room name, under a
+  "Heizplan" heading, in a tab named after the room — the same thing three times.
+  The strategy passes no `title` and the card's default is now nothing at all:
+  falling back to "Heizplan" only moved the duplication one line up. A
+  hand-written config that sets a `title` still gets it.
+
+- **The temperature badge reads the sensor ga_heating named, not the thermostat.**
+  An entity badge on a climate entity shows `current_temperature` and falls back to
+  the ENTITY'S STATE when that attribute is missing — so a room whose thermometer
+  had not reported showed its hvac mode where a temperature belongs: "Heat" beside
+  a thermometer icon (seen during boot on a device 2026-10-01, and it would stay
+  for as long as a sensor was offline, not only while booting). The badge now
+  points at `temperature_source`, which is ga_heating's own answer to which
+  thermometer is this room's — so the one-place rule still holds, and the badge has
+  an entity whose state IS the temperature and reads "–" when there is none. A room
+  reading its valve ("temperature_source": "valve") and an older ga_heating without
+  the attribute keep the climate entity.
+
+- **The room's temperature badge carries a thermometer.** Read off the ga_heating
+  room entity, it inherited that entity's icon — the thermostat dial, which is the
+  control, not the reading (seen on a device 2026-09-30). `mdi:thermometer` is now
+  stated on both branches, so the badge looks the same whether the climate entity
+  or a temperature sensor answers.
+
+- **The idle badge says "Leerlauf", not "Bereit".** "Bereit" reads as standby and
+  says nothing about what the heating is doing. "Leerlauf" is Home Assistant's own
+  German for `hvac_action: idle`, so this card and a stock HA card never say
+  different words about the same reading — and, unlike "Temperatur erreicht" or
+  "Warm genug", it claims nothing about the room: a valve reports `idle` with an
+  open window too.
+
+- **The running-state badge carries an icon next to its word:** `mdi:radiator`
+  for Heizt, `mdi:radiator-off` for Leerlauf, `mdi:power` for Aus (the same icon
+  as the AUS mode button). The radiator pair shows the thing itself, hot or cold,
+  rather than a generic flame or pause bar. The word stays — the icon reinforces it,
+  it does not replace it.
+
 ## 1.21.0
 
 - **Both Danger Zone buttons send their request again.** Since 1.9.0,

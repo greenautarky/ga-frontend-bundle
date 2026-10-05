@@ -147,6 +147,20 @@ function historyAvailable(hass) {
  *                               vendored simple-thermostat fallback. ("myvibe" =
  *                               old alias for classic.) Not resident-selectable
  *                               yet — admin/config only (selector = Odoo #571).
+ *   thermostat_header "Steuerung" title line of the thermostat card. "" drops
+ *                               it — the "Heizung" heading directly above
+ *                               already names the section. Any other string
+ *                               replaces it. ("core" style has no title.)
+ *   outdoor_temperature  —       an entity whose state is the outdoor temperature,
+ *                               drawn as a second series on every room's 24 h
+ *                               chart. NAMED, never sniffed for: a strategy that
+ *                               guessed at `sensor.aussen*` would break the day
+ *                               somebody renamed a sensor, and would draw a
+ *                               stranger's thermometer on a resident's wall.
+ *   outdoor_humidity     —       the same for the humidity chart.
+ *   change_log        false     show the last changes to a room under its
+ *                               thermostat (ga-heating-log-card). DEFAULT OFF
+ *                               while the feature is new.
  *   hide_household    true      drop the "Haushalt" overview view. DEFAULT hidden
  *                               (resident-clean UI); set false to show it.
  *   hide_roomless     true      drop the "Ohne Raum" view. DEFAULT hidden; set
@@ -173,6 +187,15 @@ function gaOptions(config) {
     hideHousehold: c.hide_household === true,
     // DEFAULT: hidden. Set hide_roomless:false to show the roomless view.
     hideRoomless: c.hide_roomless !== false,
+    // Unset keeps the fleet look; "" is a deliberate "no title", not unset.
+    thermostatHeader: typeof c.thermostat_header === "string" ? c.thermostat_header : "Steuerung",
+    // DEFAULT OFF while it is new: a card that reads the recorder on every room
+    // view is a cost every device would pay for a feature nobody has judged yet.
+    changeLog: c.change_log === true,
+    //: Absent on a device with no weather integration, which is most of them —
+    //: a GA device has no `default_config`, so nothing adds one by itself.
+    outdoorTemperature: typeof c.outdoor_temperature === "string" ? c.outdoor_temperature : null,
+    outdoorHumidity: typeof c.outdoor_humidity === "string" ? c.outdoor_humidity : null,
   };
 }
 
@@ -205,8 +228,34 @@ async function fetchHomeModel(hass) {
  * server, so there are no null reads and no client-side category logic.
  * ------------------------------------------------------------------------- */
 
+//: What a graph card needs beyond its data, and why each line is here.
+//:
+//: THE LINK. Home Assistant puts a chevron in a titled card's header, linking to
+//: the History panel filtered to that card's entities. `hui-history-graph-card`
+//: renders the `<a>` whenever a title exists and offers no way to turn it off, so
+//: a resident's room view grows a one-way door into an admin-shaped page. The
+//: title belongs on the card, so the LINK is what goes.
+//:
+//: THE HEADER SIZE. That header is an `<h1>`, styled for a page title: on a room
+//: view it shouted over the "Heizung" and "Verlauf" headings it sits under. 16px
+//: matches those headings and our own cards' `.hdr`.
+//:
+//: card-mod is already injected on every GA dashboard (const.COMMUNITY_INJECT_
+//: ASSET_IDS) for exactly this class of problem.
+const GRAPH_CHROME = {
+  card_mod: {
+    style: ".card-header { font-size: 16px; font-weight: 600; line-height: 1.4; "
+      + "padding: 12px 16px 0; } .card-header a { display: none; }",
+  },
+  //: Both 24 h charts and the thermostat above them on ONE screen, without
+  //: scrolling — the whole room at a glance is the point of the view. `rows` is
+  //: the sections grid's own height unit, so the chart is sized by the layout
+  //: rather than by a pixel height that a different screen would get wrong.
+  grid_options: { columns: 12, rows: 4 },
+};
+
 /** The heating control card for one climate entity, per the chosen style. */
-function thermostatCard(entity, roomName, style) {
+function thermostatCard(entity, roomName, style, header = "Steuerung") {
   if (["classic", "dial", "setpoint"].includes(style)) {
     // FIRST-PARTY ga-thermostat-card (Odoo #518): one card, three looks
     // (classic = big value + setpoint + AUS/MANUEL/KI chips [default];
@@ -215,7 +264,7 @@ function thermostatCard(entity, roomName, style) {
     return {
       type: "custom:ga-thermostat-card",
       entity,
-      header: "Steuerung",
+      header,
       ...(style === "classic" ? {} : { variant: style }),
     };
   }
@@ -225,7 +274,7 @@ function thermostatCard(entity, roomName, style) {
     return {
       type: "custom:simple-thermostat",
       entity,
-      header: { name: "Steuerung" },
+      header: header ? { name: header } : false,
       hide: { temperature: true, state: true },
       layout: { mode: { icons: true, names: true, headings: false } },
       control: { hvac: {
@@ -275,12 +324,40 @@ function roomSections(room, opt, hass) {
   // room sensor first, the valve's own thermometer as fallback — so badge,
   // heating and calibration agree. Order: climate current_temperature if it is
   // a number; else temps[0]; else no badge (never an empty one).
+  //: A thermometer, stated rather than inherited. Read off the CLIMATE entity the
+  //: badge would otherwise take its icon from a thermostat — the dial glyph, which
+  //: is the control, not the reading (seen on a resident test device, 2026-09-30). Set on
+  //: every branch, so the badge looks the same whichever source answers.
+  //
+  // THE SENSOR ITSELF, where ga_heating names one. A badge on the climate entity
+  // reads `current_temperature`, and an entity badge falls back to the ENTITY'S
+  // STATE when that attribute is missing — so a room whose thermometer has not
+  // reported shows the hvac mode where a temperature belongs: "Heat" next to a
+  // thermometer icon (seen during boot on a resident test device, 2026-10-01, and it
+  // would sit there for as long as a sensor stayed offline, not only while
+  // booting).
+  //
+  // `temperature_source` is ga_heating's own answer to "which thermometer is this
+  // room's" — room sensor first, the valve's as fallback, decided in one place.
+  // Reading THAT keeps the 2026-09-25 rule (badge, heating and calibration agree)
+  // while giving the badge an entity whose STATE is the temperature, so an absent
+  // reading shows as "–" rather than as a word.
   const clim = climate.length && hass && hass.states ? hass.states[climate[0]] : null;
-  if (clim && typeof (clim.attributes || {}).current_temperature === "number") {
+  const source = clim && (clim.attributes || {}).temperature_source;
+  const sourceIsEntity = typeof source === "string" && source.includes(".");
+  if (sourceIsEntity) {
+    badges.push({ type: "entity", entity: source, name: "Temperatur",
+      icon: "mdi:thermometer" });
+  } else if (clim && typeof (clim.attributes || {}).current_temperature === "number") {
+    // No named source — an older ga_heating, or a room reading its valve
+    // ("temperature_source": "valve"). The climate entity still carries the
+    // number ga_heating decided on, which is better than picking a sensor
+    // ourselves and disagreeing with the heating.
     badges.push({ type: "entity", entity: climate[0], name: "Temperatur",
-      state_content: "current_temperature" });
+      icon: "mdi:thermometer", state_content: "current_temperature" });
   } else if (temps.length) {
-    badges.push({ type: "entity", entity: temps[0], name: "Temperatur" });
+    badges.push({ type: "entity", entity: temps[0], name: "Temperatur",
+      icon: "mdi:thermometer" });
   }
   for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Luftfeuchtigkeit" });
   for (const e of batts.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Batterie" });
@@ -290,7 +367,22 @@ function roomSections(room, opt, hass) {
   // Heating — the control MyVibe called KI / MANUEL / AUS.
   if (climate.length) {
     const cards = [{ type: "heading", heading: "Heizung", heading_style: "title", badges }];
-    for (const entity of climate) cards.push(thermostatCard(entity, room.name, opt.thermostatStyle));
+    for (const entity of climate) {
+      cards.push(thermostatCard(entity, room.name, opt.thermostatStyle, opt.thermostatHeader));
+      // Under the control, the last few things that happened to this room
+      // (2026-09-30). Directly under it on purpose: "was heating on last night"
+      // is a question about the thing you are looking at, and a log on a tab of
+      // its own is a log nobody opens.
+      // "Aktivität" is Home Assistant's OWN German for this: its translation file
+      // maps `panel.logbook` to it (HA rebuilt the Logbook as the Activity view),
+      // while `panel.history` is "Verlauf" — already the heading over the 24 h
+      // charts. Taking HA's word means this card and a stock HA page never call
+      // the same thing by two names, the same reason the thermostat card says
+      // "Leerlauf". The title rides ON the card, like every other title here.
+      if (opt.changeLog) {
+        cards.push({ type: "custom:ga-heating-log-card", entity, title: "Aktivität" });
+      }
+    }
     sections.push({ type: "grid", cards });
   }
 
@@ -299,7 +391,11 @@ function roomSections(room, opt, hass) {
   for (const entity of climate) {
     sections.push({ type: "grid", cards: [
       { type: "heading", heading: "Heizplan", heading_style: "title" },
-      { type: "custom:ga-heating-card", entity, title: room.name },
+      // No `title`: the heading directly above says "Heizplan" and the tab says
+      // the room, so a room-name header inside the card was the third telling
+      // (2026-09-30). The card still honours one when a hand-written config
+      // sets it.
+      { type: "custom:ga-heating-card", entity },
     ] });
   }
 
@@ -337,13 +433,56 @@ function roomSections(room, opt, hass) {
   // The mean is the one a resident asks for ("how warm was it"). The band is
   // worth having back the day we draw it ourselves and can label it; until
   // then it costs comprehension and buys nothing.
-  if (hasHistory && temps.length) {
-    history.push({ type: "statistics-graph", title: "Temperatur (24 h)", entities: temps,
-      stat_types: ["mean"], days_to_show: 1, period: "hour" });
+  // ONE curve: the room's own thermometer.
+  //
+  // A TRV reports its own `_local_temperature` too, and it is a temperature
+  // sensor in the room like any other — so the graph drew both, and the second
+  // curve was the radiator, not the room (measured on a resident test device,
+  // 2026-09-30: 23.65 °C at the valve against 23.40 °C in the room, with the
+  // legend giving no hint which was which). A valve reads warm because it sits
+  // on the radiator; that is the whole reason `calibration.py` exists, and it
+  // is not the number a resident means by "how warm was it".
+  //
+  // The valves are named on the room entity (`attributes.valves`), and a valve's
+  // sensors carry its IEEE in their entity_id — so this is read from the model,
+  // not guessed from a name. A room whose ONLY thermometer is a valve keeps it:
+  // one honest curve under its own name beats an empty card.
+  const valveIds = ((clim && clim.attributes && clim.attributes.valves) || [])
+    .map((v) => String(v).split(".").pop());
+  const roomTemps = temps.filter((id) => !valveIds.some((ieee) => id.includes(ieee)));
+  const graphTemps = roomTemps.length ? roomTemps : temps;
+  if (hasHistory && graphTemps.length) {
+    // Named only when it is the single curve AND it is not a valve's own
+    // thermometer: "Raum Temperatur" on a sensor screwed to the radiator would
+    // be a label that contradicts the reading it sits under.
+    //: The room's curve, and — where a device names one — the outdoor one beside
+    //: it. Two series answer "is it cold outside or is the heating failing",
+    //: which one series cannot. The outdoor entity is checked against `states`
+    //: first: a name in a config that no longer exists must leave the chart with
+    //: one honest curve rather than an empty legend entry.
+    const outdoor = opt.outdoorTemperature && hass && hass.states
+      && hass.states[opt.outdoorTemperature] ? opt.outdoorTemperature : null;
+    const entities = (graphTemps.length === 1 && roomTemps.length)
+      ? [{ entity: graphTemps[0], name: "Raum Temperatur" }]
+      : graphTemps;
+    if (outdoor) entities.push({ entity: outdoor, name: "Außentemperatur" });
+    history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
+      stat_types: ["mean"], days_to_show: 1, period: "hour", ...GRAPH_CHROME });
   }
   if (hasHistory && hums.length) {
-    history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit (24 h)", entities: hums,
-      stat_types: ["mean"], days_to_show: 1, period: "hour" });
+    // Named for the same reason the temperature curve is: left to itself the card
+    // labelled the single series "… Luftfeuchtigkeit (mean)", and "(mean)" is the
+    // card's own arithmetic leaking into a resident's legend — it answers a
+    // question nobody asked and reads like part of the sensor's name.
+    const outdoorH = opt.outdoorHumidity && hass && hass.states
+      && hass.states[opt.outdoorHumidity] ? opt.outdoorHumidity : null;
+    const entities = hums.length === 1
+      ? [{ entity: hums[0], name: "Raum Luftfeuchtigkeit" }]
+      : hums;
+    if (outdoorH) entities.push({ entity: outdoorH, name: "Außenluftfeuchtigkeit" });
+    history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h",
+      entities, stat_types: ["mean"], days_to_show: 1, period: "hour",
+      ...GRAPH_CHROME });
   }
   if (history.length) {
     sections.push({ type: "grid", cards: [

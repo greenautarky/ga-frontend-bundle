@@ -159,7 +159,10 @@ def test_padding_never_arms_save_and_never_asks_the_resident_to_save():
     """
     src = CARD.read_text(encoding="utf-8")
     assert "this._padded = this._normalise();" in src
-    i = src.index("this._padded = this._normalise();")
-    assert "this._dirty = false;" in src[i:i + 500]
+    # Within _load, not within N characters of the padding call: a comment added
+    # between the two broke this on 2026-10-05 while the promise still held.
+    load = src[src.index("async _load()"):src.index("async _save()")]
+    assert "this._padded = this._normalise();" in load
+    assert "this._dirty = false;" in load
     assert "Vorschlag" not in src
     assert "macht sie zum Plan" not in src
