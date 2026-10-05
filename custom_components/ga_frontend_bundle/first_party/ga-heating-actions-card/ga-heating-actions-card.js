@@ -82,13 +82,25 @@ function frostSetpoints(states) {
   return Array.from(new Set(vals)).sort((a, b) => a - b);
 }
 
-/** How to say that in one line, or "" when no valve reports a setpoint. */
+/**
+ * How to say that in one line, or "" when no valve reports a setpoint.
+ *
+ * SAYS WHEN IT APPLIES. "Frostschutz bleibt aktiv" sat under a row of buttons
+ * and read as a fact about the heating in general; it is only about what AUS
+ * leaves behind ("here say that in AUS that happens", 2026-10-05).
+ *
+ * ONE NUMBER, THE LOWEST. Valves do not have to agree — on the flat this was
+ * written against they read 7 and 8 — and the line used to print every distinct
+ * value, "bei 7 / 8 °C", which asks a resident to work out which radiator is
+ * which. The lowest is the honest single number for a safety sentence: a valve
+ * set to 8 opens EARLIER than one set to 7, so 7 is the coldest any room is let
+ * get, and promising the warmer number would promise more than the flat does.
+ */
 function frostText(states) {
   const v = frostSetpoints(states);
   if (!v.length) return "";
-  return v.length === 1
-    ? `Frostschutz bleibt aktiv: die Ventile öffnen von selbst bei ${v[0]} °C.`
-    : `Frostschutz bleibt aktiv: die Ventile öffnen von selbst bei ${v.join(" / ")} °C.`;
+  return `Bei AUS bleibt der Frostschutz aktiv: die Ventile öffnen von selbst `
+    + `bei ${v[0]} °C.`;
 }
 
 /* --- what is in force, read from the rooms -------------------------------
@@ -603,11 +615,12 @@ class GaHeatingActionsCard extends HTMLElement {
    */
   _build() {
     this.innerHTML = `
-      <ha-card header="${this._config.title || "Heizung — Ganzes Zuhause"}">
+      <ha-card>
+        <h1 class="card-title">${this._config.title || "Heizung — Ganzes Zuhause"}</h1>
         <div class="card-content">
           <div class="msg"></div>
-          <h4>Boost</h4>
-          <div class="hint boosthint"></div>
+          <h4>Boost <span class="sub boosthint"></span></h4>
+          <div class="hint roomslabel">Räume wählen</div>
           <div class="rooms"></div>
           <div class="quick">
             <button class="btn primary boost">Boost setzen</button>
@@ -643,7 +656,54 @@ class GaHeatingActionsCard extends HTMLElement {
            gives the primary action the room it needs. Everything collapses to a
            single column on a phone, which is where a resident presses "Alle AUS"
            on their way out of the door. */
-        ga-heating-actions-card .card-content { padding: 16px; display: grid; gap: 14px; }
+        /* OUR OWN TITLE, not ha-card's header attribute.
+           That one renders inside ha-card's SHADOW DOM, where this stylesheet
+           cannot reach it - and it carries line-height 48px over 24px text plus
+           16px of its own bottom padding, which together with the 16px we were
+           padding the content with put about 44px of white between the title
+           and the first heading ("gap is still huge", 2026-10-05).
+           Rendered here instead, as the maintenance and log cards already do,
+           it keeps the 24px size HA gives a card title while the spacing
+           becomes ours.
+
+           NOTHING IN THIS STYLE BLOCK MAY CONTAIN A BACKTICK: it lives inside
+           the template literal that builds the card, so one ends the string and
+           the CSS after it is parsed as JavaScript. Shipped broken twice on
+           2026-10-05, the second time in the comment explaining the first.
+           test_first_party.py now fails on it. */
+        ga-heating-actions-card .card-title { margin: 0; padding: 16px 16px 0;
+          font-size: 24px; font-weight: 400; line-height: 1.2;
+          color: var(--ha-card-header-color, var(--primary-text-color, #212121)); }
+        ga-heating-actions-card .card-content { padding: 12px 16px 16px;
+          display: grid; gap: 14px; }
+        /* A heading and the line explaining it are ONE thing, so they must not
+           be spaced like two. The grid gap is 14px everywhere, which is right
+           between blocks and too much between "BOOST" and the sentence under
+           it ("remove gap between boost and explanation", 2026-10-05).
+           Pulled back to 4px, and only where a hint follows a heading - the
+           frost line sits under the button row, not under a heading, and keeps
+           the full gap. */
+        ga-heating-actions-card h4 + .hint { margin-top: -10px; }
+        /* The explanation rides ON the heading, so it has to escape the
+           heading's own shouting: no uppercase, no bold, no letter-spacing, and
+           the quieter colour a caption gets everywhere else on this card. */
+        ga-heating-actions-card h4 .sub { text-transform: none; font-weight: 400;
+          letter-spacing: 0; color: var(--secondary-text-color, #5a6b68); }
+        /* The panel below is a place where you choose; this says what to choose.
+           Tight against it, because a label belongs to the thing it labels. */
+        ga-heating-actions-card .roomslabel { margin-bottom: -10px; }
+        /* The status line is empty until something is said, and an empty GRID
+           ITEM is not free: it holds a row and the 14px gap after it, which is
+           the dead band between the card title and "BOOST" ("why there is a
+           huge gap between title and boost", 2026-10-05). Hiding it removes
+           the item, and with it the gap, while :empty brings both back by
+           itself the moment there is a message.
+
+           NO BACKTICKS IN HERE. This comment sits inside the template literal
+           that builds the card, so one would end the string and the CSS after
+           it would be parsed as JavaScript — which is exactly how this rule
+           shipped broken for an hour (CI, 2026-10-05). */
+        ga-heating-actions-card .msg:empty { display: none; }
         ga-heating-actions-card h4 { margin: 0; font-size: .82em; font-weight: 700;
           letter-spacing: .07em; text-transform: uppercase; color: var(--secondary-text-color, #6b7682); }
         /* A rule above every block but the first — the blocks are the thing
@@ -702,7 +762,17 @@ class GaHeatingActionsCard extends HTMLElement {
           border-radius: 8px; border: 1px solid var(--divider-color,#ddd);
           background: var(--card-background-color, #fff); color: inherit; font: inherit; }
 
-        ga-heating-actions-card .rooms { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:.9em; }
+        /* THE CHIPS ARE A CHOICE; THE BUTTON UNDER THEM IS AN ACTION.
+           Both were pills in the same filled green, so seven selected rooms and
+           "Boost setzen" read as one row of buttons and nothing said which one
+           does something ("we need to distinguish between choosing the rooms
+           and the boost button", 2026-10-05). The chips now sit on their own
+           surface: a panel is a place where you pick, and the action stands
+           outside it on the card. */
+        ga-heating-actions-card .rooms { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:.9em;
+          background: var(--secondary-background-color, #eceff1);
+          border: 1px solid var(--divider-color, #e0e0e0);
+          border-radius: 14px; padding: 10px 12px; }
         /* Filled = this room will be touched. The fill carries the state, so
            there is no checkbox beside it: two things saying the same thing is
            how the old row became unreadable. */
@@ -768,9 +838,16 @@ class GaHeatingActionsCard extends HTMLElement {
     if (bh) {
       const live = rooms0.filter((id) =>
         ((((this._hass.states[id] || {}).attributes || {}).override || {}).boost || {}).active);
+      // On the heading line now, in brackets, so the section and its
+      // explanation are one line rather than two ("put in parentheses same line
+      // as boost not below", 2026-10-05).
+      //
+      // The running sentence drops the word "Boost": it sits directly after the
+      // heading that already says it, and "BOOST (2 Räume im Boost …)" says it
+      // twice.
       bh.textContent = live.length
-        ? `${nRooms(live.length)} im Boost · Ventile ganz offen`
-        : "Ventile kurzzeitig ganz öffnen";
+        ? `(läuft in ${nRooms(live.length, true)} · Ventile ganz offen)`
+        : "(Ventile kurzzeitig ganz öffnen)";
     }
 
     const tf = this.querySelector(".toggle-form");

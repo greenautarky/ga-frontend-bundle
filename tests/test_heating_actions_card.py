@@ -115,13 +115,30 @@ def test_the_frost_setpoint_is_read_from_the_valves():
     assert "7 °C" in call(f"frostText({json.dumps(s)})")
 
 
-def test_valves_that_disagree_are_all_named():
+def test_valves_that_disagree_report_the_lowest_not_both():
+    """They do not have to agree — one flat read 7 and 8 — and the line used to
+    print every value, "bei 7 / 8 °C", which asks a resident to work out which
+    radiator is which ("just say 7 not 8", 2026-10-05).
+
+    THE LOWEST, specifically. A valve set to 8 opens EARLIER than one set to 7,
+    so 7 is the coldest any room is let get; naming the warmer number would
+    promise more protection than the flat actually gives.
+    """
     s = states(**{
         "number.0xaaa_frost_protection_temperature": {"state": "7"},
         "number.0xbbb_frost_protection_temperature": {"state": "5"},
     })
-    assert call(f"frostSetpoints({json.dumps(s)})") == [5, 7]
-    assert "5 / 7" in call(f"frostText({json.dumps(s)})")
+    text = call(f"frostText({json.dumps(s)})")
+    assert "5 °C" in text, text
+    assert "7" not in text, text
+    assert "/" not in text, text
+
+
+def test_the_frost_line_says_it_is_about_AUS():
+    """It sat under a row of buttons and read as a fact about the heating in
+    general; it is only about what AUS leaves behind."""
+    s = states(**{"number.0xaaa_frost_protection_temperature": {"state": "7"}})
+    assert call(f"frostText({json.dumps(s)})").startswith("Bei AUS")
 
 
 def test_no_valve_reports_a_setpoint_means_no_promise():
@@ -911,7 +928,10 @@ def test_boost_and_the_room_picker_are_one_block():
     """The picker must come after the Boost heading and before Boost setzen, or
     it is a control floating between two scopes again."""
     m = _markup()
-    assert _at(m, ">Boost</h4>") < _at(m, 'class="rooms"') < _at(m, ">Boost setzen<")
+    # Anchored on the heading's OPENING tag: its text now carries the bracketed
+    # explanation, so ">Boost</h4>" stopped existing the day that moved onto the
+    # same line and this test failed on correct markup (CI, 2026-10-06).
+    assert _at(m, "<h4>Boost ") < _at(m, 'class="rooms"') < _at(m, ">Boost setzen<")
 
 
 def test_the_whole_home_buttons_sit_under_their_own_heading():
@@ -956,3 +976,76 @@ def test_the_labels_are_untouched_by_the_regrouping():
     m = _markup()
     for label in ("Boost setzen", "Alle → KI", "Alle AUS"):
         assert label in m, label
+
+
+# --- the section says what it is, on one line --------------------------------
+# "the explanation of boost put in parentheses same line as boost not below,
+# and add a small sentence before the rooms area to choose the room to boost"
+# (2026-10-05).
+
+
+def test_the_explanation_rides_on_the_boost_heading():
+    """THE ASK. It was a line of its own under the heading; now the heading and
+    what it means are one line."""
+    m = _markup()
+    h4 = m[m.index(">Boost "):m.index("</h4>")]
+    assert 'class="sub boosthint"' in h4, h4
+    assert "<div class=\"hint boosthint\"" not in m, "the old standalone line is gone"
+
+
+def test_the_explanation_escapes_the_headings_shouting():
+    """The heading is uppercased by CSS. A parenthetical inherited that and read
+    as BOOST (VENTILE KURZZEITIG GANZ OEFFNEN)."""
+    src = CARD.read_text(encoding="utf-8")
+    style = src[src.index("<style>"):src.index("</style>")]
+    sub = style[style.index("h4 .sub"):]
+    assert "text-transform: none" in sub.split("}")[0]
+
+
+def test_the_room_label_comes_before_the_panel():
+    """"a small sentence before the rooms area to choose the room to boost"."""
+    m = _markup()
+    assert "Räume wählen" in m
+    assert m.index("Räume wählen") < m.index('class="rooms"')
+
+
+def _hint(states):
+    """The text `_render` puts in the boost explanation, for these states."""
+    return run_js(CARD, """
+      (() => {
+        const c = Object.create(GaHeatingActionsCard.prototype);
+        c.setConfig({}); c._built = true; c._hass = { states: __STATES__ };
+        let hintText = '';
+        const mk = (setter) => ({ addEventListener() {}, querySelector: () => null,
+          querySelectorAll: () => [], classList: { toggle() {}, add() {}, remove() {} },
+          removeAttribute() {}, setAttribute() {},
+          set innerHTML(v) {}, get innerHTML() { return ''; },
+          set textContent(v) { setter(v); }, get textContent() { return ''; } });
+        c.querySelector = (sel) =>
+          sel === '.boosthint' ? mk(v => { hintText = v; }) : mk(() => {});
+        c.querySelectorAll = () => [];
+        c._render();
+        return hintText;
+      })()
+    """.replace("__STATES__", json.dumps(states)))
+
+
+def test_the_idle_explanation_is_bracketed():
+    assert _hint({}) == "(Ventile kurzzeitig ganz öffnen)"
+
+
+def test_the_running_explanation_does_not_say_boost_twice():
+    """It sits directly after a heading that already says BOOST, so
+    "BOOST (2 Räume im Boost ...)" says it twice. And after "in" the plural
+    takes the dative."""
+    live = _boosting("climate.bad", "climate.schlaf")
+    got = _hint(live)
+    assert got.startswith("(") and got.endswith(")"), got
+    assert "im Boost" not in got, got
+    assert "2 Räumen" in got, got
+
+
+def test_one_boosted_room_still_declines():
+    got = _hint(_boosting("climate.bad"))
+    assert "1 Raum " in got or got.count("1 Raum") == 1, got
+    assert "Räumen" not in got, got
