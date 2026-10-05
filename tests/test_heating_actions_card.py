@@ -441,10 +441,21 @@ def test_nothing_overriding_gives_an_empty_string_so_the_card_can_say_so():
 
 
 def test_the_boost_countdown_is_shown_and_never_negative():
-    b = {"boost": {"until": "2026-10-01T09:05:00", "temp": 30.0,
+    """The deadline is built in the JS so the test and the code share one clock.
+
+    It used to be a literal — 2026-10-01T09:05 with `remaining_s: 252` beside it
+    — and that was fine only while the card trusted `remaining_s`. Counting from
+    `until` is what fixed the countdown that would not tick, and it turned this
+    test into a time bomb: the timestamp went into the past, a boost that ended
+    four days ago correctly renders as nothing, and the test failed on the code
+    being right (CI, 2026-10-05)."""
+    b = {"boost": {"until": "@@UNTIL@@", "temp": 30.0,
                    "active": True, "remaining_s": 252}}
-    s = call(f"boostStatus({json.dumps(st_with([b] * 2))}, {json.dumps(ROOM_IDS)})")
-    assert "4:12" in s and "2 Raum/Räumen" in s
+    expr = (f"boostStatus({json.dumps(st_with([b] * 2))}, {json.dumps(ROOM_IDS)})"
+            .replace('"@@UNTIL@@"', "new Date(Date.now() + 252000).toISOString()"))
+    s = call(expr)
+    assert "4:1" in s, s          # 4:12, or 4:11 if the second ticked over
+    assert "2 Räumen" in s, s
     assert call("mmss(-99)") == "0:00"
 
 
@@ -578,8 +589,9 @@ END_BOOST = """
     },
   };
   c._say = (kind, text) => said.push({ kind, text });
-  c._endBoost();
-  return JSON.stringify({ sent, said });
+  // AWAITED: `_endBoost` suspends on its first service call, and without this
+  // the harness read the list after one room and before the summary line.
+  return c._endBoost().then(() => JSON.stringify({ sent, said }));
 })()
 """
 
