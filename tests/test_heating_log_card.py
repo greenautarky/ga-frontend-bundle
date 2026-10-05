@@ -338,6 +338,15 @@ def test_the_user_side_does_not_restate_itself():
 
 def test_manuell_is_not_used_for_the_user_side():
     """MANUEL is a MODE on the thermostat card beside this one; a log saying
-    "Manuell" about a press that chose KI would read as a contradiction."""
-    src = CARD.read_text(encoding="utf-8")
-    assert '"Manuell"' not in src
+    "Manuell" about a press that chose KI would read as a contradiction.
+
+    Asserted on the WORDS the card renders, not on the file: the comment above
+    `SOURCE_WORDS` explains this choice and therefore contains the word, which a
+    plain substring check reads as the defect it is there to prevent.
+    """
+    words = run_js(
+        CARD,
+        "JSON.stringify(Object.values(SOURCE_WORDS)"
+        ".flatMap(s => [s.who, s.why]).filter(Boolean))",
+    )
+    assert "Manuell" not in json.loads(words)
