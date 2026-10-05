@@ -151,6 +151,13 @@ function historyAvailable(hass) {
  *                               it — the "Heizung" heading directly above
  *                               already names the section. Any other string
  *                               replaces it. ("core" style has no title.)
+ *   outdoor_temperature  —       an entity whose state is the outdoor temperature,
+ *                               drawn as a second series on every room's 24 h
+ *                               chart. NAMED, never sniffed for: a strategy that
+ *                               guessed at `sensor.aussen*` would break the day
+ *                               somebody renamed a sensor, and would draw a
+ *                               stranger's thermometer on a resident's wall.
+ *   outdoor_humidity     —       the same for the humidity chart.
  *   change_log        false     show the last changes to a room under its
  *                               thermostat (ga-heating-log-card). DEFAULT OFF
  *                               while the feature is new.
@@ -185,6 +192,10 @@ function gaOptions(config) {
     // DEFAULT OFF while it is new: a card that reads the recorder on every room
     // view is a cost every device would pay for a feature nobody has judged yet.
     changeLog: c.change_log === true,
+    //: Absent on a device with no weather integration, which is most of them —
+    //: a GA device has no `default_config`, so nothing adds one by itself.
+    outdoorTemperature: typeof c.outdoor_temperature === "string" ? c.outdoor_temperature : null,
+    outdoorHumidity: typeof c.outdoor_humidity === "string" ? c.outdoor_humidity : null,
   };
 }
 
@@ -444,9 +455,17 @@ function roomSections(room, opt, hass) {
     // Named only when it is the single curve AND it is not a valve's own
     // thermometer: "Raum Temperatur" on a sensor screwed to the radiator would
     // be a label that contradicts the reading it sits under.
+    //: The room's curve, and — where a device names one — the outdoor one beside
+    //: it. Two series answer "is it cold outside or is the heating failing",
+    //: which one series cannot. The outdoor entity is checked against `states`
+    //: first: a name in a config that no longer exists must leave the chart with
+    //: one honest curve rather than an empty legend entry.
+    const outdoor = opt.outdoorTemperature && hass && hass.states
+      && hass.states[opt.outdoorTemperature] ? opt.outdoorTemperature : null;
     const entities = (graphTemps.length === 1 && roomTemps.length)
       ? [{ entity: graphTemps[0], name: "Raum Temperatur" }]
       : graphTemps;
+    if (outdoor) entities.push({ entity: outdoor, name: "Außentemperatur" });
     history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
       stat_types: ["mean"], days_to_show: 1, period: "hour", ...GRAPH_CHROME });
   }
@@ -455,9 +474,12 @@ function roomSections(room, opt, hass) {
     // labelled the single series "… Luftfeuchtigkeit (mean)", and "(mean)" is the
     // card's own arithmetic leaking into a resident's legend — it answers a
     // question nobody asked and reads like part of the sensor's name.
+    const outdoorH = opt.outdoorHumidity && hass && hass.states
+      && hass.states[opt.outdoorHumidity] ? opt.outdoorHumidity : null;
     const entities = hums.length === 1
       ? [{ entity: hums[0], name: "Raum Luftfeuchtigkeit" }]
       : hums;
+    if (outdoorH) entities.push({ entity: outdoorH, name: "Außenluftfeuchtigkeit" });
     history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h",
       entities, stat_types: ["mean"], days_to_show: 1, period: "hour",
       ...GRAPH_CHROME });

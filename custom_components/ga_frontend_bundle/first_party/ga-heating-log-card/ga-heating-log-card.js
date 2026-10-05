@@ -40,17 +40,33 @@ const DEFAULT_HOURS = 72;
 //: ga-thermostat-card: KI = auto, MANUEL = heat, AUS = off.
 const MODE_WORDS = { auto: "KI", heat: "MANUEL", off: "AUS" };
 
-//: ga_heating's `source` vocabulary, in the resident's words. A source we do not
-//: know is rendered as nothing rather than as its raw key: a newer component
-//: inventing a reason must not put "window_contact_2" on someone's wall.
+//: ga_heating's `source` vocabulary, in the resident's words: WHO, and then WHY
+//: where the why is not obvious from the who.
+//:
+//: "Benutzer" / "System" is the question a resident actually asks of a log —
+//: was that me, or did the heating do it? — and it is the first thing each line
+//: answers (asked for 2026-10-04). A boost and a holiday sit on the BENUTZER
+//: side: somebody asked for them, even though the system carried them out at a
+//: moment nobody picked.
+//:
+//: "Manuell" would have been the obvious German for the user side and is
+//: deliberately not used: MANUEL is a MODE on the thermostat card beside this
+//: one, and a log saying "Manuell" about a press that chose KI would read as a
+//: contradiction. Home Assistant's own German has no user/system pair to borrow
+//: — its logbook says "ausgelöst durch <X>" — so this follows that shape with
+//: the actor first.
+//:
+//: The reason is dropped where it would only restate the actor: a resident
+//: pressing a button needs no "· Bedienung" after "· Benutzer", and a hand on
+//: the radiator is still the user.
 const SOURCE_WORDS = {
-  resident: "Bedienung",
-  valve: "am Heizkörper",
-  plan: "Heizplan",
-  boost: "Boost",
-  absence: "Urlaub",
-  window: "Fenster",
-  expiry: "manuelle Zeit abgelaufen",
+  resident: { who: "Benutzer", why: "" },
+  valve: { who: "Benutzer", why: "" },
+  boost: { who: "Benutzer", why: "Boost" },
+  absence: { who: "Benutzer", why: "Urlaub" },
+  plan: { who: "System", why: "Heizplan" },
+  window: { who: "System", why: "Fenster" },
+  expiry: { who: "System", why: "Zeit abgelaufen" },
 };
 
 //: Re-reading the whole window on every state update would hammer the recorder
@@ -138,7 +154,8 @@ function fromAttribute(changes) {
 
 /** One entry as `{icon, text, why}` — the words a resident reads. */
 function describe(entry) {
-  const why = SOURCE_WORDS[entry.source] || "";
+  const s = SOURCE_WORDS[entry.source];
+  const why = s ? [s.who, s.why].filter(Boolean).join(" · ") : "";
   if (entry.kind === "mode") {
     const from = MODE_WORDS[entry.from] || entry.from;
     const to = MODE_WORDS[entry.to] || entry.to;

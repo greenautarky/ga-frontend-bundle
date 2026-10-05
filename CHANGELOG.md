@@ -41,6 +41,37 @@
   them fit on one screen without scrolling — sized in the sections grid's own unit
   rather than a pixel height that a different screen would get wrong.
 
+- **The Heizplan card shows what an edit changes.** Editing a value overwrote the
+  number it replaced and then asked the resident to remember it (reported
+  2026-10-02). Every render now answers what the plan WILL be and what it IS, in
+  three places: an edited field is marked and carries "jetzt 18 °C"; the hour's
+  current setpoint is drawn as a dashed line behind the new bar on the day curve
+  ("warmer or colder than now" is the real question, and two heights in one column
+  answer it better than two numbers in a list); and a line names every day with
+  unsaved edits, because Speichern writes the WHOLE week and the day on screen
+  cannot say that. `Verwerfen` puts the week back — showing a diff without a way
+  back is half the job. Rows that would disappear on save say so.
+  The comparison is by POSITION, row against row: a time moved past its neighbour
+  reports as two changes rather than a reorder, because the alternative guesses at
+  an intent nobody expressed.
+- **Plan times sit on the half hour.** `step="1800"` moves the picker, and every
+  edit is snapped where it passes — a resident can still type 06:14, and a phone's
+  own picker ignores `step` entirely. 23:45 rounds DOWN: rounding it up would move
+  the slot to the start of the day and reorder the plan under the resident's hands.
+- **An outdoor series, where a device names one.** New strategy options
+  `outdoor_temperature` / `outdoor_humidity`, drawn beside the room's own curve —
+  two series answer "is it cold outside or is the heating failing", which one
+  cannot. The entity is NAMED, never sniffed for: guessing at `sensor.aussen*`
+  breaks when somebody renames a sensor and would draw a stranger's thermometer on
+  a resident's wall. A named entity that does not exist is left off the chart.
+- **The log says WHO first, then why.** "Benutzer" / "System" is the question a
+  resident asks of a log — was that me, or did the heating do it? A boost and a
+  holiday sit on the Benutzer side: somebody asked for them, even though the system
+  carried them out at a moment nobody picked. The reason is kept where it adds
+  something ("System · Heizplan", "Benutzer · Boost") and dropped where it would
+  restate the actor. "Manuell" is deliberately not used for the user side: MANUEL is
+  a MODE on the thermostat card beside this one.
+
 - **New: `ga-heating-log-card` — the last few changes to a room, with timestamps.**
   Asked for on 2026-09-30, and the core logbook card cannot answer it here for two
   independent reasons: a GA device loads `history:` but not `logbook:`, so

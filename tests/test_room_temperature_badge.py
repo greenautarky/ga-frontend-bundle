@@ -286,3 +286,63 @@ def test_every_graph_card_styles_away_HAs_history_chevron():
         # that header is an <h1>, styled for a page title; it sits under two
         # headings on a room view and must not shout over them
         assert "font-size: 16px" in style, f"{title!r} keeps HA's page-title size"
+
+
+# ── the outdoor series (2026-10-02) ─────────────────────────────────────────
+
+
+_OUT_STATES = """{
+  "climate.wz": { state: "auto", attributes: { current_temperature: 19.5, temperature: 21,
+                  valves: [], temperature_source: "sensor.wz_t" } },
+  "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } },
+  "sensor.wz_h": { state: "48", attributes: { device_class: "humidity" } },
+  "sensor.aussentemperatur": { state: "17.7", attributes: {} },
+  "sensor.aussenluftfeuchtigkeit": { state: "72", attributes: {} }
+}"""
+
+_OUT_ROOM = ('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+             ' hums: ["sensor.wz_h"], batts: [], lights: [], switches: [] }')
+
+
+def _graph_series(cfg: str):
+    expr = f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {_OUT_STATES} }};
+      return roomSections({_OUT_ROOM}, gaOptions({cfg}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => c.type === "statistics-graph")
+        .map(c => c.entities.map(e => e.name || e));
+    }})()"""
+    return run_js(STRATEGY, expr)
+
+
+def test_a_named_outdoor_entity_is_drawn_beside_the_rooms_own():
+    """Two series answer "is it cold outside or is the heating failing", which
+    one series cannot."""
+    got = _graph_series('{ outdoor_temperature: "sensor.aussentemperatur",'
+                        ' outdoor_humidity: "sensor.aussenluftfeuchtigkeit" }')
+    assert got[0] == ["Raum Temperatur", "Außentemperatur"]
+    assert got[1] == ["Raum Luftfeuchtigkeit", "Außenluftfeuchtigkeit"]
+
+
+def test_without_the_option_nothing_extra_is_drawn():
+    """Most devices have no weather integration at all — a GA device has no
+    `default_config`, so nothing adds one by itself."""
+    got = _graph_series("{}")
+    assert got[0] == ["Raum Temperatur"]
+    assert got[1] == ["Raum Luftfeuchtigkeit"]
+
+
+def test_a_named_entity_that_does_not_exist_is_not_charted():
+    """A typo or a deleted sensor must leave one honest curve, not an empty
+    legend entry."""
+    got = _graph_series('{ outdoor_temperature: "sensor.tippfehler" }')
+    assert got[0] == ["Raum Temperatur"]
+
+
+def test_the_entity_is_named_never_sniffed_for():
+    """Guessing at `sensor.aussen*` breaks the day somebody renames a sensor, and
+    on a device with several weather sources it would draw a stranger's
+    thermometer on a resident's wall."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert 'typeof c.outdoor_temperature === "string"' in src
+    assert "aussen" not in src.lower().replace("außen", ""), "no name sniffing"
