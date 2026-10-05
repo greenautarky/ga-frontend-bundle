@@ -719,3 +719,156 @@ def test_the_plural_after_in_takes_the_dative():
     two = _boosting("climate.bad", "climate.schlaf")
     line = run_js(CARD, f"boostStatus({json.dumps(two)}, {json.dumps(list(two))})")
     assert line.endswith("in 2 Räumen"), line
+
+
+# --- picking rooms -----------------------------------------------------------
+# "when choosing the rooms thats the best way to list them. maybe a dropdow
+# list?" (2026-10-05). It stayed a list of toggles and became ONE row: a
+# checkbox, a summary button and a collapsed list of checkboxes were three
+# controls for one job, and with "Alle Räume" ticked the room boxes were checked
+# AND disabled — which looks exactly like selected.
+#
+# A dropdown was the other candidate and is worse where this is used:
+# `<select multiple>` is a wheel on iOS that cannot express multi-select, a
+# modal on Android that no theme reaches, and ctrl-click on desktop.
+#
+# The rule the row promises: FILLED MEANS THIS ROOM WILL BE TOUCHED. These tests
+# are that promise — the chip state and `_selected()` are the same answer.
+
+ROOMS = ["climate.a", "climate.b", "climate.c"]
+
+
+def toggle(form, room_id, rooms=None):
+    return json.loads(run_js(
+        CARD,
+        f"JSON.stringify(toggleRoom({json.dumps(rooms or ROOMS)}, "
+        f"{json.dumps(form)}, {json.dumps(room_id)}))"))
+
+
+ALL = {"allRooms": True, "rooms": []}
+
+
+def test_tapping_a_lit_room_turns_that_one_off():
+    """It is lit, so it is in scope, so tapping it takes it out. The old row
+    could not express this at all: with "Alle" ticked the room boxes were
+    disabled."""
+    assert toggle(ALL, "climate.b") == {"allRooms": False,
+                                        "rooms": ["climate.a", "climate.c"]}
+
+
+def test_turning_one_off_leaves_the_rest_in_their_own_order():
+    """The row is read left to right; a selection that reorders itself as it is
+    edited makes the names move under the finger."""
+    out = toggle({"allRooms": False, "rooms": ["climate.c", "climate.a", "climate.b"]},
+                 "climate.a")
+    assert out["rooms"] == ["climate.b", "climate.c"]
+
+
+def test_tapping_a_dark_room_adds_it():
+    assert toggle({"allRooms": False, "rooms": ["climate.a"]}, "climate.b") == {
+        "allRooms": False, "rooms": ["climate.a", "climate.b"]}
+
+
+def test_selecting_the_last_one_becomes_alle():
+    """Otherwise the row shows every room lit beside a dark `Alle` — a difference
+    with no meaning behind it. It also matters later: an explicit list of every
+    room silently excludes a room added afterwards, and `alle` does not."""
+    assert toggle({"allRooms": False, "rooms": ["climate.a", "climate.b"]},
+                  "climate.c") == ALL
+
+
+def test_the_last_lit_room_can_be_turned_off():
+    """Nothing selected is a state a resident can reach, so the actions have to
+    answer for it — see the refusals below."""
+    assert toggle({"allRooms": False, "rooms": ["climate.c"]}, "climate.c") == {
+        "allRooms": False, "rooms": []}
+
+
+def test_a_single_room_flat_still_toggles():
+    one = ["climate.only"]
+    assert toggle(ALL, "climate.only", rooms=one) == {"allRooms": False, "rooms": []}
+    assert toggle({"allRooms": False, "rooms": []}, "climate.only", rooms=one) == {
+        "allRooms": True, "rooms": []}
+
+
+def test_the_row_collapses_only_when_it_would_not_fit():
+    """A flat with twelve rooms is a wall of chips above the button somebody came
+    here to press. Three is one line and hiding it would cost a tap to answer
+    "which rooms" — the question the row exists for."""
+    assert int(run_js(CARD, "MAX_CHIPS")) >= 3
+    src = CARD.read_text(encoding="utf-8")
+    assert "rooms.length <= MAX_CHIPS || this._openRooms" in src
+
+
+def test_a_chip_carries_its_own_state_for_a_screen_reader():
+    src = CARD.read_text(encoding="utf-8")
+    assert 'aria-pressed="${on}"' in src
+
+
+# --- and the actions use it --------------------------------------------------
+
+
+def _card_with(form):
+    """A card whose form is `form`, over a three-room flat."""
+    states = {r: {"attributes": {"friendly_name": r[-1].upper(), "valves": ["climate.v"],
+                                 "area_id": r[-1], "max_temp": 30}} for r in ROOMS}
+    states["climate.v"] = {"attributes": {"local_temperature": 21}}
+    return (
+        " const c = Object.create(GaHeatingActionsCard.prototype);"
+        " c.setConfig({});"
+        f" Object.assign(c._form, {json.dumps(form)});"
+        " const sent = [], said = [];"
+        f" c._hass = {{ states: {json.dumps(states)},"
+        "   callService: (d, s, data) => { sent.push(s + ':' + data.entity_id);"
+        "     return Promise.resolve(); },"
+        "   callApi: () => Promise.resolve() };"
+        " c._say = (k, t) => said.push({ kind: k, text: t });"
+    )
+
+
+def _run(form, method):
+    return json.loads(run_js(CARD, "(() => {" + _card_with(form)
+                             + f" return c.{method}().then(() =>"
+                             + " JSON.stringify({ sent, said })); })()"))
+
+
+def test_boost_acts_on_the_rooms_that_are_lit():
+    """THE RED ONE, and it predates the chips: the picker sat directly above
+    "Boost setzen" and the button ignored it — pick one room, press it, and the
+    whole flat went to 30 °C. It went unnoticed because the picker was collapsed
+    behind a disclosure and defaulted to "alle", so the two agreed in the only
+    case anybody exercised."""
+    got = _run({"allRooms": False, "rooms": ["climate.b"]}, "_boostAll")
+    assert got["sent"] == ["boost:climate.b"]
+
+
+def test_boost_with_nothing_lit_refuses_rather_than_doing_the_flat():
+    """Nothing selected is one tap away now. Falling back to every room would be
+    the same defect with a friendlier face."""
+    got = _run({"allRooms": False, "rooms": []}, "_boostAll")
+    assert got["sent"] == []
+    assert got["said"] == [{"kind": "err", "text": "Kein Raum ausgewählt."}]
+
+
+def test_boost_by_default_still_means_the_whole_home():
+    got = _run({"allRooms": True, "rooms": []}, "_boostAll")
+    assert [s.split(":")[1] for s in got["sent"]] == ROOMS
+
+
+def test_alle_aus_ignores_the_picker():
+    """Must-not-flag. The label says "Alle AUS" — Ahmad's own words from the
+    previous system — and a button that says what it does is allowed to say it.
+    Scoping it to the selection would make a labelled promise false."""
+    got = _run({"allRooms": False, "rooms": ["climate.b"]}, "_offAll")
+    assert [s.split(":")[1] for s in got["sent"]] == ROOMS
+
+
+def test_alle_ki_ignores_it_too():
+    got = _run({"allRooms": False, "rooms": ["climate.b"]}, "_planAll")
+    assert {s.split(":")[1] for s in got["sent"]} == set(ROOMS)
+
+
+def test_ending_a_sonderplan_on_nothing_does_not_report_zero_of_zero():
+    """"Sonderplan in 0 von 0 Räumen aufgehoben" is a lie with a number in it."""
+    got = _run({"allRooms": False, "rooms": []}, "_cancelAbsence")
+    assert got["said"] == [{"kind": "err", "text": "Kein Raum ausgewählt."}]

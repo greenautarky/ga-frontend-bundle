@@ -177,6 +177,34 @@ function roomName(state) {
   return a.friendly_name || a.area_id || "";
 }
 
+//: How many rooms fit in one row of chips before it is worth collapsing. Six is
+//: two lines on a phone; a flat with more than that is the case the disclosure
+//: below was written for.
+const MAX_CHIPS = 6;
+
+/**
+ * The scope after one room chip is tapped: `{allRooms, rooms}`.
+ *
+ * Out here rather than in the click handler because this is the part with the
+ * decisions in it, and a closure over a DOM node cannot be tested — the whole
+ * reason `tests/js/eval.mjs` exists is to run the shipped logic, and logic
+ * reachable only through a click is logic nothing runs until a resident does.
+ *
+ * A LIT CHIP MEANS THIS ROOM WILL BE TOUCHED, so tapping a lit one turns it
+ * off. `allRooms` is shorthand for every room, so turning one off has to start
+ * from the list the row is showing, in the rooms' own order.
+ */
+function toggleRoom(rooms, f, id) {
+  const lit = f.allRooms || f.rooms.includes(id);
+  const current = f.allRooms ? rooms.slice() : rooms.filter((r) => f.rooms.includes(r));
+  const next = lit ? current.filter((r) => r !== id) : current.concat([id]);
+  // A selection that covers the flat IS "alle". Without this the row shows every
+  // room lit beside a dark `Alle`, a difference with no meaning behind it — and
+  // the explicit list would also silently exclude a room added later.
+  const allRooms = next.length === rooms.length;
+  return { allRooms, rooms: allRooms ? [] : next };
+}
+
 /**
  * What the collapsed room list says about itself.
  *
@@ -339,16 +367,29 @@ class GaHeatingActionsCard extends HTMLElement {
   // ─── actions ──────────────────────────────────────────────────────────────
 
   /**
-   * Boost every room for a few minutes.
+   * Boost the SELECTED rooms for a few minutes.
    *
    * "Open all valves 100 %" is what was asked for; what the stack can express is
    * a SETPOINT, so this asks for each room's own max_temp — the warmest thing it
    * will accept — and ga_heating drives the valves there. That is an emulation
    * and the card says so rather than claiming a valve position it never sends.
+   *
+   * THE SELECTION, not every room. The room picker sits directly above this
+   * button and this button ignored it: pick Badezimmer, press Boost setzen, and
+   * the whole flat went to 30 °C. It went unnoticed because the picker was
+   * collapsed behind a disclosure and defaulted to "alle", so the two agreed in
+   * the only case anybody exercised.
+   *
+   * `Alle → KI` and `Alle AUS` beside it keep every room on purpose: their
+   * labels say "Alle", they are Ahmad's own words from the previous system, and
+   * a button that says what it does is allowed to say it.
    */
   async _boostAll() {
-    const rooms = this._rooms();
-    if (!rooms.length) return this._say("err", "Kein Raum mit Thermostat gefunden.");
+    if (!this._rooms().length) {
+      return this._say("err", "Kein Raum mit Thermostat gefunden.");
+    }
+    const rooms = this._selected();
+    if (!rooms.length) return this._say("err", "Kein Raum ausgewählt.");
     let ok = 0;
     const failed = [];
     for (const id of rooms) {
@@ -368,7 +409,8 @@ class GaHeatingActionsCard extends HTMLElement {
     if (failed.length) {
       this._say("err", `${ok} von ${rooms.length} Räumen auf voll — nicht erreicht: ${failed.join(", ")}.`);
     } else {
-      this._say("ok", `${ok} Räume für ${this._minutes} Minuten voll aufgedreht. Danach gilt wieder der Plan.`);
+      this._say("ok", `${nRooms(ok)} für ${this._minutes} Minuten voll aufgedreht. `
+        + `Danach gilt wieder der Plan.`);
     }
   }
 
@@ -392,6 +434,7 @@ class GaHeatingActionsCard extends HTMLElement {
    * against the converter source, the vendor manual, and the devices themselves.
    */
   async _offAll() {
+    // EVERY room, not the selection — the button says "Alle AUS". See _boostAll.
     const rooms = this._rooms();
     if (!rooms.length) return this._say("err", "Kein Raum mit Thermostat gefunden.");
     let ok = 0;
@@ -420,6 +463,7 @@ class GaHeatingActionsCard extends HTMLElement {
    * leave a boost running for another four minutes and read as broken.
    */
   async _planAll() {
+    // EVERY room, not the selection — the button says "Alle → KI". See _boostAll.
     const rooms = this._rooms();
     let ok = 0;
     for (const id of rooms) {
@@ -527,6 +571,7 @@ class GaHeatingActionsCard extends HTMLElement {
 
   async _cancelAbsence() {
     const rooms = this._selected();
+    if (!rooms.length) return this._say("err", "Kein Raum ausgewählt.");
     let ok = 0;
     for (const id of rooms) {
       try { await this._hass.callApi("delete", "ga_heating/absence", { entity_id: id }); ok += 1; }
@@ -633,8 +678,16 @@ class GaHeatingActionsCard extends HTMLElement {
           background: var(--card-background-color, #fff); color: inherit; font: inherit; }
 
         ga-heating-actions-card .rooms { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:.9em; }
-        ga-heating-actions-card .rooms label { display:flex; gap:6px; align-items:center;
-          background: var(--secondary-background-color,#f0f0f0); padding:6px 11px; border-radius:999px; }
+        /* Filled = this room will be touched. The fill carries the state, so
+           there is no checkbox beside it: two things saying the same thing is
+           how the old row became unreadable. */
+        ga-heating-actions-card .rooms .chip { font: inherit; font-size: .9em;
+          padding: 6px 13px; border-radius: 999px; cursor: pointer;
+          border: 1px solid var(--divider-color, #e0e0e0); background: transparent;
+          color: var(--primary-text-color, #212121); }
+        ga-heating-actions-card .rooms .chip.on { background: var(--primary-color, #4A7D59);
+          border-color: var(--primary-color, #4A7D59);
+          color: var(--text-primary-color, #fff); font-weight: 600; }
         ga-heating-actions-card .rooms .btn { padding: 6px 11px; font-size: .88em; }
       </style>`;
 
@@ -759,41 +812,59 @@ class GaHeatingActionsCard extends HTMLElement {
 
     // Room scope. Nothing selected means ALL — said in words, because an empty
     // row of checkboxes reads as "none" and would be the opposite of the truth.
-    // Room scope, EXPLICIT. `Alle Räume` is its own switch, as it was in the old
-    // system: "nothing ticked" reads as "none", which is the opposite of what it
-    // used to mean here. The per-room list collapses, so the common case — all of
-    // them — is one line.
+    // ROOM SCOPE: one row of toggles, `Alle` first.
+    //
+    // It was a checkbox, a summary button and a collapsed list of checkboxes —
+    // three controls for one job, and the state was unreadable: every chip the
+    // same grey, the answer in small native boxes, and with `Alle` ticked the
+    // room boxes were checked AND disabled, which looks exactly like selected.
+    //
+    // A dropdown was the other candidate and is worse on the device this is used
+    // on: `<select multiple>` is a wheel on iOS that cannot express multi-select,
+    // a modal on Android that no theme reaches, and ctrl-click on desktop. It
+    // also hides the one thing this control exists to answer — what will this
+    // touch — behind a tap.
+    //
+    // So: filled means it will be touched, outlined means it will not, and the
+    // row is the answer without a tap. Above MAX_CHIPS rooms it collapses again,
+    // because a flat with twelve of them is a wall of chips above the button
+    // somebody actually came here to press.
     const rooms = this._rooms();
     const box = this.querySelector(".rooms");
     if (!rooms.length) {
       box.innerHTML = '<span class="hint">Kein Raum mit Thermostat gefunden.</span>';
     } else {
+      const open = rooms.length <= MAX_CHIPS || this._openRooms;
+      const chip = (label, on, attr) =>
+        `<button type="button" class="chip${on ? " on" : ""}" ${attr} `
+        + `aria-pressed="${on}">${label}</button>`;
       box.innerHTML =
-        `<label><input type="checkbox" class="allrooms" ${f.allRooms ? "checked" : ""}>`
-        + `<b>Alle Räume</b></label>`
-        + `<button class="btn ghost toggle-rooms">`
-        + `${scopeLabel(this._hass.states, rooms, f, this._openRooms)}`
-        + `</button>`
-        + (this._openRooms
-            ? rooms.map((id) =>
-                `<label><input type="checkbox" data-id="${id}" `
-                + `${f.allRooms || f.rooms.includes(id) ? "checked" : ""} `
-                + `${f.allRooms ? "disabled" : ""}>`
-                + `${roomName(this._hass.states[id]) || id}</label>`).join("")
+        chip("Alle", f.allRooms, 'data-all="1"')
+        + (rooms.length > MAX_CHIPS
+            ? `<button class="btn ghost toggle-rooms">`
+              + `${scopeLabel(this._hass.states, rooms, f, this._openRooms)}</button>`
+            : "")
+        + (open
+            ? rooms.map((id) => chip(
+                roomName(this._hass.states[id]) || id,
+                f.allRooms || f.rooms.includes(id),
+                `data-id="${id}"`)).join("")
             : "");
-      const all = box.querySelector(".allrooms");
-      if (all) all.addEventListener("change", () => {
-        f.allRooms = all.checked;
-        if (f.allRooms) f.rooms = [];
+
+      const allChip = box.querySelector("[data-all]");
+      if (allChip) allChip.addEventListener("click", () => {
+        f.allRooms = true;
+        f.rooms = [];
         this._render();
       });
       const tr = box.querySelector(".toggle-rooms");
-      if (tr) tr.addEventListener("click", () => { this._openRooms = !this._openRooms; this._render(); });
-      box.querySelectorAll("input[data-id]").forEach((el) => {
-        el.addEventListener("change", () => {
-          f.allRooms = false;
-          f.rooms = Array.from(box.querySelectorAll("input[data-id]"))
-            .filter((x) => x.checked).map((x) => x.dataset.id);
+      if (tr) tr.addEventListener("click", () => {
+        this._openRooms = !this._openRooms;
+        this._render();
+      });
+      box.querySelectorAll("[data-id]").forEach((el) => {
+        el.addEventListener("click", () => {
+          Object.assign(f, toggleRoom(rooms, f, el.dataset.id));
           this._render();
         });
       });
