@@ -329,11 +329,14 @@ def test_each_source_says_who_first_then_why(source, expected):
 
 def test_the_user_side_does_not_restate_itself():
     """"Benutzer · Bedienung" says the same thing twice, and a hand on the
-    radiator is still the user."""
-    src = CARD.read_text(encoding="utf-8")
-    assert 'resident: { who: "Benutzer", why: "" }' in src
-    assert 'valve: { who: "Benutzer", why: "" }' in src
-    assert "am Heizkörper" not in src
+    radiator is still the user — so neither carries a reason."""
+    for source in ("resident", "valve"):
+        why = json.loads(run_js(
+            CARD,
+            f'JSON.stringify(describe({{kind:"mode", from:"auto", to:"heat",'
+            f' source:"{source}"}}).why)',
+        ))
+        assert why == "Benutzer", why
 
 
 def test_manuell_is_not_used_for_the_user_side():

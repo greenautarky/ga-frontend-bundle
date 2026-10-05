@@ -326,7 +326,14 @@ def test_a_named_outdoor_entity_is_drawn_beside_the_rooms_own():
 
 def test_without_the_option_nothing_extra_is_drawn():
     """Most devices have no weather integration at all — a GA device has no
-    `default_config`, so nothing adds one by itself."""
+    `default_config`, so nothing adds one by itself.
+
+    This is also the proof that the entity is NAMED and never sniffed for: the
+    states above DO contain `sensor.aussentemperatur`, and with no option naming
+    it the chart must still draw one curve. Guessing at `sensor.aussen*` would
+    break the day somebody renames a sensor, and on a device with several weather
+    sources it would draw a stranger's thermometer on a resident's wall.
+    """
     got = _graph_series("{}")
     assert got[0] == ["Raum Temperatur"]
     assert got[1] == ["Raum Luftfeuchtigkeit"]
@@ -338,11 +345,3 @@ def test_a_named_entity_that_does_not_exist_is_not_charted():
     got = _graph_series('{ outdoor_temperature: "sensor.tippfehler" }')
     assert got[0] == ["Raum Temperatur"]
 
-
-def test_the_entity_is_named_never_sniffed_for():
-    """Guessing at `sensor.aussen*` breaks the day somebody renames a sensor, and
-    on a device with several weather sources it would draw a stranger's
-    thermometer on a resident's wall."""
-    src = STRATEGY.read_text(encoding="utf-8")
-    assert 'typeof c.outdoor_temperature === "string"' in src
-    assert "aussen" not in src.lower().replace("außen", ""), "no name sniffing"
