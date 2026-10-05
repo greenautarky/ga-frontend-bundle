@@ -83,6 +83,12 @@ const STYLE = `
   ga-thermostat-card .manualrow { display: flex; align-items: center; gap: 6px;
     margin-top: 8px; font-size: 13px; opacity: .85; }
   ga-thermostat-card .manualrow ha-icon { --mdc-icon-size: 18px; }
+  /* The way out, beside the thing it ends. Quiet by default: the row is a
+     statement, and the button is only for the resident who disagrees with it. */
+  ga-thermostat-card .manualrow .endov { margin-left: auto; font-family: inherit;
+    font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 12px;
+    border: 1px solid var(--divider-color, #e0e0e0); cursor: pointer;
+    background: transparent; color: var(--primary-text-color, #212121); }
   ga-thermostat-card .val { text-align: center; font-size: 35px; font-weight: 500; line-height: 1.1; }
   ga-thermostat-card .val small { font-size: 15px; opacity: .6; }
   ga-thermostat-card .set { display: flex; align-items: center; justify-content: center;
@@ -157,6 +163,29 @@ class GaThermostatCard extends HTMLElement {
   }
 
   getCardSize() { return this._variant === "dial" ? 4 : 3; }
+
+  //: The countdown rows ("Boost noch 4 min", "Manuell noch 2 h 10 min") are read
+  //: from a deadline, so they need a clock. Home Assistant pushes a state change
+  //: when something CHANGES, and time passing is not that — left to state
+  //: updates the minutes stand still.
+  //:
+  //: Every 30 s, because these rows are in minutes: a second-by-second redraw of
+  //: a whole card to move a number that changes once a minute is work nobody
+  //: asked for. NEVER while a press is in flight or a dial is being dragged —
+  //: `_render` rebuilds the markup, which would replace the button under the
+  //: resident's finger and discard the value they are still typing in.
+  connectedCallback() {
+    this._ticker = setInterval(() => {
+      if (!this._hass || this._pending != null || this._dragging) return;
+      const s = this._state();
+      if (s && (this._manualRemaining(s) || this._overrideRow(s))) this._render();
+    }, 30000);
+  }
+
+  disconnectedCallback() {
+    clearInterval(this._ticker);
+    this._ticker = null;
+  }
 
   _state() { return this._hass && this._hass.states[this._config.entity]; }
   _step(s) { return Number(s.attributes.target_temp_step) || 0.5; }
@@ -259,6 +288,28 @@ class GaThermostatCard extends HTMLElement {
       this._pendingSince = 0;
     }
   }
+  /**
+   * End a running boost or Sonderplan for THIS room, and nothing else.
+   *
+   * NO MODE IS SENT WITH IT, which is the whole reason this is its own path and
+   * not a press on KI. An override wins over the room's stored decision while it
+   * runs; it never replaced it. So dropping the override IS the way back to
+   * whatever the room was before — KI, MANUEL with its own clock, or AUS — and
+   * sending a mode as well would overwrite that decision with the card's guess.
+   * Pressing KI to escape a boost is exactly that guess, and it silently
+   * converts an AUS room into a heating one.
+   *
+   * `cancel_boost` and `cancel_absence` both pop their key and re-apply the
+   * room, so one call per press and the component decides what the room is.
+   */
+  _endOverride(kind) {
+    const service = kind === "boost" ? "cancel_boost"
+      : kind === "absence" ? "cancel_absence"
+      : null;
+    if (!service) return;
+    this._hass.callService("ga_heating", service, { entity_id: this._config.entity });
+  }
+
   _setMode(mode) {
     this._hass.callService("climate", "set_hvac_mode", { entity_id: this._config.entity, hvac_mode: mode });
   }
@@ -298,7 +349,72 @@ class GaThermostatCard extends HTMLElement {
     return { left, clock, minutes: mins };
   }
 
+  /**
+   * A running override, as the room publishes it (`attributes.override`).
+   *
+   * ga_heating already decided what is in force and until when; reading its own
+   * dict means the card cannot disagree with the heating about whether a boost
+   * is running — the mistake `override_view` exists to prevent. `active` is its
+   * word, not ours: a holiday booked for next week is stored but not in force.
+   */
+  _overrideRow(s) {
+    const ov = (s.attributes && s.attributes.override) || {};
+    //: `end` is the service that UNDOES this override. A boost and a Sonderplan
+    //: never touched the room's stored decision — they win over it while they
+    //: run — so cancelling one puts the room back exactly as it was, with no
+    //: bookkeeping to restore. A WINDOW has no button: it ends when the window
+    //: closes, and a button that says otherwise would be a lie about a contact.
+    const kinds = [
+      ["boost", "Boost", "mdi:rocket-launch-outline", "Danach gilt wieder der Plan", "boost"],
+      // "Sonderplan", not "Urlaub": ga_heating stores ONE absence override, and
+      // the Krankheit and Urlaub forms on the actions card both write it. The
+      // card cannot tell them apart, and guessing told a resident who had just
+      // entered a sickness that they were on holiday (reported 2026-10-05).
+      // "Sonderplan" is the product's own umbrella word and is true of both.
+      //
+      // Carrying the kind would need ga_heating to store it — and a dashboard on
+      // a wall saying "Krank" records why somebody is at home, which is a
+      // decision about health data, not a label.
+      ["absence", "Sonderplan", "mdi:calendar-clock", "Bis zum Ende des Sonderplans", "absence"],
+      ["window", "Fenster offen", "mdi:window-open-variant", "Heizt wieder, sobald es zu ist", null],
+    ];
+    for (const [key, label, icon, hint, end] of kinds) {
+      const o = ov[key];
+      if (!o || o.active !== true) continue;
+      const left = this._fromNow(o.until || o.end);
+      const stop = end
+        ? `<button class="endov" data-end="${end}" title="Zurück zum vorherigen Zustand">Beenden</button>`
+        : "";
+      return `<div class="manualrow" title="${hint}">` +
+        `<ha-icon icon="${icon}"></ha-icon>` +
+        `<span>${label}${left ? ` noch ${left.left} — bis ${left.clock}` : ""}</span>${stop}</div>`;
+    }
+    return "";
+  }
+
+  /** `{left, clock}` for an ISO timestamp still in the future, else null. */
+  _fromNow(raw) {
+    if (!raw) return null;
+    const until = new Date(raw);
+    if (Number.isNaN(until.getTime())) return null;
+    const ms = until.getTime() - Date.now();
+    if (ms <= 0) return null;
+    const mins = Math.round(ms / 60000);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return {
+      left: h > 0 ? `${h} h ${String(m).padStart(2, "0")} min` : `${m} min`,
+      clock: until.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }),
+    };
+  }
+
   _manualRow(s) {
+    // An override FIRST: while a boost runs, the room reports `heat` because its
+    // radiators are being driven — so a bare "Manuell noch …" would name the
+    // symptom and hide the cause (reported 2026-10-05: a boosted room read as
+    // MANUEL with no boost anywhere on the card).
+    const override = this._overrideRow(s);
+    if (override) return override;
     const r = this._manualRemaining(s);
     if (!r) return "";
     return `<div class="manualrow" title="Danach übernimmt der Heizplan wieder">` +
@@ -527,9 +643,11 @@ class GaThermostatCard extends HTMLElement {
     this._wired = true;
     this._root.addEventListener("click", (ev) => {
       const target = ev.target && ev.target.closest && ev.target.closest(
-        ".set button, .big button, .modes .m");
+        ".set button, .big button, .modes .m, .manualrow .endov");
       if (!target || !this._root.contains(target)) return;
-      if (target.dataset.mode) {
+      if (target.dataset.end) {
+        this._endOverride(target.dataset.end);
+      } else if (target.dataset.mode) {
         this._setMode(target.dataset.mode);
       } else if (target.dataset.delta) {
         this._setTemp(Number(target.dataset.delta));

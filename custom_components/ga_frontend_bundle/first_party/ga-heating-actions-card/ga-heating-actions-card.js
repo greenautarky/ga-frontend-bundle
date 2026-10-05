@@ -129,20 +129,80 @@ function overrideStatus(states, roomIds) {
   return `Sonderplan aktiv — ${what}${until ? ` · bis ${until}` : ""} · ${who}`;
 }
 
-/** The same for a running boost, including the number nobody could see. */
+/**
+ * The same for a running boost, including the number nobody could see.
+ *
+ * COUNTED FROM `until`, not from `remaining_s`. ga_heating computes the seconds
+ * when the entity publishes, and a room publishes when something about it
+ * CHANGES — which a boost quietly ticking down is not. The card therefore showed
+ * one number and held it: "noch 4:59" for five minutes (reported 2026-10-05).
+ * The deadline is an absolute timestamp, so the clock can be read here, as often
+ * as the card likes. `remaining_s` stays the fallback for an override that has
+ * no `until`.
+ */
 function boostStatus(states, roomIds) {
   const live = (roomIds || [])
     .map((id) => ((((states[id] || {}).attributes || {}).override || {}).boost) || null)
     .filter((b) => b && b.active);
   if (!live.length) return "";
-  const longest = Math.max(...live.map((b) => Number(b.remaining_s) || 0));
-  return `Boost läuft — noch ${mmss(longest)} in ${live.length} Raum/Räumen`;
+  const left = (b) => {
+    const until = b.until ? new Date(b.until).getTime() : NaN;
+    if (!Number.isNaN(until)) return Math.max(0, Math.round((until - Date.now()) / 1000));
+    return Number(b.remaining_s) || 0;
+  };
+  const longest = Math.max(...live.map(left));
+  if (longest <= 0) return "";
+  return `Boost läuft — noch ${mmss(longest)} in ${nRooms(live.length, true)}`;
+}
+
+/**
+ * "1 Raum" / "3 Räume", and after a preposition "in 3 RäumeN".
+ *
+ * German declines, and a dashboard that does not reads like a machine talking.
+ * Three places counted rooms three different ways — "1 Räume im Boost", "in 1
+ * Raum/Räumen" — so this is the one of them.
+ *
+ * `dative` is not pedantry: both call sites below sit after "in", where the
+ * plural takes -n. Writing one helper without it just moved the error from
+ * "1 Räume" to "in 2 Räume" (caught in a browser against the device, 2026-10-05).
+ */
+function nRooms(n, dative = false) {
+  if (n === 1) return `${n} Raum`;
+  return `${n} ${dative ? "Räumen" : "Räume"}`;
 }
 
 /** What a room is called on screen. Never its entity id, never a radio address. */
 function roomName(state) {
   const a = (state && state.attributes) || {};
   return a.friendly_name || a.area_id || "";
+}
+
+/**
+ * What the collapsed room list says about itself.
+ *
+ * "2 gewählt" is a COUNT, and a count is the one thing a resident already knows
+ * — they just ticked them. What they cannot see with the list closed is WHICH
+ * two, and that is the only question the line has to answer before someone
+ * presses Boost or Aktivieren.
+ *
+ * Two names, then "+n", because the row sits beside a checkbox on a phone.
+ *
+ * WHY NOT A DROPDOWN (asked 2026-10-05). A `<select multiple>` hides the
+ * selection behind a tap, needs a second tap to close, renders as a native
+ * modal on iOS and Android that no theme reaches, and on a flat with three
+ * rooms it would hide three words to save one line. The disclosure below keeps
+ * the common case — all of them — to a single line and shows every room at
+ * once when opened, which a dropdown cannot do while staying readable.
+ */
+function scopeLabel(states, rooms, f, open) {
+  const caret = open ? "▾" : "▸";
+  if (f.allRooms) return `${caret} Räume: alle`;
+  const names = rooms
+    .filter((id) => f.rooms.includes(id))
+    .map((id) => roomName(states[id]) || id);
+  if (!names.length) return `${caret} Kein Raum gewählt`;
+  const shown = names.slice(0, 2).join(", ");
+  return `${caret} Räume: ${shown}${names.length > 2 ? ` +${names.length - 2}` : ""}`;
 }
 
 /**
@@ -237,6 +297,23 @@ class GaHeatingActionsCard extends HTMLElement {
     this._hass = hass;
     if (!this._built) { this._built = true; this._build(); }
     this._render();
+  }
+
+  //: A countdown has to be driven by a clock, not by state updates. The card
+  //: re-renders when Home Assistant pushes a change; a boost running out pushes
+  //: nothing until it ends, so without this the seconds stand still.
+  //:
+  //: Every second, and only while the card is on screen — `disconnectedCallback`
+  //: stops it, so a dashboard the resident has navigated away from costs nothing.
+  connectedCallback() {
+    this._ticker = setInterval(() => {
+      if (this._hass && !this._openForm) this._render();
+    }, 1000);
+  }
+
+  disconnectedCallback() {
+    clearInterval(this._ticker);
+    this._ticker = null;
   }
 
   getCardSize() { return 6; }
@@ -386,6 +463,68 @@ class GaHeatingActionsCard extends HTMLElement {
     }
   }
 
+  /** The rooms with a boost running — what the line above the button counts. */
+  _boostRooms() {
+    return (this._rooms() || []).filter((id) =>
+      ((((this._hass.states[id] || {}).attributes || {}).override || {}).boost || {})
+        .active === true);
+  }
+
+  /**
+   * End every running boost, and put those rooms back where they were.
+   *
+   * SCOPED TO THE ROOMS THAT ARE BOOSTING, not to the selection — the same rule
+   * as `_endAbsence`, and for the same reason: the button sits under a line that
+   * says "3 Räume im Boost", and a button under that sentence has to act on
+   * those three. The selection is an input to STARTING something; by the time
+   * someone wants out, it may have been changed, and a Beenden that reported
+   * success having ended nothing is the worst of both.
+   *
+   * Nothing restores a previous state here, because nothing was overwritten: a
+   * boost wins over each room's stored decision while it runs and never replaces
+   * it, so dropping it is the way back. A room that was AUS returns to AUS.
+   */
+  async _endBoost() {
+    const rooms = this._boostRooms();
+    if (!rooms.length) return this._say("ok", "Kein Boost aktiv.");
+    let ok = 0;
+    for (const id of rooms) {
+      try {
+        await this._hass.callService("ga_heating", "cancel_boost", { entity_id: id });
+        ok += 1;
+      } catch (e) { /* counted by omission */ }
+    }
+    this._say(ok === rooms.length ? "ok" : "err",
+      `Boost in ${ok} von ${rooms.length} Räumen beendet.`);
+  }
+
+  /** The rooms that actually have one running — what the status line counts. */
+  _absenceRooms() {
+    return (this._rooms() || []).filter((id) =>
+      ((((this._hass.states[id] || {}).attributes || {}).override || {}).absence || {})
+        .active === true);
+  }
+
+  /**
+   * End the Sonderplan the status line is describing.
+   *
+   * NOT the selection. "Deaktivieren" inside the form is selection-scoped, which
+   * is right for an editor; this button sits next to a line that says "1 von 3
+   * Räumen", and a button under that sentence has to act on THAT one. With the
+   * selection elsewhere it would have reported success having done nothing.
+   */
+  async _endAbsence() {
+    const rooms = this._absenceRooms();
+    if (!rooms.length) return this._say("ok", "Kein Sonderplan aktiv.");
+    let ok = 0;
+    for (const id of rooms) {
+      try { await this._hass.callApi("delete", "ga_heating/absence", { entity_id: id }); ok += 1; }
+      catch (e) { /* counted by omission */ }
+    }
+    this._say(ok === rooms.length ? "ok" : "err",
+      `Sonderplan in ${ok} von ${rooms.length} Räumen beendet.`);
+  }
+
   async _cancelAbsence() {
     const rooms = this._selected();
     let ok = 0;
@@ -408,13 +547,17 @@ class GaHeatingActionsCard extends HTMLElement {
           <div class="rooms"></div>
           <div class="quick">
             <button class="btn primary boost">Boost setzen</button>
+            <button class="btn ghost end-boost" hidden>Boost beenden</button>
             <button class="btn ki planall">Alle → KI</button>
             <button class="btn aus offall">Alle AUS</button>
           </div>
           <div class="hint frosthint"></div>
           <h4 class="sph">Sonderpläne (Krankheit und Urlaub)</h4>
           <div class="status"></div>
-          <button class="btn ghost toggle-form"></button>
+          <div class="statusactions">
+            <button class="btn ghost toggle-form"></button>
+            <button class="btn ghost end-absence" hidden>Sonderplan beenden</button>
+          </div>
           <div class="form">
           <div class="kinds">
             <button class="btn kind" data-kind="sick">Krankheit</button>
@@ -469,6 +612,8 @@ class GaHeatingActionsCard extends HTMLElement {
         ga-heating-actions-card .status.on { box-shadow: inset 3px 0 0 var(--ga-heat,#ff8a3d); }
         ga-heating-actions-card .status .quiet { color: var(--secondary-text-color,#6b7682); }
 
+        ga-heating-actions-card .statusactions { display:flex; gap:8px; flex-wrap:wrap; }
+        ga-heating-actions-card .statusactions .btn[hidden] { display:none; }
         ga-heating-actions-card .form[hidden] { display:none; }
         ga-heating-actions-card .form { display: grid; gap: 12px; }
 
@@ -498,6 +643,8 @@ class GaHeatingActionsCard extends HTMLElement {
     this.querySelector(".planall").addEventListener("click", () => this._planAll());
     this.querySelector(".apply").addEventListener("click", () => this._applyAbsence());
     this.querySelector(".cancel-absence").addEventListener("click", () => this._cancelAbsence());
+    this.querySelector(".end-absence").addEventListener("click", () => this._endAbsence());
+    this.querySelector(".end-boost").addEventListener("click", () => this._endBoost());
     this.querySelector(".toggle-form").addEventListener("click", () => {
       this._openForm = !this._openForm;
       this._render();
@@ -544,12 +691,31 @@ class GaHeatingActionsCard extends HTMLElement {
       const live = rooms0.filter((id) =>
         ((((this._hass.states[id] || {}).attributes || {}).override || {}).boost || {}).active);
       bh.textContent = live.length
-        ? `${live.length} Räume im Boost · Ventile ganz offen`
+        ? `${nRooms(live.length)} im Boost · Ventile ganz offen`
         : "Ventile kurzzeitig ganz öffnen";
     }
 
     const tf = this.querySelector(".toggle-form");
     if (tf) tf.textContent = this._openForm ? "Abbrechen" : "Bearbeiten";
+    // THE WAY OUT, BESIDE THE THING IT ENDS. "Deaktivieren" lives inside the
+    // form, which starts closed — so a resident with a Sonderplan running saw a
+    // status and one button labelled "Bearbeiten", and the only way to stop it
+    // was to open an editor they did not want ("where is the deactivate",
+    // 2026-10-05). Shown only while something is actually running: a button that
+    // ends nothing is a question, not an action.
+    const end = this.querySelector(".end-absence");
+    if (end) {
+      if (this._absenceRooms().length) end.removeAttribute("hidden");
+      else end.setAttribute("hidden", "");
+    }
+    // Same rule for the boost: shown only while one is running. A permanent
+    // "Boost beenden" beside "Boost setzen" would read as the other half of a
+    // pair of settings rather than as a way out of something in progress.
+    const eb = this.querySelector(".end-boost");
+    if (eb) {
+      if (this._boostRooms().length) eb.removeAttribute("hidden");
+      else eb.setAttribute("hidden", "");
+    }
     const formEl = this.querySelector(".form");
     if (formEl) { if (this._openForm) formEl.removeAttribute("hidden"); else formEl.setAttribute("hidden", ""); }
 
@@ -606,7 +772,7 @@ class GaHeatingActionsCard extends HTMLElement {
         `<label><input type="checkbox" class="allrooms" ${f.allRooms ? "checked" : ""}>`
         + `<b>Alle Räume</b></label>`
         + `<button class="btn ghost toggle-rooms">`
-        + `Räume: ${f.allRooms ? "Alle" : `${f.rooms.length} gewählt`}`
+        + `${scopeLabel(this._hass.states, rooms, f, this._openRooms)}`
         + `</button>`
         + (this._openRooms
             ? rooms.map((id) =>

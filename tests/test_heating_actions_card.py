@@ -555,3 +555,155 @@ def test_alle_ki_also_ends_a_running_boost():
     body_src = src[i:i + 900]
     assert "cancel_boost" in body_src
     assert 'hvac_mode: "auto"' in body_src
+
+
+# ── a running boost can be ended from here too ───────────────────────────────
+# Asked for on 2026-10-05: "we also need a beenden button in the profil to stop
+# boost for all selected rooms". The card could start a boost in every room and
+# offered no way out of one; the only escape was "Alle → KI", which also
+# overwrites the stored decision of every room that was not boosting.
+
+#: Runs `_endBoost` against a stubbed hass and reports what it sent.
+END_BOOST = """
+(() => {
+  const sent = [];
+  const said = [];
+  const c = Object.create(GaHeatingActionsCard.prototype);
+  c.setConfig({});
+  c._hass = {
+    states: %s,
+    callService: (d, s, data) => {
+      sent.push({ domain: d, service: s, data });
+      return Promise.resolve();
+    },
+  };
+  c._say = (kind, text) => said.push({ kind, text });
+  c._endBoost();
+  return JSON.stringify({ sent, said });
+})()
+"""
+
+
+def _boosting(*room_ids):
+    """States where the named rooms have a boost running, plus one that has not."""
+    out = {
+        "climate.wohnzimmer": {"attributes": {"friendly_name": "Wohnzimmer",
+                                              "valves": [], "max_temp": 30}},
+        "climate.bad": {"attributes": {"friendly_name": "Badezimmer",
+                                       "valves": [], "max_temp": 30}},
+        "climate.schlaf": {"attributes": {"friendly_name": "Schlafzimmer",
+                                          "valves": [], "max_temp": 30}},
+    }
+    for rid in room_ids:
+        out[rid]["attributes"]["override"] = {
+            "boost": {"active": True, "until": "2099-01-01T00:00:00", "temp": 30}}
+    return out
+
+
+def end_boost(states_obj):
+    return json.loads(run_js(CARD, END_BOOST % json.dumps(states_obj)))
+
+
+def test_the_button_ends_every_room_that_is_boosting():
+    """THE RED ONE: there was no way out of a whole-home boost."""
+    got = end_boost(_boosting("climate.bad", "climate.schlaf"))
+    assert {c["service"] for c in got["sent"]} == {"cancel_boost"}
+    assert {c["data"]["entity_id"] for c in got["sent"]} == {"climate.bad", "climate.schlaf"}
+
+
+def test_a_room_without_a_boost_is_left_alone():
+    """The defect this avoids is the one "Alle → KI" has: it would put a room
+    that chose AUS back on the plan on its way past."""
+    got = end_boost(_boosting("climate.bad"))
+    assert [c["data"]["entity_id"] for c in got["sent"]] == ["climate.bad"]
+
+
+def test_nothing_running_says_so_instead_of_reporting_success():
+    got = end_boost(_boosting())
+    assert got["sent"] == []
+    assert got["said"] == [{"kind": "ok", "text": "Kein Boost aktiv."}]
+
+
+def test_it_reports_how_many_rooms_it_reached():
+    got = end_boost(_boosting("climate.bad", "climate.schlaf"))
+    assert got["said"][0]["text"] == "Boost in 2 von 2 Räumen beendet."
+
+
+def test_no_mode_is_sent_with_it():
+    """Dropping the boost IS the way back — it never replaced a room's stored
+    decision. A `set_hvac_mode` here would turn a room that was AUS before the
+    boost into a heating one."""
+    got = end_boost(_boosting("climate.bad"))
+    assert not any(c["domain"] == "climate" for c in got["sent"])
+
+
+def test_the_button_is_hidden_until_a_boost_is_running():
+    """A permanent "Boost beenden" beside "Boost setzen" reads as the other half
+    of a pair of settings rather than as a way out of something in progress."""
+    markup = run_js(CARD, BUILD_MARKUP)
+    assert "Boost beenden" in markup
+    i = markup.index("Boost beenden")
+    assert "hidden" in markup[max(0, i - 120):i], markup[max(0, i - 120):i]
+
+
+# ── which rooms an action will touch, in words ───────────────────────────────
+# "maybe a dropdown list?" (2026-10-05). The list stays a disclosure; what was
+# missing is WHICH rooms are in scope while it is closed — see scopeLabel.
+
+def scope(selected, all_rooms=False, open_=False):
+    f = {"allRooms": all_rooms, "rooms": selected}
+    rooms = ["climate.wohnzimmer", "climate.bad", "climate.schlaf"]
+    return run_js(CARD, f"scopeLabel({json.dumps(_boosting())}, {json.dumps(rooms)}, "
+                        f"{json.dumps(f)}, {json.dumps(open_)})")
+
+
+def test_the_closed_row_names_the_rooms_it_will_act_on():
+    """A count is the one thing a resident already knows — they just ticked them.
+    What they cannot see with the list closed is WHICH."""
+    assert scope(["climate.bad"]) == "▸ Räume: Badezimmer"
+
+
+def test_two_names_then_a_number():
+    """The row sits beside a checkbox on a phone."""
+    got = scope(["climate.wohnzimmer", "climate.bad", "climate.schlaf"])
+    assert got == "▸ Räume: Wohnzimmer, Badezimmer +1"
+
+
+def test_all_rooms_says_so_rather_than_listing_the_flat():
+    assert scope([], all_rooms=True) == "▸ Räume: alle"
+
+
+def test_an_empty_selection_says_so():
+    """Must-not-flag: "0 gewählt" and "Räume: " both read as a loading state.
+    This is the one case where a resident presses Boost and nothing happens."""
+    assert scope([]) == "▸ Kein Raum gewählt"
+
+
+def test_the_caret_follows_the_disclosure():
+    assert scope(["climate.bad"], open_=True).startswith("▾")
+
+
+def test_a_room_is_named_never_identified():
+    """The old profile view listed entity ids when an area had no name. A radio
+    address in a room picker is the bug `roomName` exists to prevent."""
+    assert "climate." not in scope(["climate.bad"])
+
+
+def test_german_declines_and_so_does_the_card():
+    """"1 Räume im Boost" and "in 1 Raum/Räumen" were both on screen. A dashboard
+    that cannot count in the language it speaks reads like a machine."""
+    assert run_js(CARD, "nRooms(1)") == "1 Raum"
+    assert run_js(CARD, "nRooms(3)") == "3 Räume"
+    one = _boosting("climate.bad")
+    line = run_js(CARD, f"boostStatus({json.dumps(one)}, {json.dumps(list(one))})")
+    assert "1 Raum" in line and "Räume" not in line, line
+
+
+def test_the_plural_after_in_takes_the_dative():
+    """Both status lines sit after "in", where the plural takes -n. A helper
+    without the case just moves the error from "1 Räume" to "in 2 Räume"."""
+    assert run_js(CARD, "nRooms(2, true)") == "2 Räumen"
+    assert run_js(CARD, "nRooms(1, true)") == "1 Raum"
+    two = _boosting("climate.bad", "climate.schlaf")
+    line = run_js(CARD, f"boostStatus({json.dumps(two)}, {json.dumps(list(two))})")
+    assert line.endswith("in 2 Räumen"), line
