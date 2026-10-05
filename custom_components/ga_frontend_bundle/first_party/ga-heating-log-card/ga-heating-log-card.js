@@ -7,7 +7,7 @@
  *
  *  1. A GA device has no `default_config`, and `ga_packages/ga_integrations.yaml`
  *     loads `history:` and NOT `logbook:` — so `/api/logbook` answers 404 here.
- *     Measured on 100.126.209.15, 2026-09-30.
+ *     Measured on a resident test device, 2026-09-30.
  *  2. Even with it loaded it would show the wrong half. The logbook records
  *     STATE changes; a room's setpoint is an ATTRIBUTE. "21 → 23 °C" — the thing
  *     a resident actually did — would never appear in it.

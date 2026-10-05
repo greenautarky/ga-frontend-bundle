@@ -326,14 +326,14 @@ function roomSections(room, opt, hass) {
   // a number; else temps[0]; else no badge (never an empty one).
   //: A thermometer, stated rather than inherited. Read off the CLIMATE entity the
   //: badge would otherwise take its icon from a thermostat — the dial glyph, which
-  //: is the control, not the reading (seen on 100.126.209.15, 2026-09-30). Set on
+  //: is the control, not the reading (seen on a resident test device, 2026-09-30). Set on
   //: every branch, so the badge looks the same whichever source answers.
   //
   // THE SENSOR ITSELF, where ga_heating names one. A badge on the climate entity
   // reads `current_temperature`, and an entity badge falls back to the ENTITY'S
   // STATE when that attribute is missing — so a room whose thermometer has not
   // reported shows the hvac mode where a temperature belongs: "Heat" next to a
-  // thermometer icon (seen during boot on 100.126.209.15, 2026-10-01, and it
+  // thermometer icon (seen during boot on a resident test device, 2026-10-01, and it
   // would sit there for as long as a sensor stayed offline, not only while
   // booting).
   //
@@ -437,7 +437,7 @@ function roomSections(room, opt, hass) {
   //
   // A TRV reports its own `_local_temperature` too, and it is a temperature
   // sensor in the room like any other — so the graph drew both, and the second
-  // curve was the radiator, not the room (measured on 100.126.209.15,
+  // curve was the radiator, not the room (measured on a resident test device,
   // 2026-09-30: 23.65 °C at the valve against 23.40 °C in the room, with the
   // legend giving no hint which was which). A valve reads warm because it sits
   // on the radiator; that is the whole reason `calibration.py` exists, and it

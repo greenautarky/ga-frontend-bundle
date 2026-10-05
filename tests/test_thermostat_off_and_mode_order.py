@@ -1,6 +1,6 @@
 """AUS sits first, and an off room looks exactly like a heating one.
 
-Asked for on 2026-09-30, on 100.126.209.15.
+Asked for on 2026-09-30, on a resident test device.
 
   the ORDER    AUS ... MANUEL ... KI, left to right — least heating to most,
                so the row reads as one scale. This is PRESENTATION ONLY: every

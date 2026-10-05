@@ -1,7 +1,7 @@
 """The last few changes to a room, with timestamps.
 
 Asked for on 2026-09-30. The core logbook card cannot answer this on a GA
-device, for two independent reasons measured on 100.126.209.15:
+device, for two independent reasons measured on a resident test device:
 
   the 404    `ga_packages/ga_integrations.yaml` loads `history:` and NOT
              `logbook:` (a GA device has no `default_config`), so
