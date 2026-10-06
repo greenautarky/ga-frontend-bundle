@@ -367,3 +367,108 @@ def test_the_title_renders_inside_the_padded_body():
     card's sat in from it."""
     out = _render({"a": batt(96)}, ["a"])
     assert out.index('class="card-content"') < out.index("Wartung")
+
+
+# -- radio health ------------------------------------------------------------
+#
+# Added 2026-10-06, after a balancing run left one room in MANUEL with a
+# three-hour clock on a radiator nobody had touched. ga_heating now forgives the
+# late echo that caused it; this section is where the REASON becomes visible,
+# because "the room went manual by itself" is otherwise a mystery with no entity
+# to point at.
+#
+# Two signals, deliberately separate: link quality is the radio, and a late answer
+# is what that radio cost us.
+
+
+def radio_rows(entities, links=(), climate=None):
+    return json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows(" + json.dumps(entities) + ", [], "
+        + json.dumps({"links": list(links), "climate": climate})
+        + ").map(r => r.name + '|' + r.detail))"))
+
+
+def lqi(value, friendly="Thermostat 1 Linkqualität"):
+    return {"state": str(value), "attributes": {"friendly_name": friendly}}
+
+
+def test_a_weak_radio_is_named():
+    out = radio_rows({"sensor.a_linkquality": lqi(22)}, links=["sensor.a_linkquality"])
+    assert out == ["Thermostat 1|Funkverbindung schwach"], out
+
+
+def test_a_very_weak_radio_says_so():
+    out = radio_rows({"sensor.a_linkquality": lqi(9)}, links=["sensor.a_linkquality"])
+    assert out == ["Thermostat 1|Funkverbindung sehr schwach"], out
+
+
+def test_a_healthy_radio_says_nothing():
+    assert radio_rows({"sensor.a_linkquality": lqi(180)},
+                      links=["sensor.a_linkquality"]) == []
+
+
+def test_an_unreported_link_quality_is_not_a_weak_signal():
+    """THE RED ONE for this section. Link quality was switched on across the fleet
+    on 2026-10-06 and every sensor read `unknown` until its device next reported -
+    for a battery TRV, possibly hours. `Number("unknown")` is NaN, but `Number("")`
+    and `Number(null)` are 0, which would have put "sehr schwach" on every
+    thermostat in the house at once."""
+    for bad in ("unknown", "unavailable", "", "   ", None):
+        out = radio_rows({"sensor.a_linkquality": {"state": bad, "attributes": {}}},
+                         links=["sensor.a_linkquality"])
+        assert out == [], (bad, out)
+
+
+def test_a_zero_is_still_a_reading():
+    """Must-not-flag the other way: 0 is the worst possible link, not a missing
+    one, and it is the one most worth saying."""
+    out = radio_rows({"sensor.a_linkquality": lqi(0)}, links=["sensor.a_linkquality"])
+    assert out == ["Thermostat 1|Funkverbindung sehr schwach"], out
+
+
+def test_a_radiator_that_answers_late_is_named_with_its_lag():
+    states = {
+        "climate.bijan": {"state": "auto", "attributes": {
+            "valves_late": {"climate.0xaaa": {"lag_s": 58, "count": 1}}}},
+        "climate.0xaaa": {"state": "auto", "attributes": {"friendly_name": "Thermostat 1"}},
+    }
+    out = radio_rows(states, climate="climate.bijan")
+    assert out == ["Thermostat 1|antwortet verzögert (58 s)"], out
+
+
+def test_a_room_with_no_late_radiator_says_nothing():
+    states = {"climate.bijan": {"state": "auto", "attributes": {}}}
+    assert radio_rows(states, climate="climate.bijan") == []
+    assert radio_rows({}, climate=None) == []
+
+
+def test_a_barely_late_answer_is_not_worth_a_card_entry():
+    """A TRV reports on its own cycle; a few seconds behind is normal and would
+    make this section noise."""
+    states = {
+        "climate.bijan": {"state": "auto", "attributes": {
+            "valves_late": {"climate.0xaaa": {"lag_s": 4, "count": 1}}}},
+        "climate.0xaaa": {"state": "auto", "attributes": {"friendly_name": "Thermostat 1"}},
+    }
+    assert radio_rows(states, climate="climate.bijan") == []
+
+
+def test_the_worst_thing_is_first_across_every_kind():
+    """A resident reads the first line. An empty battery outranks a weak radio,
+    which outranks a slow answer."""
+    states = {
+        "sensor.a_battery": {"state": "12", "attributes": {"friendly_name": "Fenster Batterie"}},
+        "sensor.b_linkquality": lqi(20, "Thermostat 2 Linkqualität"),
+        "climate.bijan": {"state": "auto", "attributes": {
+            "valves_late": {"climate.0xaaa": {"lag_s": 58}}}},
+        "climate.0xaaa": {"state": "auto", "attributes": {"friendly_name": "Thermostat 1"}},
+    }
+    out = json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows(" + json.dumps(states)
+        + ', ["sensor.a_battery"], '
+        + json.dumps({"links": ["sensor.b_linkquality"], "climate": "climate.bijan"})
+        + ").map(r => r.name + '|' + r.detail))"))
+    assert out[0] == "Fenster|Batterie fast leer", out
+    assert len(out) == 3, out

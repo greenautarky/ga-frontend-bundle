@@ -113,8 +113,44 @@ function deviceName(state) {
  * Worst first, because a resident reads the first line. Exported shape rather
  * than markup so the ordering and the thresholds can be tested without a DOM.
  */
-function maintenanceRows(states, batteries) {
+//: LINK QUALITY, as Zigbee2MQTT reports it: 0-255, higher is better. The exact
+//: number means different things on different coordinators, so these are
+//: deliberately low: a radiator this far down is struggling on anyone's scale,
+//: and the row says "weak", never a number a resident would try to compare.
+//:
+//: Enabled across the fleet on 2026-10-06. Every sensor reads `unknown` until its
+//: device next reports, which for a battery TRV can be a long time - so an absent
+//: or non-numeric reading must render NOTHING. Same rule, and the same reason, as
+//: the battery band above: a missing value is not a bad value.
+const LINK_BANDS = [
+  { at: 15, level: "critical", word: "Funkverbindung sehr schwach",
+    icon: "mdi:wifi-strength-alert-outline" },
+  { at: 40, level: "low", word: "Funkverbindung schwach",
+    icon: "mdi:wifi-strength-1" },
+];
+
+function linkBand(lqi) {
+  return LINK_BANDS.find((b) => lqi <= b.at) || null;
+}
+
+//: A radiator that answered our own write late enough to be mistaken for a hand
+//: on the dial. ga_heating publishes these per room as `valves_late`; it is the
+//: cause behind "the room went to MANUEL by itself", which is otherwise invisible
+//: here (reported 2026-10-06, Bijan Zimmer, 58 s late after a balancing run).
+const LATE_SECONDS_WORTH_SAYING = 30;
+
+/** A reading that is actually a number, or null. Never `Number("")`, which is 0. */
+function reading(state) {
+  if (!state || state.state == null) return null;
+  const text = String(state.state).trim();
+  if (text === "") return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+function maintenanceRows(states, batteries, extra) {
   const rows = [];
+  const { links, climate } = extra || {};
   for (const id of batteries || []) {
     const s = states[id];
     if (!s) continue;
@@ -147,7 +183,40 @@ function maintenanceRows(states, batteries) {
       sort: pct,
     });
   }
-  rows.sort((a, b) => a.sort - b.sort);
+  for (const id of links || []) {
+    const lqi = reading(states[id]);
+    if (lqi === null) continue;        // `unknown` is not a weak signal
+    const band = linkBand(lqi);
+    if (!band) continue;
+    rows.push({
+      kind: "link", level: band.level, icon: band.icon,
+      name: deviceName(states[id]) || "Gerät",
+      detail: band.word,
+      sort: lqi,
+    });
+  }
+
+  // A LATE RADIATOR, read from the room ga_heating publishes it on. No threshold
+  // band: ga_heating only records an answer it had to forgive, so the entry
+  // existing IS the finding.
+  const late = ((states[climate] || {}).attributes || {}).valves_late || {};
+  for (const [valve, info] of Object.entries(late)) {
+    const lag = Number((info || {}).lag_s);
+    if (!Number.isFinite(lag) || lag < LATE_SECONDS_WORTH_SAYING) continue;
+    rows.push({
+      kind: "late", level: "low", icon: "mdi:timer-sand",
+      name: deviceName(states[valve]) || "Heizkörper",
+      detail: `antwortet verzögert (${Math.round(lag)} s)`,
+      sort: 1000 - lag,
+    });
+  }
+
+  // Worst first across every kind, because a resident reads the first line: a
+  // flat battery outranks a weak signal outranks a slow answer. Within a level
+  // each kind keeps its own sort key, so two weak radios still come out worst
+  // first.
+  const RANK = { critical: 0, low: 1 };
+  rows.sort((a, b) => (RANK[a.level] - RANK[b.level]) || (a.sort - b.sort));
   return rows;
 }
 
@@ -155,6 +224,8 @@ class GaMaintenanceCard extends HTMLElement {
   setConfig(config) {
     this._config = { ...config };
     this._batteries = Array.isArray(config.batteries) ? config.batteries : [];
+    this._links = Array.isArray(config.links) ? config.links : [];
+    this._climate = typeof config.climate === "string" ? config.climate : null;
   }
 
   set hass(hass) {
@@ -168,7 +239,8 @@ class GaMaintenanceCard extends HTMLElement {
 
   _rows() {
     const states = (this._hass && this._hass.states) || {};
-    return maintenanceRows(states, this._batteries);
+    return maintenanceRows(states, this._batteries,
+      { links: this._links, climate: this._climate });
   }
 
   _render() {

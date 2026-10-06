@@ -331,8 +331,14 @@ function thermostatCard(entity, roomName, style, header = "Steuerung") {
  * allow-list by construction — anything that is not one of this room's devices
  * cannot appear, whatever it is called or wherever it is assigned.
  */
-function roomBatteries(room, clim, hass) {
-  const states = (hass && hass.states) || {};
+/**
+ * The z2m device keys behind a room: its valves, thermometers and hygrometers.
+ *
+ * Factored out of roomBatteries when the Wartung section learned to report radio
+ * quality too — the same devices, a different suffix. Copying the walk would have
+ * let the two lists drift apart as rooms gain and lose sensors.
+ */
+function roomDeviceKeys(room, clim) {
   const keys = new Set();
   const add = (entityId) => {
     const object = String(entityId || "").split(".").pop() || "";
@@ -344,16 +350,33 @@ function roomBatteries(room, clim, hass) {
   for (const v of (clim && clim.attributes && clim.attributes.valves) || []) add(v);
   for (const t of room.temps || []) add(t);
   for (const h of room.hums || []) add(h);
+  return keys;
+}
 
+/** The entities of one suffix that actually exist for this room's devices. */
+function roomDeviceSensors(room, clim, hass, suffix) {
+  const states = (hass && hass.states) || {};
   const out = [];
-  for (const key of keys) {
-    const id = `sensor.${key}_battery`;
+  for (const key of roomDeviceKeys(room, clim)) {
+    const id = `sensor.${key}_${suffix}`;
     if (states[id]) out.push(id);
   }
   // Stable order so the rendered config does not churn between builds; the card
-  // sorts by what matters (emptiest first) when it renders.
+  // sorts by what matters (worst first) when it renders.
   out.sort();
   return out;
+}
+
+function roomBatteries(room, clim, hass) {
+  return roomDeviceSensors(room, clim, hass, "battery");
+}
+
+//: Link quality was enabled across the fleet on 2026-10-06. Passed the same way
+//: as the batteries — only the entities that EXIST — so a device or a deployment
+//: without it simply contributes nothing, and the card renders no row rather than
+//: an empty one.
+function roomLinkQuality(room, clim, hass) {
+  return roomDeviceSensors(room, clim, hass, "linkquality");
 }
 
 /**
@@ -465,6 +488,12 @@ function roomSections(room, opt, hass) {
         type: "custom:ga-maintenance-card",
         title: "Wartung",
         batteries: roomBatteries(room, clim, hass),
+        links: roomLinkQuality(room, clim, hass),
+        // The room itself, for `valves_late`: ga_heating publishes there which of
+        // this room's radiators answered our own write late enough to look like a
+        // hand on the dial. That is the cause behind "the room went to MANUEL by
+        // itself", and it has no sensor of its own to read.
+        climate: (room.climate || [])[0] || null,
       });
     }
     sections.push({ type: "grid", cards });
