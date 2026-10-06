@@ -56,6 +56,54 @@ def test_temperature_badge_comes_first_then_humidity():
     assert b[1]["entity"] == "sensor.wz_h"
 
 
+# -- a room with no hygrometer of its own ------------------------------------
+#
+# Asked for on 2026-10-06, together with the temperature: a sensorless room shows
+# the house figure rather than nothing. ga_heating computes it (there is no third
+# fallback -- a TRV does not measure humidity) and publishes it as
+# `current_humidity`; the badge binds to the climate entity for it, exactly as the
+# temperature badge does for `current_temperature`.
+
+_NO_HYGRO = """{
+  "climate.flur": { state: "heat", attributes: { current_temperature: 20.6,
+    current_humidity: 44.5, temperature_source: "house_average",
+    humidity_source: "house_average" } }
+}"""
+
+
+def test_a_room_without_a_hygrometer_shows_the_house_figure():
+    b = _badges('{ name: "Flur", climate: ["climate.flur"], temps: [], hums: [],'
+                ' batts: [], lights: [], switches: [] }', _NO_HYGRO)
+    assert b is not None
+    assert [x["name"] for x in b] == ["Temperatur", "Luftfeuchtigkeit"], b
+    hum = b[1]
+    assert hum["entity"] == "climate.flur"
+    assert hum["state_content"] == "current_humidity", (
+        "bound to the climate entity without this, the badge shows the entity STATE "
+        "- 'Heat' where a percentage belongs"
+    )
+    assert hum["icon"] == "mdi:water-percent", "else it takes the thermostat glyph"
+
+
+def test_a_room_with_its_own_hygrometer_still_uses_it():
+    """Must-not-flag: the fallback must not capture rooms that can measure."""
+    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+                ' hums: ["sensor.wz_h"], batts: [], lights: [], switches: [] }', _STATES)
+    assert b[1]["entity"] == "sensor.wz_h"
+    assert "state_content" not in b[1], "a sensor's own state IS the reading"
+
+
+def test_no_hygrometer_anywhere_means_no_humidity_badge():
+    """A house with no hygrometers at all: ga_heating publishes no
+    `current_humidity`, and an empty badge is worse than none."""
+    states = """{
+      "climate.flur": { state: "heat", attributes: { current_temperature: 20.6 } }
+    }"""
+    b = _badges('{ name: "Flur", climate: ["climate.flur"], temps: [], hums: [],'
+                ' batts: [], lights: [], switches: [] }', states)
+    assert [x["name"] for x in b] == ["Temperatur"], b
+
+
 def test_no_temperature_source_means_no_temperature_badge_and_no_null():
     """Room without a temperature sensor and without a usable current_temperature."""
     states = '{ "climate.wz": { state: "heat", attributes: { temperature: 21 } } }'

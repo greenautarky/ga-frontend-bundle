@@ -416,7 +416,22 @@ function roomSections(room, opt, hass) {
     badges.push({ type: "entity", entity: temps[0], name: "Temperatur",
       icon: "mdi:thermometer" });
   }
-  for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Luftfeuchtigkeit" });
+  // HUMIDITY, the same shape as the temperature above it. A room with its own
+  // hygrometer binds to that sensor; a room without one binds to the climate
+  // entity, which carries ga_heating's `current_humidity` — the house average of
+  // every room that HAS one. A TRV does not measure humidity, so unlike the
+  // temperature there is no third case to fall through to: either the house has
+  // hygrometers or there is no badge.
+  //
+  // `state_content` and an explicit icon for the same reason as above: bound to a
+  // climate entity, an entity badge shows the ENTITY'S STATE when the attribute is
+  // missing — "Heat" where a percentage belongs — and takes the thermostat glyph.
+  if (hums.length) {
+    badges.push({ type: "entity", entity: hums[0], name: "Luftfeuchtigkeit" });
+  } else if (clim && typeof (clim.attributes || {}).current_humidity === "number") {
+    badges.push({ type: "entity", entity: climate[0], name: "Luftfeuchtigkeit",
+      icon: "mdi:water-percent", state_content: "current_humidity" });
+  }
   // NO BATTERY BADGE. It was `batts.slice(0, 1)` — one percentage for a room
   // that may hold three battery devices, and nothing said which one it came
   // from, so a healthy valve beside a dying thermometer showed 100 %. The
