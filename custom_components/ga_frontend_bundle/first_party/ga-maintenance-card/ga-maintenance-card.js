@@ -83,11 +83,18 @@ function gaLabel(text) {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
+//: The suffixes Zigbee2MQTT and HA append to a DEVICE's name to make a sensor's.
+//: Stripped so the row names the device, not the reading: a line reading
+//: "Thermostat 1 Linkqualität — Funkverbindung schwach" says the same word twice
+//: (CI, 2026-10-06). Both languages, because the fleet runs German front ends over
+//: English integration defaults.
+const SENSOR_SUFFIX = /\s*(Batterie|Battery( level)?|Linkqualit(ä|ae)t|Link ?quality|Signal(stärke|starke)?)\s*$/i;
+
 /**
- * What to call the device this battery belongs to.
+ * What to call the device a maintenance row is about.
  *
  * In order: a GA label if anything carries one, then the name a person gave it,
- * then the sensor's own name with its " Batterie" suffix removed — and never
+ * then the sensor's own name with its reading suffix removed — and never
  * the radio address, which is the one answer that cannot help anybody standing
  * in the room holding a screwdriver.
  *
@@ -103,7 +110,7 @@ function deviceName(state) {
   // form, which is the one thing this was asked to stop showing (caught in a
   // browser, 2026-10-05).
   const friendly = String(a.friendly_name || "").trim()
-    .replace(/\s*(Batterie|Battery( level)?)\s*$/i, "").trim();
+    .replace(SENSOR_SUFFIX, "").trim();
   return gaLabel(a.ga_label) || gaLabel(friendly) || friendly || null;
 }
 
