@@ -30,7 +30,13 @@ from homeassistant.core import CoreState, Event, HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .bundle import bundle_version, card_url, delivery_plan, load_cards
+from .bundle import (
+    bundle_version,
+    card_url,
+    delivery_plan,
+    load_cards,
+    retired_resources,
+)
 from .const import (
     COMMUNITY_DIRNAME,
     COMMUNITY_INJECT_ASSET_IDS,
@@ -111,7 +117,10 @@ async def _serve_inject(
 
 
 async def _register_resource_assets(
-    hass: HomeAssistant, assets: list[dict[str, str]], version: str | None = None
+    hass: HomeAssistant,
+    assets: list[dict[str, str]],
+    version: str | None = None,
+    shipped_ids: frozenset[str] = frozenset(),
 ) -> int:
     """Register first-party assets as Lovelace RESOURCES (never injected modules).
 
@@ -133,8 +142,14 @@ async def _register_resource_assets(
 
     Same URL whichever path pulled it in, so the browser's ES-module registry
     executes the file exactly once. Idempotent.
+
+    ``shipped_ids`` is EVERY first-party asset in this package. A resource under
+    the first-party path whose asset is not among them was registered by an
+    earlier bundle for a card that has since been dropped, and is removed —
+    see ``bundle.retired_resources`` for the ownership rule (resident, HACS and
+    community resources are never touched).
     """
-    if not assets:
+    if not assets and not shipped_ids:
         return 0
 
     try:
@@ -168,6 +183,35 @@ async def _register_resource_assets(
         await resources.async_load()
 
     items = list(resources.async_items())
+
+    # Resources of cards this bundle no longer ships (dropped from first_party/
+    # in a later release). Registration only ever adds, so without this they
+    # stay forever and the panel imports a URL Core answers with HTML.
+    if not shipped_ids:
+        _LOGGER.error(
+            "%s: no first-party assets shipped — NOT sweeping retired Lovelace "
+            "resources (an empty package must not read as 'everything retired')",
+            DOMAIN,
+        )
+    for item in retired_resources(items, shipped_ids, FIRST_PARTY_URL_BASE):
+        try:
+            await resources.async_delete_item(item["id"])
+            _LOGGER.warning(
+                "%s: removed Lovelace resource %s — its asset no longer ships "
+                "with bundle %s",
+                DOMAIN,
+                item.get("url"),
+                version,
+            )
+        except Exception as err:  # noqa: BLE001 - never break HA start
+            _LOGGER.error(
+                "%s: could not remove retired resource %s: %r",
+                DOMAIN,
+                item.get("url"),
+                err,
+            )
+    items = list(resources.async_items())
+
     added = 0
     present = 0
     for card in assets:
@@ -268,7 +312,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     _fp_inject, fp_resources = delivery_plan(fp_cards, EARLY_INJECT_ASSET_IDS)
 
     async def _resources_started(_event: Event | None = None) -> None:
-        await _register_resource_assets(hass, fp_resources, version)
+        await _register_resource_assets(
+            hass,
+            fp_resources,
+            version,
+            shipped_ids=frozenset(c["id"] for c in fp_cards),
+        )
 
     if hass.state is CoreState.running:
         hass.async_create_task(_resources_started())
