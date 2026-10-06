@@ -67,6 +67,7 @@ const SOURCE_WORDS = {
   plan: { who: "System", why: "Heizplan" },
   window: { who: "System", why: "Fenster" },
   expiry: { who: "System", why: "Zeit abgelaufen" },
+  balancing: { who: "System", why: "Einregulierung" },
 };
 
 //: Re-reading the whole window on every state update would hammer the recorder
