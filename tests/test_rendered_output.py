@@ -348,6 +348,9 @@ def test_the_curves_are_still_there():
     assert [c["title"] for c in cards] == ["Temperatur letzte 24h"], cards
     for card in cards:
         assert card["entities"], f"{card['title']!r} charts nothing"
+        # Hourly means: fewer points read as curves, where 5-minute means drew
+        # met.no's half-hourly outdoor series as a staircase. The lag that comes
+        # with it is accepted — see GRAPH_PERIOD.
         assert card["days_to_show"] == 1 and card["period"] == "hour"
         # the title brings HA's history chevron with it; card-mod takes it away
         assert "a { display: none; }" in card["card_mod"]["style"]

@@ -224,7 +224,6 @@ class GaHeatingCard extends HTMLElement {
     this._config = config;
     this._day = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1][0];
     this._week = null;   // {monday: [{time,temp}], …} — the whole week, edited locally
-    this._dirty = false;
   }
 
   set hass(hass) {
@@ -248,13 +247,13 @@ class GaHeatingCard extends HTMLElement {
       this._padded = this._normalise();
       // The plan AS IT STANDS, kept so every later render can say what an edit
       // changed. Copied after padding, because padding is this card proposing
-      // rows rather than the resident changing anything (see `_dirty` below) —
+      // rows rather than the resident changing anything (see `_isDirty`) —
       // taken before it, every padded row would show up as an edit nobody made.
       this._saved = JSON.parse(JSON.stringify(this._week));
-      // `_dirty` stays false: padding is a PROPOSAL, not an edit the resident
-      // made. Marking it dirty would arm Save on a plan nobody touched, and the
-      // next press would write five slots the resident never looked at.
-      this._dirty = false;
+      // Nothing is dirty here, and nothing has to say so: `_saved` was copied
+      // AFTER padding, so the diff sees no difference. Padding is a PROPOSAL,
+      // not an edit the resident made — arming Save on it would write five slots
+      // nobody looked at.
       this._render();
     } catch (e) {
       this._flash("err", "Plan konnte nicht geladen werden.");
@@ -265,9 +264,8 @@ class GaHeatingCard extends HTMLElement {
     try {
       await this._hass.callApi("post", "ga_heating/schedule",
         { entity_id: this._config.entity, days: this._week });
-      // What was just written IS the plan now; nothing is pending any more.
+      // What was just written IS the plan now, so the diff goes quiet by itself.
       this._saved = JSON.parse(JSON.stringify(this._week));
-      this._dirty = false;
       this._render();
       this._flash("ok", "Heizplan gespeichert — er gilt ab sofort.");
     } catch (e) {
@@ -301,9 +299,21 @@ class GaHeatingCard extends HTMLElement {
   _discard() {
     if (!this._saved) return;
     this._week = JSON.parse(JSON.stringify(this._saved));
-    this._dirty = false;
     this._render();
     this._flash("ok", "Änderungen verworfen — der gespeicherte Plan gilt weiter.");
+  }
+
+  /**
+   * Is anything actually different from the saved plan?
+   *
+   * DERIVED, not a flag. A `_dirty` boolean set on every edit never came back
+   * down: a resident who typed 21, thought better of it and typed 18 again was
+   * left with Speichern and Verwerfen still armed over a plan identical to the
+   * stored one (reported 2026-10-05). The diff already knows; asking it means
+   * the buttons cannot disagree with what the card is showing.
+   */
+  _isDirty() {
+    return changedDays(this._week, this._saved).length > 0;
   }
 
   _slots() { return this._week[this._day] || []; }
@@ -317,12 +327,12 @@ class GaHeatingCard extends HTMLElement {
       s.time = t;
     }
     else s.temp = Math.min(TMAX, Math.max(TMIN, parseFloat(value) || 20));
-    this._sort(); this._dirty = true; this._render();
+    this._sort(); this._render();
   }
   _copyTo(days) {
     const src = JSON.parse(JSON.stringify(this._slots()));
     for (const d of days) this._week[d] = JSON.parse(JSON.stringify(src));
-    this._dirty = true; this._render();
+    this._render();
     this._flash("ok", `Übernommen auf ${days.length} Tage — noch nicht gespeichert.`);
   }
 
@@ -514,12 +524,13 @@ class GaHeatingCard extends HTMLElement {
       ? `Noch nicht gespeichert: ${names.join(", ")}`
       : "";
     pending.classList.toggle("on", names.length > 0);
-    this.querySelector(".save").disabled = !this._dirty;
-    this.querySelector(".discard").disabled = !this._dirty;
+    const dirty = this._isDirty();
+    this.querySelector(".save").disabled = !dirty;
+    this.querySelector(".discard").disabled = !dirty;
 
     // Two things the resident must not have to guess. Only shown while nothing
     // has been edited, so it never sits on top of a save result.
-    if (!this._dirty) {
+    if (!dirty) {
       if (list.length > SLOTS_PER_DAY) {
         this._flash("ok", `Dieser Tag hat ${list.length} Zeiten — mehr als die fünf, die hier angeboten werden. `
           + `Sie bleiben erhalten; nichts wird entfernt.`);

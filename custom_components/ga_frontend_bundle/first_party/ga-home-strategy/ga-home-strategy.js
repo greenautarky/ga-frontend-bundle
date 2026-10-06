@@ -242,6 +242,25 @@ async function fetchHomeModel(hass) {
 //:
 //: card-mod is already injected on every GA dashboard (const.COMMUNITY_INJECT_
 //: ASSET_IDS) for exactly this class of problem.
+//: HOURLY MEANS, and the lag that comes with them is accepted deliberately.
+//:
+//: An hourly statistic is written when its hour is COMPLETE — the 12:00 row
+//: appears at 13:00 — so this chart ends between one and two hours ago. Five
+//: minute means fix that (measured 2026-10-05: newest hourly row 11:00, newest
+//: 5-minute row 12:20, clock 12:28) and were tried for exactly that reason.
+//:
+//: They were reverted because of what they revealed. A room's own thermometer
+//: reports often enough to draw a curve either way (35 points, 19 changes over
+//: three hours), but met.no publishes roughly every half hour, so the outdoor
+//: series became a staircase (35 points, 6 changes). At one point per hour both
+//: lines read as curves — the chart interpolates between measurements, which is
+//: what makes an hourly mean legible in the first place.
+//:
+//: So: fewer points, smoother lines, and a tail that lags. The CURRENT numbers
+//: are a badge away at the top of the same view, which is where a resident looks
+//: for "what is it now" anyway.
+const GRAPH_PERIOD = "hour";
+
 const GRAPH_CHROME = {
   card_mod: {
     style: ".card-header { font-size: 16px; font-weight: 600; line-height: 1.4; "
@@ -299,6 +318,45 @@ function thermostatCard(entity, roomName, style, header = "Steuerung") {
 }
 
 /**
+ * The battery sensors of a room's OWN heating devices.
+ *
+ * Built from the devices, never from the area's entity list. `room.batts` is
+ * "every battery sensor in this area", and on the first device this was written
+ * against that included a phone's `sensor.<name>_battery_level` at 15 % — the Home
+ * Assistant companion app, i.e. somebody's phone. A maintenance line saying the
+ * heating needs attention because a phone is flat is worse than no line.
+ *
+ * So: take the radio ids of the valves ga_heating names and of the room's own
+ * thermometers, and accept the battery sensor that belongs to each. An
+ * allow-list by construction — anything that is not one of this room's devices
+ * cannot appear, whatever it is called or wherever it is assigned.
+ */
+function roomBatteries(room, clim, hass) {
+  const states = (hass && hass.states) || {};
+  const keys = new Set();
+  const add = (entityId) => {
+    const object = String(entityId || "").split(".").pop() || "";
+    // z2m names every entity of a device after its IEEE: `0x…_battery`,
+    // `0x…_temperature`, and the climate entity is the bare address.
+    const m = /^(0x[0-9a-f]+)/i.exec(object);
+    if (m) keys.add(m[1].toLowerCase());
+  };
+  for (const v of (clim && clim.attributes && clim.attributes.valves) || []) add(v);
+  for (const t of room.temps || []) add(t);
+  for (const h of room.hums || []) add(h);
+
+  const out = [];
+  for (const key of keys) {
+    const id = `sensor.${key}_battery`;
+    if (states[id]) out.push(id);
+  }
+  // Stable order so the rendered config does not churn between builds; the card
+  // sorts by what matters (emptiest first) when it renders.
+  out.sort();
+  return out;
+}
+
+/**
  * The room view sections, built from ONE pre-classified, states-validated room:
  *   { name, climate[], lights[], switches[], temps[], hums[], batts[] }
  */
@@ -309,7 +367,6 @@ function roomSections(room, opt, hass) {
   const climate = opt.singleThermostat ? climateAll.slice(0, 1) : climateAll;
   const temps = room.temps || [];
   const hums = room.hums || [];
-  const batts = room.batts || [];
   const lights = room.lights || [];
   const switches = room.switches || [];
 
@@ -360,7 +417,11 @@ function roomSections(room, opt, hass) {
       icon: "mdi:thermometer" });
   }
   for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Luftfeuchtigkeit" });
-  for (const e of batts.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Batterie" });
+  // NO BATTERY BADGE. It was `batts.slice(0, 1)` — one percentage for a room
+  // that may hold three battery devices, and nothing said which one it came
+  // from, so a healthy valve beside a dying thermometer showed 100 %. The
+  // reading moved into the Wartung section below, where it appears only when it
+  // needs a person and says whose battery it is.
 
   const sections = [];
 
@@ -382,6 +443,14 @@ function roomSections(room, opt, hass) {
       if (opt.changeLog) {
         cards.push({ type: "custom:ga-heating-log-card", entity, title: "Aktivität" });
       }
+      // Under the activity, because it answers the next question: that was what
+      // happened, this is what needs doing. Batteries today; heating faults are
+      // meant to join them here rather than become a second list elsewhere.
+      cards.push({
+        type: "custom:ga-maintenance-card",
+        title: "Wartung",
+        batteries: roomBatteries(room, clim, hass),
+      });
     }
     sections.push({ type: "grid", cards });
   }
@@ -467,7 +536,7 @@ function roomSections(room, opt, hass) {
       : graphTemps;
     if (outdoor) entities.push({ entity: outdoor, name: "Außentemperatur" });
     history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
-      stat_types: ["mean"], days_to_show: 1, period: "hour", ...GRAPH_CHROME });
+      stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD, ...GRAPH_CHROME });
   }
   if (hasHistory && hums.length) {
     // Named for the same reason the temperature curve is: left to itself the card
@@ -481,7 +550,7 @@ function roomSections(room, opt, hass) {
       : hums;
     if (outdoorH) entities.push({ entity: outdoorH, name: "Außenluftfeuchtigkeit" });
     history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h",
-      entities, stat_types: ["mean"], days_to_show: 1, period: "hour",
+      entities, stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD,
       ...GRAPH_CHROME });
   }
   if (history.length) {

@@ -333,6 +333,9 @@ def test_an_entry_with_an_offset_is_shown_in_the_viewers_clock(monkeypatch, tz, 
         ("plan", "System · Heizplan"),
         ("window", "System · Fenster"),
         ("expiry", "System · Zeit abgelaufen"),
+        # ga_heating 0.13.0: the balancing hour (ICHB). Started by the operator at
+        # commissioning, not by the resident, so it sits on the System side.
+        ("balancing", "System · Einregulierung"),
     ],
 )
 def test_each_source_says_who_first_then_why(source, expected):

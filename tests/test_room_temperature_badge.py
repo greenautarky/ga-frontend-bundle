@@ -38,12 +38,21 @@ _STATES = """{
 
 
 def test_temperature_badge_comes_first_then_humidity():
-    """Room with temp + humidity sensors -> badges = [Temperatur, Luftfeuchtigkeit, ...]."""
+    """Room with temp + humidity sensors -> badges = [Temperatur, Luftfeuchtigkeit].
+
+    THE BATTERY BADGE IS GONE from this row (2026-10-05). It was
+    `batts.slice(0, 1)`: one percentage for a room that may hold three battery
+    devices, with nothing saying which one it came from. The reading moved to
+    the Wartung section, which appears only when a battery needs a person and
+    names the device — see test_maintenance_card.py.
+
+    The room below still HAS a battery sensor, so this also pins that removing
+    the badge did not quietly take the humidity one with it."""
     b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
                 ' hums: ["sensor.wz_h"], batts: ["sensor.wz_b"], lights: [], switches: [] }',
                 _STATES)
     assert b is not None, "no Heizung heading built — the test would be vacuous"
-    assert [x["name"] for x in b] == ["Temperatur", "Luftfeuchtigkeit", "Batterie"], b
+    assert [x["name"] for x in b] == ["Temperatur", "Luftfeuchtigkeit"], b
     assert b[1]["entity"] == "sensor.wz_h"
 
 

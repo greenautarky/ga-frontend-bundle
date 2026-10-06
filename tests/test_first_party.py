@@ -8,6 +8,7 @@ never touch them, but loaded/served/injected by the same mechanism.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from conftest import PKG
@@ -167,3 +168,37 @@ def test_sidebar_default_module_present_and_discovered(bundle_module):
     assert "localStorage.getItem(KEY)" in js       # only acts while no user preference
     cards = bundle_module.load_cards(FIRST_PARTY)
     assert {"id": "ga-sidebar-default", "file": "ga-sidebar-default.js"} in cards
+
+
+# ── a backtick in a <style> block is a syntax error, not a typo ──────────────
+
+
+def test_no_backtick_inside_a_shipped_style_block():
+    """Every card builds itself from a TEMPLATE LITERAL, and its <style> lives
+    inside that literal. A backtick anywhere in there ends the string, and the
+    CSS after it is parsed as JavaScript — "SyntaxError: Unexpected identifier
+    'display'" — so the card does not load at all and Home Assistant renders
+    "Konfigurationsfehler" where the dashboard should be.
+
+    It shipped twice on 2026-10-05: once quoting a CSS declaration in a comment
+    explaining a fix, then again in the comment explaining THAT one. Both times
+    the file reached a device before anything noticed.
+
+    CI caught both (test_cards_register_in_browser, test_rendered_output), but
+    those need Node — and the machine this was written and deployed from has
+    none, so the only check that mattered ran after the mistake was already on
+    a device. This one is a string scan: it runs anywhere, in milliseconds, and
+    names the line.
+    """
+    offenders = []
+    for path in sorted((PKG / "first_party").rglob("*.js")):
+        src = path.read_text(encoding="utf-8")
+        for block in re.finditer(r"<style>(.*?)</style>", src, re.S):
+            css = block.group(1)
+            if "`" in css:
+                at = block.start(1) + css.index("`")
+                offenders.append(f"{path.name}:{src[:at].count(chr(10)) + 1}")
+    assert not offenders, (
+        "backtick inside a shipped <style> block (ends the template literal): "
+        + ", ".join(offenders)
+    )

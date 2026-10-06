@@ -63,5 +63,10 @@ function browserContext() {
 
 const ctx = browserContext();
 vm.runInContext(readFileSync(file, "utf8"), ctx, { filename: file });
-const result = vm.runInContext(`(${expression})`, ctx, { filename: "<expression>" });
+// AWAITED, because a card method that talks to `hass` is async. Without this a
+// test of one saw only the work done before its first `await`: `_endBoost`
+// cancelled the first room, suspended, and the harness returned a half-finished
+// `{}` that still looked like a pass for a one-room case (CI, 2026-10-05).
+// A plain value is unaffected — `await 3` is 3.
+const result = await vm.runInContext(`(${expression})`, ctx, { filename: "<expression>" });
 process.stdout.write(JSON.stringify(result === undefined ? null : result));

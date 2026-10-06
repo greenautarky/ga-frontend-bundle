@@ -115,13 +115,30 @@ def test_the_frost_setpoint_is_read_from_the_valves():
     assert "7 °C" in call(f"frostText({json.dumps(s)})")
 
 
-def test_valves_that_disagree_are_all_named():
+def test_valves_that_disagree_report_the_lowest_not_both():
+    """They do not have to agree — one flat read 7 and 8 — and the line used to
+    print every value, "bei 7 / 8 °C", which asks a resident to work out which
+    radiator is which ("just say 7 not 8", 2026-10-05).
+
+    THE LOWEST, specifically. A valve set to 8 opens EARLIER than one set to 7,
+    so 7 is the coldest any room is let get; naming the warmer number would
+    promise more protection than the flat actually gives.
+    """
     s = states(**{
         "number.0xaaa_frost_protection_temperature": {"state": "7"},
         "number.0xbbb_frost_protection_temperature": {"state": "5"},
     })
-    assert call(f"frostSetpoints({json.dumps(s)})") == [5, 7]
-    assert "5 / 7" in call(f"frostText({json.dumps(s)})")
+    text = call(f"frostText({json.dumps(s)})")
+    assert "5 °C" in text, text
+    assert "7" not in text, text
+    assert "/" not in text, text
+
+
+def test_the_frost_line_says_it_is_about_AUS():
+    """It sat under a row of buttons and read as a fact about the heating in
+    general; it is only about what AUS leaves behind."""
+    s = states(**{"number.0xaaa_frost_protection_temperature": {"state": "7"}})
+    assert call(f"frostText({json.dumps(s)})").startswith("Bei AUS")
 
 
 def test_no_valve_reports_a_setpoint_means_no_promise():
@@ -441,10 +458,21 @@ def test_nothing_overriding_gives_an_empty_string_so_the_card_can_say_so():
 
 
 def test_the_boost_countdown_is_shown_and_never_negative():
-    b = {"boost": {"until": "2026-10-01T09:05:00", "temp": 30.0,
+    """The deadline is built in the JS so the test and the code share one clock.
+
+    It used to be a literal — 2026-10-01T09:05 with `remaining_s: 252` beside it
+    — and that was fine only while the card trusted `remaining_s`. Counting from
+    `until` is what fixed the countdown that would not tick, and it turned this
+    test into a time bomb: the timestamp went into the past, a boost that ended
+    four days ago correctly renders as nothing, and the test failed on the code
+    being right (CI, 2026-10-05)."""
+    b = {"boost": {"until": "@@UNTIL@@", "temp": 30.0,
                    "active": True, "remaining_s": 252}}
-    s = call(f"boostStatus({json.dumps(st_with([b] * 2))}, {json.dumps(ROOM_IDS)})")
-    assert "4:12" in s and "2 Raum/Räumen" in s
+    expr = (f"boostStatus({json.dumps(st_with([b] * 2))}, {json.dumps(ROOM_IDS)})"
+            .replace('"@@UNTIL@@"', "new Date(Date.now() + 252000).toISOString()"))
+    s = call(expr)
+    assert "4:1" in s, s          # 4:12, or 4:11 if the second ticked over
+    assert "2 Räumen" in s, s
     assert call("mmss(-99)") == "0:00"
 
 
@@ -555,3 +583,539 @@ def test_alle_ki_also_ends_a_running_boost():
     body_src = src[i:i + 900]
     assert "cancel_boost" in body_src
     assert 'hvac_mode: "auto"' in body_src
+
+
+# ── a running boost can be ended from here too ───────────────────────────────
+# Asked for on 2026-10-05: "we also need a beenden button in the profil to stop
+# boost for all selected rooms". The card could start a boost in every room and
+# offered no way out of one; the only escape was "Alle → KI", which also
+# overwrites the stored decision of every room that was not boosting.
+
+#: Runs `_endBoost` against a stubbed hass and reports what it sent.
+END_BOOST = """
+(() => {
+  const sent = [];
+  const said = [];
+  const c = Object.create(GaHeatingActionsCard.prototype);
+  c.setConfig({});
+  c._hass = {
+    states: %s,
+    callService: (d, s, data) => {
+      sent.push({ domain: d, service: s, data });
+      return Promise.resolve();
+    },
+  };
+  c._say = (kind, text) => said.push({ kind, text });
+  // AWAITED: `_endBoost` suspends on its first service call, and without this
+  // the harness read the list after one room and before the summary line.
+  return c._endBoost().then(() => JSON.stringify({ sent, said }));
+})()
+"""
+
+
+def _boosting(*room_ids):
+    """States where the named rooms have a boost running, plus one that has not."""
+    out = {
+        "climate.wohnzimmer": {"attributes": {"friendly_name": "Wohnzimmer",
+                                              "valves": [], "max_temp": 30}},
+        "climate.bad": {"attributes": {"friendly_name": "Badezimmer",
+                                       "valves": [], "max_temp": 30}},
+        "climate.schlaf": {"attributes": {"friendly_name": "Schlafzimmer",
+                                          "valves": [], "max_temp": 30}},
+    }
+    for rid in room_ids:
+        out[rid]["attributes"]["override"] = {
+            "boost": {"active": True, "until": "2099-01-01T00:00:00", "temp": 30}}
+    return out
+
+
+def end_boost(states_obj):
+    return json.loads(run_js(CARD, END_BOOST % json.dumps(states_obj)))
+
+
+def test_the_button_ends_every_room_that_is_boosting():
+    """THE RED ONE: there was no way out of a whole-home boost."""
+    got = end_boost(_boosting("climate.bad", "climate.schlaf"))
+    assert {c["service"] for c in got["sent"]} == {"cancel_boost"}
+    assert {c["data"]["entity_id"] for c in got["sent"]} == {"climate.bad", "climate.schlaf"}
+
+
+def test_a_room_without_a_boost_is_left_alone():
+    """The defect this avoids is the one "Alle → KI" has: it would put a room
+    that chose AUS back on the plan on its way past."""
+    got = end_boost(_boosting("climate.bad"))
+    assert [c["data"]["entity_id"] for c in got["sent"]] == ["climate.bad"]
+
+
+def test_nothing_running_says_so_instead_of_reporting_success():
+    got = end_boost(_boosting())
+    assert got["sent"] == []
+    assert got["said"] == [{"kind": "ok", "text": "Kein Boost aktiv."}]
+
+
+def test_it_reports_how_many_rooms_it_reached():
+    got = end_boost(_boosting("climate.bad", "climate.schlaf"))
+    assert got["said"] == [{"kind": "ok", "text": "Boost in 2 Räumen beendet."}]
+
+
+def test_one_room_is_one_room_not_one_of_one():
+    """The toast said "1 von 1 Räumen" for the commonest case there is."""
+    got = end_boost(_boosting("climate.bad"))
+    assert got["said"] == [{"kind": "ok", "text": "Boost in 1 Raum beendet."}]
+
+
+def test_a_partial_failure_counts_and_names_what_it_did_not_reach():
+    """The real counts, and which room is still boosting."""
+    expr = (END_BOOST % json.dumps(_boosting("climate.bad", "climate.schlaf"))).replace(
+        "return Promise.resolve();",
+        "return data.entity_id === 'climate.schlaf'"
+        " ? Promise.reject(new Error('x')) : Promise.resolve();")
+    got = json.loads(run_js(CARD, expr))
+    assert got["said"] == [{"kind": "err", "text":
+                            "Boost in 1 von 2 Räumen beendet — nicht erreicht: Schlafzimmer."}]
+
+
+# ── "Sonderplan beenden" ends what the status line describes ────────────────
+# A review changed `_endAbsence` to a wrong route and the suite stayed green.
+# The route is pinned here; ga_heating answers DELETE /api/ga_heating/absence.
+
+END_ABSENCE = """
+(() => {
+  const sent = [];
+  const said = [];
+  const c = Object.create(GaHeatingActionsCard.prototype);
+  c.setConfig({});
+  c._hass = {
+    states: %s,
+    callApi: (method, path, data) => {
+      sent.push({ method, path, data });
+      return Promise.resolve({});
+    },
+    callService: (d, s, data) => {
+      sent.push({ service: d + "." + s, data });
+      return Promise.resolve();
+    },
+  };
+  c._say = (kind, text) => said.push({ kind, text });
+  return c._endAbsence().then(() => JSON.stringify({ sent, said }));
+})()
+"""
+
+
+def _absent(*room_ids):
+    out = _boosting()
+    for rid in room_ids:
+        out[rid]["attributes"]["override"] = {"absence": {
+            "active": True, "start": "2026-10-01T00:00:00", "end": "2026-10-08T12:00:00",
+            "temp": 16, "off": False}}
+    return out
+
+
+def test_end_absence_deletes_over_the_absence_route_for_each_running_room():
+    got = json.loads(run_js(CARD, END_ABSENCE % json.dumps(_absent("climate.bad",
+                                                                   "climate.schlaf"))))
+    assert got["sent"] == [
+        {"method": "delete", "path": "ga_heating/absence", "data": {"entity_id": "climate.bad"}},
+        {"method": "delete", "path": "ga_heating/absence",
+         "data": {"entity_id": "climate.schlaf"}},
+    ]
+    assert got["said"] == [{"kind": "ok", "text": "Sonderplan in 2 von 2 Räumen beendet."}]
+
+
+def test_end_absence_with_nothing_running_sends_nothing():
+    got = json.loads(run_js(CARD, END_ABSENCE % json.dumps(_absent())))
+    assert got["sent"] == []
+    assert got["said"] == [{"kind": "ok", "text": "Kein Sonderplan aktiv."}]
+
+
+def test_no_mode_is_sent_with_it():
+    """Dropping the boost IS the way back — it never replaced a room's stored
+    decision. A `set_hvac_mode` here would turn a room that was AUS before the
+    boost into a heating one."""
+    got = end_boost(_boosting("climate.bad"))
+    assert not any(c["domain"] == "climate" for c in got["sent"])
+
+
+def test_the_button_is_hidden_until_a_boost_is_running():
+    """A permanent "Boost beenden" beside "Boost setzen" reads as the other half
+    of a pair of settings rather than as a way out of something in progress."""
+    markup = run_js(CARD, BUILD_MARKUP)
+    assert "Boost beenden" in markup
+    i = markup.index("Boost beenden")
+    assert "hidden" in markup[max(0, i - 120):i], markup[max(0, i - 120):i]
+
+
+# ── which rooms an action will touch, in words ───────────────────────────────
+# "maybe a dropdown list?" (2026-10-05). The list stays a disclosure; what was
+# missing is WHICH rooms are in scope while it is closed — see scopeLabel.
+
+def scope(selected, all_rooms=False, open_=False):
+    f = {"allRooms": all_rooms, "rooms": selected}
+    rooms = ["climate.wohnzimmer", "climate.bad", "climate.schlaf"]
+    return run_js(CARD, f"scopeLabel({json.dumps(_boosting())}, {json.dumps(rooms)}, "
+                        f"{json.dumps(f)}, {json.dumps(open_)})")
+
+
+def test_the_closed_row_names_the_rooms_it_will_act_on():
+    """A count is the one thing a resident already knows — they just ticked them.
+    What they cannot see with the list closed is WHICH."""
+    assert scope(["climate.bad"]) == "▸ Räume: Badezimmer"
+
+
+def test_two_names_then_a_number():
+    """The row sits beside a checkbox on a phone."""
+    got = scope(["climate.wohnzimmer", "climate.bad", "climate.schlaf"])
+    assert got == "▸ Räume: Wohnzimmer, Badezimmer +1"
+
+
+def test_all_rooms_says_so_rather_than_listing_the_flat():
+    assert scope([], all_rooms=True) == "▸ Räume: alle"
+
+
+def test_an_empty_selection_says_so():
+    """Must-not-flag: "0 gewählt" and "Räume: " both read as a loading state.
+    This is the one case where a resident presses Boost and nothing happens."""
+    assert scope([]) == "▸ Kein Raum gewählt"
+
+
+def test_the_caret_follows_the_disclosure():
+    assert scope(["climate.bad"], open_=True).startswith("▾")
+
+
+def test_a_room_is_named_never_identified():
+    """The old profile view listed entity ids when an area had no name. A radio
+    address in a room picker is the bug `roomName` exists to prevent."""
+    assert "climate." not in scope(["climate.bad"])
+
+
+def test_german_declines_and_so_does_the_card():
+    """"1 Räume im Boost" and "in 1 Raum/Räumen" were both on screen. A dashboard
+    that cannot count in the language it speaks reads like a machine."""
+    assert run_js(CARD, "nRooms(1)") == "1 Raum"
+    assert run_js(CARD, "nRooms(3)") == "3 Räume"
+    one = _boosting("climate.bad")
+    line = run_js(CARD, f"boostStatus({json.dumps(one)}, {json.dumps(list(one))})")
+    assert "1 Raum" in line and "Räume" not in line, line
+
+
+def test_the_plural_after_in_takes_the_dative():
+    """Both status lines sit after "in", where the plural takes -n. A helper
+    without the case just moves the error from "1 Räume" to "in 2 Räume"."""
+    assert run_js(CARD, "nRooms(2, true)") == "2 Räumen"
+    assert run_js(CARD, "nRooms(1, true)") == "1 Raum"
+    two = _boosting("climate.bad", "climate.schlaf")
+    line = run_js(CARD, f"boostStatus({json.dumps(two)}, {json.dumps(list(two))})")
+    assert line.endswith("in 2 Räumen"), line
+
+
+# --- picking rooms -----------------------------------------------------------
+# "when choosing the rooms thats the best way to list them. maybe a dropdow
+# list?" (2026-10-05). It stayed a list of toggles and became ONE row: a
+# checkbox, a summary button and a collapsed list of checkboxes were three
+# controls for one job, and with "Alle Räume" ticked the room boxes were checked
+# AND disabled — which looks exactly like selected.
+#
+# A dropdown was the other candidate and is worse where this is used:
+# `<select multiple>` is a wheel on iOS that cannot express multi-select, a
+# modal on Android that no theme reaches, and ctrl-click on desktop.
+#
+# The rule the row promises: FILLED MEANS THIS ROOM WILL BE TOUCHED. These tests
+# are that promise — the chip state and `_selected()` are the same answer.
+
+ROOMS = ["climate.a", "climate.b", "climate.c"]
+
+
+def toggle(form, room_id, rooms=None):
+    return json.loads(run_js(
+        CARD,
+        f"JSON.stringify(toggleRoom({json.dumps(rooms or ROOMS)}, "
+        f"{json.dumps(form)}, {json.dumps(room_id)}))"))
+
+
+ALL = {"allRooms": True, "rooms": []}
+
+
+def test_tapping_a_lit_room_turns_that_one_off():
+    """It is lit, so it is in scope, so tapping it takes it out. The old row
+    could not express this at all: with "Alle" ticked the room boxes were
+    disabled."""
+    assert toggle(ALL, "climate.b") == {"allRooms": False,
+                                        "rooms": ["climate.a", "climate.c"]}
+
+
+def test_turning_one_off_leaves_the_rest_in_their_own_order():
+    """The row is read left to right; a selection that reorders itself as it is
+    edited makes the names move under the finger."""
+    out = toggle({"allRooms": False, "rooms": ["climate.c", "climate.a", "climate.b"]},
+                 "climate.a")
+    assert out["rooms"] == ["climate.b", "climate.c"]
+
+
+def test_tapping_a_dark_room_adds_it():
+    assert toggle({"allRooms": False, "rooms": ["climate.a"]}, "climate.b") == {
+        "allRooms": False, "rooms": ["climate.a", "climate.b"]}
+
+
+def test_selecting_the_last_one_becomes_alle():
+    """Otherwise the row shows every room lit beside a dark `Alle` — a difference
+    with no meaning behind it. It also matters later: an explicit list of every
+    room silently excludes a room added afterwards, and `alle` does not."""
+    assert toggle({"allRooms": False, "rooms": ["climate.a", "climate.b"]},
+                  "climate.c") == ALL
+
+
+def test_the_last_lit_room_can_be_turned_off():
+    """Nothing selected is a state a resident can reach, so the actions have to
+    answer for it — see the refusals below."""
+    assert toggle({"allRooms": False, "rooms": ["climate.c"]}, "climate.c") == {
+        "allRooms": False, "rooms": []}
+
+
+def test_a_single_room_flat_still_toggles():
+    one = ["climate.only"]
+    assert toggle(ALL, "climate.only", rooms=one) == {"allRooms": False, "rooms": []}
+    assert toggle({"allRooms": False, "rooms": []}, "climate.only", rooms=one) == {
+        "allRooms": True, "rooms": []}
+
+
+def test_the_row_collapses_only_when_it_would_not_fit():
+    """A flat with twelve rooms is a wall of chips above the button somebody came
+    here to press. Three is one line and hiding it would cost a tap to answer
+    "which rooms" — the question the row exists for."""
+    assert int(run_js(CARD, "MAX_CHIPS")) >= 3
+    src = CARD.read_text(encoding="utf-8")
+    assert "rooms.length <= MAX_CHIPS || this._openRooms" in src
+
+
+def test_a_chip_carries_its_own_state_for_a_screen_reader():
+    src = CARD.read_text(encoding="utf-8")
+    assert 'aria-pressed="${on}"' in src
+
+
+# --- and the actions use it --------------------------------------------------
+
+
+def _card_with(form):
+    """A card whose form is `form`, over a three-room flat."""
+    states = {r: {"attributes": {"friendly_name": r[-1].upper(), "valves": ["climate.v"],
+                                 "area_id": r[-1], "max_temp": 30}} for r in ROOMS}
+    states["climate.v"] = {"attributes": {"local_temperature": 21}}
+    return (
+        " const c = Object.create(GaHeatingActionsCard.prototype);"
+        " c.setConfig({});"
+        f" Object.assign(c._form, {json.dumps(form)});"
+        " const sent = [], said = [];"
+        f" c._hass = {{ states: {json.dumps(states)},"
+        "   callService: (d, s, data) => { sent.push(s + ':' + data.entity_id);"
+        "     return Promise.resolve(); },"
+        "   callApi: () => Promise.resolve() };"
+        " c._say = (k, t) => said.push({ kind: k, text: t });"
+    )
+
+
+def _run(form, method):
+    return json.loads(run_js(CARD, "(() => {" + _card_with(form)
+                             + f" return c.{method}().then(() =>"
+                             + " JSON.stringify({ sent, said })); })()"))
+
+
+def test_boost_acts_on_the_rooms_that_are_lit():
+    """THE RED ONE, and it predates the chips: the picker sat directly above
+    "Boost setzen" and the button ignored it — pick one room, press it, and the
+    whole flat went to 30 °C. It went unnoticed because the picker was collapsed
+    behind a disclosure and defaulted to "alle", so the two agreed in the only
+    case anybody exercised."""
+    got = _run({"allRooms": False, "rooms": ["climate.b"]}, "_boostAll")
+    assert got["sent"] == ["boost:climate.b"]
+
+
+def test_boost_with_nothing_lit_refuses_rather_than_doing_the_flat():
+    """Nothing selected is one tap away now. Falling back to every room would be
+    the same defect with a friendlier face."""
+    got = _run({"allRooms": False, "rooms": []}, "_boostAll")
+    assert got["sent"] == []
+    assert got["said"] == [{"kind": "err", "text": "Kein Raum ausgewählt."}]
+
+
+def test_boost_by_default_still_means_the_whole_home():
+    got = _run({"allRooms": True, "rooms": []}, "_boostAll")
+    assert [s.split(":")[1] for s in got["sent"]] == ROOMS
+
+
+def test_alle_aus_ignores_the_picker():
+    """Must-not-flag. The label says "Alle AUS" — Ahmad's own words from the
+    previous system — and a button that says what it does is allowed to say it.
+    Scoping it to the selection would make a labelled promise false."""
+    got = _run({"allRooms": False, "rooms": ["climate.b"]}, "_offAll")
+    assert [s.split(":")[1] for s in got["sent"]] == ROOMS
+
+
+def test_alle_ki_ignores_it_too():
+    got = _run({"allRooms": False, "rooms": ["climate.b"]}, "_planAll")
+    assert {s.split(":")[1] for s in got["sent"]} == set(ROOMS)
+
+
+def test_ending_a_sonderplan_on_nothing_does_not_report_zero_of_zero():
+    """"Sonderplan in 0 von 0 Räumen aufgehoben" is a lie with a number in it."""
+    got = _run({"allRooms": False, "rooms": []}, "_cancelAbsence")
+    assert got["said"] == [{"kind": "err", "text": "Kein Raum ausgewählt."}]
+
+
+# --- the blocks say which buttons share a scope ------------------------------
+# "here at the beginneing we have boost and we explain it but this section isnt
+# only about boost and teh boost button is down along alle ki and..."
+# (2026-10-05).
+#
+# One heading said "Boost" over three actions, two of which are not a boost —
+# and the room picker under it governs the first and deliberately not the other
+# two. A reader had to KNOW that. It is why "Boost setzen ignores the picker"
+# went unnoticed for so long: nothing on screen claimed otherwise, and nothing
+# claimed it either.
+#
+# So the layout carries it: the picker and Boost in one block, the two whole-home
+# buttons in another under a heading that states their scope. These tests are the
+# ORDER, because order is the whole mechanism — every label here is unchanged.
+
+
+def _markup():
+    return run_js(CARD, BUILD_MARKUP)
+
+
+def _at(markup, needle):
+    """Where an ELEMENT is, not where its words are.
+
+    Anchored on the tag boundary because the first version of these tests was
+    not: a `<!-- … -->` in the template explaining why "Boost setzen ignores the
+    picker" was a defect sat earlier in the markup than the button, and the test
+    measured the prose. HTML comments are DOM.
+    """
+    i = markup.index(needle)
+    assert markup.count(needle) == 1, f"{needle!r} is not unique in the markup"
+    return i
+
+
+def test_boost_and_the_room_picker_are_one_block():
+    """The picker must come after the Boost heading and before Boost setzen, or
+    it is a control floating between two scopes again."""
+    m = _markup()
+    # Anchored on the heading's OPENING tag: its text now carries the bracketed
+    # explanation, so ">Boost</h4>" stopped existing the day that moved onto the
+    # same line and this test failed on correct markup (CI, 2026-10-06).
+    assert _at(m, "<h4>Boost ") < _at(m, 'class="rooms"') < _at(m, ">Boost setzen<")
+
+
+def test_the_whole_home_buttons_sit_under_their_own_heading():
+    """THE RED ONE: they were under "Boost", which is not what they do."""
+    m = _markup()
+    head = _at(m, ">Ganze Wohnung<")
+    assert _at(m, ">Boost setzen<") < head, "Boost belongs above the split"
+    assert head < _at(m, ">Alle → KI<") < _at(m, ">Alle AUS<")
+
+
+def test_the_room_picker_is_not_inside_the_whole_home_block():
+    """It does not govern those two buttons, so it must not look as though it
+    does — that mismatch is the defect this layout exists to make impossible."""
+    m = _markup()
+    assert _at(m, 'class="rooms"') < _at(m, ">Ganze Wohnung<")
+
+
+def test_ending_a_boost_stays_with_the_boost():
+    m = _markup()
+    assert _at(m, ">Boost beenden<") < _at(m, ">Ganze Wohnung<")
+
+
+def test_the_frost_line_sits_under_the_button_it_explains():
+    """It is about what AUS leaves behind, and it sat under a row where two of
+    three buttons were not AUS."""
+    m = _markup()
+    assert _at(m, ">Alle AUS<") < _at(m, "frosthint")
+
+
+def test_every_block_after_the_first_is_ruled_off():
+    """The blocks are what says which buttons share a scope, so they have to look
+    separate. A heading alone reads as a label on the row above it."""
+    m = _markup()
+    for head in ("Ganze Wohnung", "Sonderpläne (Krankheit und Urlaub)"):
+        before = m[max(0, _at(m, ">" + head + "<") - 120):_at(m, ">" + head + "<")]
+        assert "rule" in before, head
+
+
+def test_the_labels_are_untouched_by_the_regrouping():
+    """Must-not-flag. Moving buttons is not licence to rename them — these are
+    Ahmad's words from the previous system and residents read them there."""
+    m = _markup()
+    for label in ("Boost setzen", "Alle → KI", "Alle AUS"):
+        assert label in m, label
+
+
+# --- the section says what it is, on one line --------------------------------
+# "the explanation of boost put in parentheses same line as boost not below,
+# and add a small sentence before the rooms area to choose the room to boost"
+# (2026-10-05).
+
+
+def test_the_explanation_rides_on_the_boost_heading():
+    """THE ASK. It was a line of its own under the heading; now the heading and
+    what it means are one line."""
+    m = _markup()
+    h4 = m[m.index(">Boost "):m.index("</h4>")]
+    assert 'class="sub boosthint"' in h4, h4
+    assert "<div class=\"hint boosthint\"" not in m, "the old standalone line is gone"
+
+
+def test_the_explanation_escapes_the_headings_shouting():
+    """The heading is uppercased by CSS. A parenthetical inherited that and read
+    as BOOST (VENTILE KURZZEITIG GANZ OEFFNEN)."""
+    src = CARD.read_text(encoding="utf-8")
+    style = src[src.index("<style>"):src.index("</style>")]
+    sub = style[style.index("h4 .sub"):]
+    assert "text-transform: none" in sub.split("}")[0]
+
+
+def test_the_room_label_comes_before_the_panel():
+    """"a small sentence before the rooms area to choose the room to boost"."""
+    m = _markup()
+    assert "Räume wählen" in m
+    assert m.index("Räume wählen") < m.index('class="rooms"')
+
+
+def _hint(states):
+    """The text `_render` puts in the boost explanation, for these states."""
+    return run_js(CARD, """
+      (() => {
+        const c = Object.create(GaHeatingActionsCard.prototype);
+        c.setConfig({}); c._built = true; c._hass = { states: __STATES__ };
+        let hintText = '';
+        const mk = (setter) => ({ addEventListener() {}, querySelector: () => null,
+          querySelectorAll: () => [], classList: { toggle() {}, add() {}, remove() {} },
+          removeAttribute() {}, setAttribute() {},
+          set innerHTML(v) {}, get innerHTML() { return ''; },
+          set textContent(v) { setter(v); }, get textContent() { return ''; } });
+        c.querySelector = (sel) =>
+          sel === '.boosthint' ? mk(v => { hintText = v; }) : mk(() => {});
+        c.querySelectorAll = () => [];
+        c._render();
+        return hintText;
+      })()
+    """.replace("__STATES__", json.dumps(states)))
+
+
+def test_the_idle_explanation_is_bracketed():
+    assert _hint({}) == "(Ventile kurzzeitig ganz öffnen)"
+
+
+def test_the_running_explanation_does_not_say_boost_twice():
+    """It sits directly after a heading that already says BOOST, so
+    "BOOST (2 Räume im Boost ...)" says it twice. And after "in" the plural
+    takes the dative."""
+    live = _boosting("climate.bad", "climate.schlaf")
+    got = _hint(live)
+    assert got.startswith("(") and got.endswith(")"), got
+    assert "im Boost" not in got, got
+    assert "2 Räumen" in got, got
+
+
+def test_one_boosted_room_still_declines():
+    got = _hint(_boosting("climate.bad"))
+    assert "1 Raum " in got or got.count("1 Raum") == 1, got
+    assert "Räumen" not in got, got

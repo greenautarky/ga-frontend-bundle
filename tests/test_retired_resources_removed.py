@@ -12,6 +12,11 @@ REAL ``_register_resource_assets`` with only Home Assistant's framework imports
 stubbed (the integration code is never replaced). The Lovelace resource store is
 a fake with the four methods the integration calls.
 
+The retired example is ``ga-retired-card``, a name that never ships. It used to
+be ``ga-maintenance-card`` itself; once that card shipped again, the per-asset
+``?v=`` clean-up deleted the entry on its own and the test stayed green with the
+sweep disabled. ``test_retired_example_never_ships`` keeps that from recurring.
+
 The ownership rule is the half that must not regress the other way: only URLs
 under the first-party static path are ours. A resident's ``/local/...``
 resource, a HACS card and a community-card URL are never touched.
@@ -32,12 +37,13 @@ REPO = Path(__file__).resolve().parent.parent
 PKG = REPO / "custom_components" / "ga_frontend_bundle"
 
 FP = "/ga_frontend_bundle_first_party"  # pinned, not read from const.py
-RETIRED = f"{FP}/ga-maintenance-card/ga-maintenance-card.js?v=1.21.0"
+RETIRED_ID = "ga-retired-card"  # must never ship: see test_retired_example_never_ships
+RETIRED = f"{FP}/{RETIRED_ID}/{RETIRED_ID}.js?v=1.21.0"
 RESIDENT = "/local/my-own-card.js"
 HACS = "/hacsfiles/button-card/button-card.js"
 COMMUNITY = "/ga_frontend_bundle_static/simple-thermostat/simple-thermostat.js"
 # Looks like ours by name, is not ours by path: must survive.
-LOOKALIKE = "/local/ga_frontend_bundle_first_party/ga-maintenance-card.js"
+LOOKALIKE = f"/local/ga_frontend_bundle_first_party/{RETIRED_ID}.js"
 
 
 class FakeResources:
@@ -146,6 +152,16 @@ def _shipped_resource_paths(pkg) -> set[str]:
     _inject, res = delivery_plan(load_cards(PKG / "first_party"), EARLY_INJECT_ASSET_IDS)
     assert len(res) >= 4, "fewer first-party resource assets than expected — wrong dir?"
     return {f"{FP}/{c['id']}/{c['file']}" for c in res}
+
+
+def test_retired_example_never_ships(integration):
+    """The example must be retired, or the version clean-up removes it, not the sweep."""
+    pkg, _ = integration
+    shipped = {p.split("/")[2] for p in _shipped_resource_paths(pkg)}
+    assert RETIRED_ID not in shipped, (
+        f"{RETIRED_ID} ships now; pick another name, or this file no longer tests the sweep"
+    )
+    assert not (PKG / "first_party" / RETIRED_ID).exists()
 
 
 def test_retired_ga_resource_is_removed_on_update(integration):
