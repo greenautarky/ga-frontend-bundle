@@ -190,3 +190,164 @@ def test_a_window_still_beats_a_run():
     """An open window invalidates the measurement anyway, and the radiators are
     off - saying "Abgleich laeuft" over a cold room would be the wrong fact."""
     assert "Fenster offen" in _row({"window": {"active": True}, "ichb": dict(RUNNING)})
+
+
+# -- what the two buttons SEND, pinned -----------------------------------------
+# A review injected a wrong service name, a wrong payload and a wrong cancel
+# name into the card, and every test above stayed green: they read the warning
+# logic and the markup, never the call. These pin the call itself. The expected
+# values are constants here, never read from the card.
+
+ICHB_CALLS = """
+(() => {
+  const sent = [];
+  const said = [];
+  const c = Object.create(GaHeatingActionsCard.prototype);
+  c.setConfig({});
+  c._hass = {
+    states: __STATES__,
+    callService: (d, s, data) => {
+      sent.push({ domain: d, service: s, data });
+      return Promise.resolve();
+    },
+  };
+  c._say = (kind, text) => said.push({ kind, text });
+  return c.__METHOD__().then(() => JSON.stringify({ sent, said }));
+})()
+"""
+
+COOL_FLAT = {"climate.bad": _room("Bad", 19.0, "bad"),
+             "climate.kueche": _room("Kueche", 20.0, "kueche")}
+
+
+def ichb_calls(method, states=None):
+    expr = (ICHB_CALLS.replace("__STATES__", json.dumps(states or COOL_FLAT))
+            .replace("__METHOD__", method))
+    return json.loads(run_js(CARD, expr))
+
+
+def test_start_calls_ga_heating_ichb_with_the_30_degree_target_only():
+    """One call, for the whole flat: no entity_id, no rooms, no minutes."""
+    got = ichb_calls("_startIchb")
+    assert got["sent"] == [
+        {"domain": "ga_heating", "service": "ichb", "data": {"temperature": 30}}]
+    assert got["said"][0]["kind"] == "ok"
+
+
+def test_cancel_calls_ga_heating_cancel_ichb_with_no_arguments():
+    got = ichb_calls("_cancelIchb")
+    assert got["sent"] == [
+        {"domain": "ga_heating", "service": "cancel_ichb", "data": {}}]
+    assert got["said"][0]["kind"] == "ok"
+
+
+# -- what the section SHOWS, rendered ------------------------------------------
+# A fake element per selector, holding the attributes, classes and text the
+# real `_render` writes. Every element starts VISIBLE, so a render that forgets
+# to hide something is seen as having forgotten.
+
+RENDER = """
+(() => {
+  const els = {};
+  const mk = () => {
+    const attrs = {}; const cls = new Set();
+    return { attrs, cls, textContent: '', innerHTML: '', disabled: false,
+      setAttribute(k, v) { attrs[k] = v; }, removeAttribute(k) { delete attrs[k]; },
+      classList: { toggle(c, on) { if (on === undefined) on = !cls.has(c);
+                                   if (on) cls.add(c); else cls.delete(c); },
+                   add(c) { cls.add(c); }, remove(c) { cls.delete(c); } },
+      addEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
+  };
+  const c = Object.create(GaHeatingActionsCard.prototype);
+  c.setConfig({}); c._built = true;
+  c._hass = __HASS__;
+  c.querySelector = (sel) => (els[sel] = els[sel] || mk());
+  c.querySelectorAll = () => [];
+  c._render();
+  __THEN__
+  const out = {};
+  for (const [sel, e] of Object.entries(els)) {
+    out[sel] = { hidden: 'hidden' in e.attrs, cls: [...e.cls], text: e.textContent,
+                 disabled: e.disabled };
+  }
+  return JSON.stringify(out);
+})()
+"""
+
+#: The services a device on ga_heating 0.13.0 registers (the part that matters).
+SERVICES_013 = {"ga_heating": {"boost": {}, "cancel_boost": {}, "ichb": {},
+                               "cancel_ichb": {}}}
+#: ... and on 0.12.1, before the balancing run existed.
+SERVICES_0121 = {"ga_heating": {"boost": {}, "cancel_boost": {}}}
+
+RUN = {"active": True, "until": "2099-01-01T00:00:00+00:00"}
+
+
+def _hass(states, services=SERVICES_013):
+    hass = {"states": states}
+    if services is not None:
+        hass["services"] = services
+    return json.dumps(hass)
+
+
+def render(states, services=SERVICES_013, then=None):
+    """Render once; with `then`, render again over a second set of states."""
+    js = RENDER.replace("__HASS__", _hass(states, services)).replace(
+        "__THEN__", f"c._hass = {_hass(then, services)}; c._render();" if then else "")
+    return json.loads(run_js(CARD, js))
+
+
+def _running(states):
+    out = json.loads(json.dumps(states))
+    for s in out.values():
+        s["attributes"]["override"] = {"ichb": dict(RUN)}
+    return out
+
+
+def test_the_section_is_shown_where_ga_heating_offers_the_service():
+    assert render(COOL_FLAT)[".ichb-section"]["hidden"] is False
+
+
+def test_the_section_is_hidden_on_ga_heating_0_12():
+    """`ichb` arrived in ga_heating 0.13.0; on 0.12.1 the button would call a
+    service that does not exist, and fail every time it is pressed."""
+    assert render(COOL_FLAT, SERVICES_0121)[".ichb-section"]["hidden"] is True
+
+
+def test_the_section_is_hidden_when_hass_lists_no_services_at_all():
+    assert render(COOL_FLAT, None)[".ichb-section"]["hidden"] is True
+
+
+def test_the_section_starts_hidden_in_the_markup():
+    """Hidden until a render has seen the service — never a flash of a dead button."""
+    html = run_js(CARD, BUILD)
+    at = html.index('class="ichb-section"')
+    assert "hidden" in html[at:at + 40], html[at:at + 40]
+
+
+def test_cancel_is_hidden_and_start_enabled_when_no_run_is_going():
+    """A cancel button with nothing to cancel is a question, not an action."""
+    out = render(COOL_FLAT)
+    assert out[".ichb-cancel"]["hidden"] is True
+    assert out[".ichb-start"]["disabled"] is False
+
+
+def test_cancel_is_shown_and_start_disabled_while_a_run_is_going():
+    out = render(_running(COOL_FLAT))
+    assert out[".ichb-cancel"]["hidden"] is False
+    assert out[".ichb-start"]["disabled"] is True
+    assert "läuft" in out[".ichbhint"]["text"]
+
+
+def test_too_warm_is_red_before_a_run():
+    warm = {"climate.bad": _room("Bad", 27.0, "bad")}
+    assert "warn" in render(warm)[".ichbhint"]["cls"]
+
+
+def test_the_countdown_is_not_red_while_a_run_is_going():
+    """The rooms are warm DURING a run - that is the run working. The red class
+    from the pre-run warning used to stay on the countdown."""
+    warm = {"climate.bad": _room("Bad", 27.0, "bad")}
+    out = render(warm, then=_running(warm))
+    assert "läuft" in out[".ichbhint"]["text"]
+    assert "warn" not in out[".ichbhint"]["cls"]

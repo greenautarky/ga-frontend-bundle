@@ -370,17 +370,43 @@ class GaHeatingActionsCard extends HTMLElement {
   //: re-renders when Home Assistant pushes a change; a boost running out pushes
   //: nothing until it ends, so without this the seconds stand still.
   //:
-  //: Every second, and only while the card is on screen — `disconnectedCallback`
-  //: stops it, so a dashboard the resident has navigated away from costs nothing.
+  //: ONLY WHILE A COUNTDOWN IS RUNNING, and only while the card is on screen.
+  //: The first version ticked every second, always, and every tick ran the
+  //: whole render — which rebuilt the room chips. A press held across a tick
+  //: went down on a chip that no longer existed when it came up, so the click
+  //: never fired. The tick now updates the countdown text and nothing else
+  //: (`_renderLive`), and `_syncTicker` stops it when nothing is counting down.
   connectedCallback() {
-    this._ticker = setInterval(() => {
-      if (this._hass && !this._openForm) this._render();
-    }, 1000);
+    this._connected = true;
+    this._syncTicker();
   }
 
   disconnectedCallback() {
-    clearInterval(this._ticker);
-    this._ticker = null;
+    this._connected = false;
+    this._syncTicker();
+  }
+
+  /** True while a boost or a balancing run is counting down in some room. */
+  _counting() {
+    if (!this._hass) return false;
+    return this._boostRooms().length > 0 || this._ichbRooms().length > 0;
+  }
+
+  /** Start the one-second clock if a countdown needs it, stop it if not. */
+  _syncTicker() {
+    const want = Boolean(this._connected && this._counting());
+    if (want && !this._ticker) {
+      this._ticker = setInterval(() => this._tick(), 1000);
+    } else if (!want && this._ticker) {
+      clearInterval(this._ticker);
+      this._ticker = null;
+    }
+  }
+
+  _tick() {
+    if (!this._hass || !this._built) return;
+    this._renderLive();
+    this._syncTicker();
   }
 
   getCardSize() { return 6; }
@@ -582,15 +608,15 @@ class GaHeatingActionsCard extends HTMLElement {
    * ga_heating decides which radiators are actually measurable and reports the
    * rest — the card does not pre-empt that.
    *
-   * No arguments are sent: the service's own defaults (60 min, 25 °C) are the
-   * ones the rate calculation expects, and a card offering a 20-minute balance
-   * would be offering a measurement nobody can use.
+   * ONE ARGUMENT IS SENT, the target temperature (ICHB_TARGET), so the number
+   * in the warning above and the number the run uses cannot drift apart. The
+   * duration is left to the service's default of 60 minutes, which is what the
+   * rate calculation averages over; a card offering a 20-minute balance would be
+   * offering a measurement nobody can use. No `rooms`: see above.
    */
   async _startIchb() {
     const { blocking, warm } = this._tooWarmRooms();
     try {
-      // The target is sent rather than left to the service default so the number
-      // in the warning above and the number the run uses cannot drift apart.
       await this._hass.callService("ga_heating", "ichb", { temperature: ICHB_TARGET });
       // Said ON THE PRESS as well as on the heading: the heading is where a
       // resident looks before deciding, the toast is what they get if they did
@@ -649,14 +675,21 @@ class GaHeatingActionsCard extends HTMLElement {
     const rooms = this._boostRooms();
     if (!rooms.length) return this._say("ok", "Kein Boost aktiv.");
     let ok = 0;
+    const failed = [];
     for (const id of rooms) {
       try {
         await this._hass.callService("ga_heating", "cancel_boost", { entity_id: id });
         ok += 1;
-      } catch (e) { /* counted by omission */ }
+      } catch (e) { failed.push(roomName(this._hass.states[id]) || id); }
     }
-    this._say(ok === rooms.length ? "ok" : "err",
-      `Boost in ${ok} von ${rooms.length} Räumen beendet.`);
+    // The counts it actually reached: "Boost in 1 Raum beendet", not a fixed
+    // "1 von 1 Räumen" — and on a partial failure, which rooms are still boosting.
+    if (failed.length) {
+      this._say("err", `Boost in ${ok} von ${nRooms(rooms.length, true)} beendet — `
+        + `nicht erreicht: ${failed.join(", ")}.`);
+    } else {
+      this._say("ok", `Boost in ${nRooms(ok, true)} beendet.`);
+    }
   }
 
   /** The rooms that actually have one running — what the status line counts. */
@@ -737,10 +770,12 @@ class GaHeatingActionsCard extends HTMLElement {
             <button class="btn aus offall">Alle AUS</button>
           </div>
           <div class="hint frosthint"></div>
+          <div class="ichb-section" hidden>
           <h4 class="rule">Hydraulischer Abgleich <span class="sub ichbhint"></span></h4>
           <div class="quick">
             <button class="btn ki ichb-start">Abgleich starten</button>
             <button class="btn ghost ichb-cancel" hidden>Abgleich abbrechen</button>
+          </div>
           </div>
           <h4 class="rule sph">Sonderpläne (Krankheit und Urlaub)</h4>
           <div class="status"></div>
@@ -817,6 +852,10 @@ class GaHeatingActionsCard extends HTMLElement {
            it would be parsed as JavaScript — which is exactly how this rule
            shipped broken for an hour (CI, 2026-10-05). */
         ga-heating-actions-card .msg:empty { display: none; }
+        /* The balancing block is one grid item, so hiding it takes its gap with
+           it. Hidden until the device's ga_heating offers the service. */
+        ga-heating-actions-card .ichb-section { display: grid; gap: 14px; }
+        ga-heating-actions-card .ichb-section[hidden] { display: none; }
         ga-heating-actions-card h4 { margin: 0; font-size: .82em; font-weight: 700;
           letter-spacing: .07em; text-transform: uppercase; color: var(--secondary-text-color, #6b7682); }
         /* A rule above every block but the first — the blocks are the thing
@@ -934,6 +973,29 @@ class GaHeatingActionsCard extends HTMLElement {
            + "nachgewiesenen Frostschutz ab.";
     }
 
+    this._renderLive();
+
+    const tf = this.querySelector(".toggle-form");
+    if (tf) tf.textContent = this._openForm ? "Abbrechen" : "Bearbeiten";
+    const formEl = this.querySelector(".form");
+    if (formEl) {
+      if (this._openForm) formEl.removeAttribute("hidden");
+      else formEl.setAttribute("hidden", "");
+    }
+
+    this._renderFields();
+    this._renderRooms();
+    this._syncTicker();
+  }
+
+  /**
+   * Everything that changes while a countdown runs, and nothing else.
+   *
+   * The once-a-second tick calls this and only this. It writes text and toggles
+   * visibility; it never replaces an element a resident can press, so a press
+   * held across a tick lands on the button it went down on.
+   */
+  _renderLive() {
     // The status block, always visible. Two lines at most, and it says "nothing
     // is overriding" rather than staying blank — blank reads as "not loaded".
     const rooms0 = this._rooms();
@@ -968,11 +1030,24 @@ class GaHeatingActionsCard extends HTMLElement {
     // The heading says what the hour is for; while a run is going it says how
     // much of it is left, counted from `until` for the same reason the boost
     // countdown is — a run ticking down publishes nothing.
+    //
+    // THE WHOLE SECTION ONLY WHERE THE SERVICE EXISTS. `ichb` and `cancel_ichb`
+    // arrived in ga_heating 0.13.0; on a device still on 0.12.x the button would
+    // call a service Home Assistant does not have and fail, every time.
+    const isec = this.querySelector(".ichb-section");
+    if (isec) {
+      const offered = Boolean(((this._hass.services || {}).ga_heating || {}).ichb);
+      if (offered) isec.removeAttribute("hidden");
+      else isec.setAttribute("hidden", "");
+    }
     const ih = this.querySelector(".ichbhint");
     const icancel = this.querySelector(".ichb-cancel");
     const istart = this.querySelector(".ichb-start");
     if (ih) {
       const live = this._ichbRooms();
+      // Red only for "too warm to measure", and only before a run: once one is
+      // going, the countdown is information, not a warning.
+      let warn = false;
       if (live.length) {
         const ov = ((this._hass.states[live[0]].attributes || {}).override || {}).ichb || {};
         const until = ov.until ? new Date(ov.until).getTime() : NaN;
@@ -991,8 +1066,9 @@ class GaHeatingActionsCard extends HTMLElement {
         } else {
           ih.textContent = "(eine Stunde gleicher Durchfluss, damit die Räume vergleichbar werden)";
         }
-        ih.classList.toggle("warn", blocking.length > 0);
+        warn = blocking.length > 0;
       }
+      ih.classList.toggle("warn", warn);
       if (icancel) {
         if (live.length) icancel.removeAttribute("hidden");
         else icancel.setAttribute("hidden", "");
@@ -1001,8 +1077,6 @@ class GaHeatingActionsCard extends HTMLElement {
       if (istart) istart.disabled = live.length > 0;
     }
 
-    const tf = this.querySelector(".toggle-form");
-    if (tf) tf.textContent = this._openForm ? "Abbrechen" : "Bearbeiten";
     // THE WAY OUT, BESIDE THE THING IT ENDS. "Deaktivieren" lives inside the
     // form, which starts closed — so a resident with a Sonderplan running saw a
     // status and one button labelled "Bearbeiten", and the only way to stop it
@@ -1022,10 +1096,17 @@ class GaHeatingActionsCard extends HTMLElement {
       if (this._boostRooms().length) eb.removeAttribute("hidden");
       else eb.setAttribute("hidden", "");
     }
-    const formEl = this.querySelector(".form");
-    if (formEl) { if (this._openForm) formEl.removeAttribute("hidden"); else formEl.setAttribute("hidden", ""); }
+  }
 
+  /**
+   * The Sonderplan fields. REBUILT ONLY WHEN THEIR MARKUP CHANGES: Home
+   * Assistant pushes state changes all the time, and replacing an input a
+   * resident is typing into drops what they typed and the focus with it.
+   */
+  _renderFields() {
+    const f = this._form;
     const fields = this.querySelector(".fields");
+    if (!fields) return;
     // The off-switch is a HOLIDAY field only — see absenceBody.
     const offField = f.kind === "holiday"
       ? `<label class="chk"><input type="checkbox" class="off" ${f.off ? "checked" : ""}>`
@@ -1037,7 +1118,7 @@ class GaHeatingActionsCard extends HTMLElement {
         ? `<label>🌡️ Zieltemp.<span class="in"><input type="number" class="temp" min="${TMIN}" `
           + `max="${TMAX}" step="0.5" value="${f.temperature}"><em>°C</em></span></label>`
         : "");
-    fields.innerHTML = f.kind === "sick"
+    const fieldsHtml = f.kind === "sick"
       ? `<label>⏱️ Dauer ab jetzt<span class="in">`
         + `<input type="number" class="hours" min="1" max="${SICK_MAX_HOURS}" value="${f.hours}">`
         + `<em>h</em></span></label>`
@@ -1050,6 +1131,9 @@ class GaHeatingActionsCard extends HTMLElement {
         + tempField
         + `<p class="hint wide">Die Uhrzeit bei „Bis“ entscheidet, ab wann wieder normal geheizt `
         + `wird — sonst ist die Wohnung am Rückreisetag noch kalt.</p>`;
+    if (fieldsHtml === this._fieldsHtml) return;
+    this._fieldsHtml = fieldsHtml;
+    fields.innerHTML = fieldsHtml;
 
     const bind = (sel, key, cast) => {
       const el = fields.querySelector(sel);
@@ -1062,6 +1146,11 @@ class GaHeatingActionsCard extends HTMLElement {
     bind(".end", "end", (el) => el.value);
     bind(".starttime", "startTime", (el) => el.value);
     bind(".endtime", "endTime", (el) => el.value);
+  }
+
+  /** The room chips. Rebuilt only when what they show changes — see _renderFields. */
+  _renderRooms() {
+    const f = this._form;
 
     // Room scope. Nothing selected means ALL — said in words, because an empty
     // row of checkboxes reads as "none" and would be the opposite of the truth.
@@ -1084,14 +1173,17 @@ class GaHeatingActionsCard extends HTMLElement {
     // somebody actually came here to press.
     const rooms = this._rooms();
     const box = this.querySelector(".rooms");
+    if (!box) return;
     if (!rooms.length) {
-      box.innerHTML = '<span class="hint">Kein Raum mit Thermostat gefunden.</span>';
+      const empty = '<span class="hint">Kein Raum mit Thermostat gefunden.</span>';
+      if (this._roomsHtml !== empty) box.innerHTML = empty;
+      this._roomsHtml = empty;
     } else {
       const open = rooms.length <= MAX_CHIPS || this._openRooms;
       const chip = (label, on, attr) =>
         `<button type="button" class="chip${on ? " on" : ""}" ${attr} `
         + `aria-pressed="${on}">${label}</button>`;
-      box.innerHTML =
+      const roomsHtml =
         chip("Alle", f.allRooms, 'data-all="1"')
         + (rooms.length > MAX_CHIPS
             ? `<button class="btn ghost toggle-rooms">`
@@ -1103,6 +1195,9 @@ class GaHeatingActionsCard extends HTMLElement {
                 f.allRooms || f.rooms.includes(id),
                 `data-id="${id}"`)).join("")
             : "");
+      if (roomsHtml === this._roomsHtml) return;
+      this._roomsHtml = roomsHtml;
+      box.innerHTML = roomsHtml;
 
       const allChip = box.querySelector("[data-all]");
       if (allChip) allChip.addEventListener("click", () => {

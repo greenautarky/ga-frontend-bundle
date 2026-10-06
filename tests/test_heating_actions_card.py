@@ -655,7 +655,77 @@ def test_nothing_running_says_so_instead_of_reporting_success():
 
 def test_it_reports_how_many_rooms_it_reached():
     got = end_boost(_boosting("climate.bad", "climate.schlaf"))
-    assert got["said"][0]["text"] == "Boost in 2 von 2 Räumen beendet."
+    assert got["said"] == [{"kind": "ok", "text": "Boost in 2 Räumen beendet."}]
+
+
+def test_one_room_is_one_room_not_one_of_one():
+    """The toast said "1 von 1 Räumen" for the commonest case there is."""
+    got = end_boost(_boosting("climate.bad"))
+    assert got["said"] == [{"kind": "ok", "text": "Boost in 1 Raum beendet."}]
+
+
+def test_a_partial_failure_counts_and_names_what_it_did_not_reach():
+    """The real counts, and which room is still boosting."""
+    expr = (END_BOOST % json.dumps(_boosting("climate.bad", "climate.schlaf"))).replace(
+        "return Promise.resolve();",
+        "return data.entity_id === 'climate.schlaf'"
+        " ? Promise.reject(new Error('x')) : Promise.resolve();")
+    got = json.loads(run_js(CARD, expr))
+    assert got["said"] == [{"kind": "err", "text":
+                            "Boost in 1 von 2 Räumen beendet — nicht erreicht: Schlafzimmer."}]
+
+
+# ── "Sonderplan beenden" ends what the status line describes ────────────────
+# A review changed `_endAbsence` to a wrong route and the suite stayed green.
+# The route is pinned here; ga_heating answers DELETE /api/ga_heating/absence.
+
+END_ABSENCE = """
+(() => {
+  const sent = [];
+  const said = [];
+  const c = Object.create(GaHeatingActionsCard.prototype);
+  c.setConfig({});
+  c._hass = {
+    states: %s,
+    callApi: (method, path, data) => {
+      sent.push({ method, path, data });
+      return Promise.resolve({});
+    },
+    callService: (d, s, data) => {
+      sent.push({ service: d + "." + s, data });
+      return Promise.resolve();
+    },
+  };
+  c._say = (kind, text) => said.push({ kind, text });
+  return c._endAbsence().then(() => JSON.stringify({ sent, said }));
+})()
+"""
+
+
+def _absent(*room_ids):
+    out = _boosting()
+    for rid in room_ids:
+        out[rid]["attributes"]["override"] = {"absence": {
+            "active": True, "start": "2026-10-01T00:00:00", "end": "2026-10-08T12:00:00",
+            "temp": 16, "off": False}}
+    return out
+
+
+def test_end_absence_deletes_over_the_absence_route_for_each_running_room():
+    got = json.loads(run_js(CARD, END_ABSENCE % json.dumps(_absent("climate.bad",
+                                                                   "climate.schlaf"))))
+    assert got["sent"] == [
+        {"method": "delete", "path": "ga_heating/absence", "data": {"entity_id": "climate.bad"}},
+        {"method": "delete", "path": "ga_heating/absence",
+         "data": {"entity_id": "climate.schlaf"}},
+    ]
+    assert got["said"] == [{"kind": "ok", "text": "Sonderplan in 2 von 2 Räumen beendet."}]
+
+
+def test_end_absence_with_nothing_running_sends_nothing():
+    got = json.loads(run_js(CARD, END_ABSENCE % json.dumps(_absent())))
+    assert got["sent"] == []
+    assert got["said"] == [{"kind": "ok", "text": "Kein Sonderplan aktiv."}]
 
 
 def test_no_mode_is_sent_with_it():
