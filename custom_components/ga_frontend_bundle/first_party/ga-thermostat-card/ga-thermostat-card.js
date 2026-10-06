@@ -365,6 +365,17 @@ class GaThermostatCard extends HTMLElement {
     //: bookkeeping to restore. A WINDOW has no button: it ends when the window
     //: closes, and a button that says otherwise would be a lie about a contact.
     const kinds = [
+      // A balancing run, FIRST: it outranks a boost in ga_heating's own
+      // precedence (window > ichb > boost), so when both are somehow present the
+      // row has to name the one actually driving the radiators.
+      //
+      // No Beenden button. `cancel_ichb` ends the run for the WHOLE flat — the
+      // hour only means anything if every room is measured at once — and a
+      // button inside one room's card that silently stops all six would be a lie
+      // about its own scope. It is cancelled from the Profil card, where the
+      // scope is stated.
+      ["ichb", "Abgleich läuft", "mdi:scale-balance",
+       "Hydraulischer Abgleich — danach gilt wieder der Plan", null],
       ["boost", "Boost", "mdi:rocket-launch-outline", "Danach gilt wieder der Plan", "boost"],
       // "Sonderplan", not "Urlaub": ga_heating stores ONE absence override, and
       // the Krankheit and Urlaub forms on the actions card both write it. The

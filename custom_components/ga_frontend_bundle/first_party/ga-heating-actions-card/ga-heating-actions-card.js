@@ -189,6 +189,33 @@ function roomName(state) {
   return a.friendly_name || a.area_id || "";
 }
 
+//: What a balancing run asks for, and the room temperature it needs to be worth
+//: running at all.
+//:
+//: The hour measures each radiator's catch-up rate at a common flow, so every
+//: room has to have somewhere to climb. A room already at the target makes its
+//: TRV stop calling for heat the moment the run starts, and that radiator
+//: contributes no rate — the run still "succeeds" and the data is empty.
+//:
+//: TWO LIMITS, because a warm room spoils a run in two different ways.
+//:
+//: CANNOT MEASURE (headroom). Under 4 K of gap the room reaches the target
+//: partway through the hour and the radiator throttles for the rest of the
+//: window — these rooms rise roughly 0.5-2 K in an hour. At a 30 degree target
+//: that is 26, and it is a hard limit: above it the radiator contributes no
+//: rate at all.
+//:
+//: SHOULD NOT MEASURE (comparability). The run exists to compare radiators with
+//: each other, and a radiator gives up less heat into a warm room than into a
+//: cool one — so rates measured across already-warm rooms compress together and
+//: the differences the balance is looking for shrink into the noise. 21 is
+//: ordinary room temperature and the value the product owner asked for
+//: (2026-10-06); it is a recommendation, not a refusal.
+const ICHB_TARGET = 30;
+const ICHB_MIN_HEADROOM = 4;
+const ICHB_MAX_ROOM_TEMP = ICHB_TARGET - ICHB_MIN_HEADROOM;
+const ICHB_IDEAL_ROOM_TEMP = 21;
+
 //: How many rooms fit in one row of chips before it is worth collapsing. Six is
 //: two lines on a phone; a flat with more than that is the case the disclosure
 //: below was written for.
@@ -519,6 +546,84 @@ class GaHeatingActionsCard extends HTMLElement {
     }
   }
 
+  /**
+   * The rooms too warm for a balancing run to measure, named.
+   *
+   * Named rather than counted, and read from the ROOM's own thermometer — the
+   * same number the heading badge shows — so a resident can check the claim
+   * against what is on their screen.
+   */
+  _tooWarmRooms() {
+    const over = (limit) => (this._rooms() || []).filter((id) => {
+      const t = Number(((this._hass.states[id] || {}).attributes || {}).current_temperature);
+      return Number.isFinite(t) && t > limit;
+    }).map((id) => roomName(this._hass.states[id]) || id);
+    // `blocking` is a subset of `warm`; naming a room twice in one sentence
+    // would read as two separate problems with it.
+    const blocking = over(ICHB_MAX_ROOM_TEMP);
+    const warm = over(ICHB_IDEAL_ROOM_TEMP).filter((n) => !blocking.includes(n));
+    return { blocking, warm };
+  }
+
+  /** The rooms a balancing run is holding right now, as ga_heating reports them. */
+  _ichbRooms() {
+    return (this._rooms() || []).filter((id) =>
+      ((((this._hass.states[id] || {}).attributes || {}).override || {}).ichb || {})
+        .active === true);
+  }
+
+  /**
+   * Start a hydraulic balancing run across the whole flat.
+   *
+   * WHOLE HOME, NOT THE SELECTION, and no room picker of its own. The point of
+   * the hour is that every radiator is measured at the same flow and the rooms
+   * are then comparable with each other; balancing three of six rooms produces
+   * numbers that cannot be compared with anything, which is worse than no run.
+   * ga_heating decides which radiators are actually measurable and reports the
+   * rest — the card does not pre-empt that.
+   *
+   * No arguments are sent: the service's own defaults (60 min, 25 °C) are the
+   * ones the rate calculation expects, and a card offering a 20-minute balance
+   * would be offering a measurement nobody can use.
+   */
+  async _startIchb() {
+    const { blocking, warm } = this._tooWarmRooms();
+    try {
+      // The target is sent rather than left to the service default so the number
+      // in the warning above and the number the run uses cannot drift apart.
+      await this._hass.callService("ga_heating", "ichb", { temperature: ICHB_TARGET });
+      // Said ON THE PRESS as well as on the heading: the heading is where a
+      // resident looks before deciding, the toast is what they get if they did
+      // not, and an hour is too long to find out afterwards.
+      if (blocking.length) {
+        this._say("err", `Abgleich gestartet, aber ${blocking.join(", ")} `
+          + `${blocking.length === 1 ? "ist" : "sind"} über ${ICHB_MAX_ROOM_TEMP} °C — `
+          + `${blocking.length === 1 ? "dieser Raum liefert" : "diese Räume liefern"} `
+          + `keine brauchbare Messung. Am besten unter ${ICHB_IDEAL_ROOM_TEMP} °C wiederholen.`);
+      } else if (warm.length) {
+        this._say("err", `Abgleich gestartet. ${warm.join(", ")} `
+          + `${warm.length === 1 ? "ist" : "sind"} über ${ICHB_IDEAL_ROOM_TEMP} °C — `
+          + `das Ergebnis wird ungenauer, weil ein Heizkörper in einen warmen Raum `
+          + `weniger Wärme abgibt. Für den besten Abgleich kühl starten.`);
+      } else {
+        this._say("ok", "Abgleich gestartet — eine Stunde, danach gilt wieder der Plan.");
+      }
+    } catch (e) {
+      const why = (e && (e.body && e.body.message)) || (e && e.message) || "abgelehnt";
+      this._say("err", `Abgleich nicht gestartet: ${why}`);
+    }
+  }
+
+  /** Stop a run early. The plan underneath was never overwritten, so this is a drop. */
+  async _cancelIchb() {
+    try {
+      await this._hass.callService("ga_heating", "cancel_ichb", {});
+      this._say("ok", "Abgleich abgebrochen — die Räume folgen wieder dem Plan.");
+    } catch (e) {
+      this._say("err", "Abgleich konnte nicht abgebrochen werden.");
+    }
+  }
+
   /** The rooms with a boost running — what the line above the button counts. */
   _boostRooms() {
     return (this._rooms() || []).filter((id) =>
@@ -632,6 +737,11 @@ class GaHeatingActionsCard extends HTMLElement {
             <button class="btn aus offall">Alle AUS</button>
           </div>
           <div class="hint frosthint"></div>
+          <h4 class="rule">Hydraulischer Abgleich <span class="sub ichbhint"></span></h4>
+          <div class="quick">
+            <button class="btn ki ichb-start">Abgleich starten</button>
+            <button class="btn ghost ichb-cancel" hidden>Abgleich abbrechen</button>
+          </div>
           <h4 class="rule sph">Sonderpläne (Krankheit und Urlaub)</h4>
           <div class="status"></div>
           <div class="statusactions">
@@ -689,6 +799,9 @@ class GaHeatingActionsCard extends HTMLElement {
            the quieter colour a caption gets everywhere else on this card. */
         ga-heating-actions-card h4 .sub { text-transform: none; font-weight: 400;
           letter-spacing: 0; color: var(--secondary-text-color, #5a6b68); }
+        /* A warning that reads like the rest of the card is a warning nobody
+           sees; this one costs an hour to ignore. */
+        ga-heating-actions-card h4 .sub.warn { color: var(--error-color, #b3261e); }
         /* The panel below is a place where you choose; this says what to choose.
            Tight against it, because a label belongs to the thing it labels. */
         ga-heating-actions-card .roomslabel { margin-bottom: -10px; }
@@ -793,6 +906,8 @@ class GaHeatingActionsCard extends HTMLElement {
     this.querySelector(".cancel-absence").addEventListener("click", () => this._cancelAbsence());
     this.querySelector(".end-absence").addEventListener("click", () => this._endAbsence());
     this.querySelector(".end-boost").addEventListener("click", () => this._endBoost());
+    this.querySelector(".ichb-start").addEventListener("click", () => this._startIchb());
+    this.querySelector(".ichb-cancel").addEventListener("click", () => this._cancelIchb());
     this.querySelector(".toggle-form").addEventListener("click", () => {
       this._openForm = !this._openForm;
       this._render();
@@ -848,6 +963,42 @@ class GaHeatingActionsCard extends HTMLElement {
       bh.textContent = live.length
         ? `(läuft in ${nRooms(live.length, true)} · Ventile ganz offen)`
         : "(Ventile kurzzeitig ganz öffnen)";
+    }
+
+    // The heading says what the hour is for; while a run is going it says how
+    // much of it is left, counted from `until` for the same reason the boost
+    // countdown is — a run ticking down publishes nothing.
+    const ih = this.querySelector(".ichbhint");
+    const icancel = this.querySelector(".ichb-cancel");
+    const istart = this.querySelector(".ichb-start");
+    if (ih) {
+      const live = this._ichbRooms();
+      if (live.length) {
+        const ov = ((this._hass.states[live[0]].attributes || {}).override || {}).ichb || {};
+        const until = ov.until ? new Date(ov.until).getTime() : NaN;
+        const left = Number.isNaN(until)
+          ? Number(ov.remaining_s) || 0
+          : Math.max(0, Math.round((until - Date.now()) / 1000));
+        ih.textContent = `(läuft — noch ${mmss(left)} in ${nRooms(live.length, true)})`;
+      } else {
+        const { blocking, warm } = this._tooWarmRooms();
+        if (blocking.length) {
+          ih.textContent = `(zu warm für eine Messung: ${blocking.join(", ")} — `
+            + `unter ${ICHB_MAX_ROOM_TEMP} °C starten)`;
+        } else if (warm.length) {
+          ih.textContent = `(am besten unter ${ICHB_IDEAL_ROOM_TEMP} °C starten — `
+            + `${warm.join(", ")} ${warm.length === 1 ? "ist" : "sind"} wärmer)`;
+        } else {
+          ih.textContent = "(eine Stunde gleicher Durchfluss, damit die Räume vergleichbar werden)";
+        }
+        ih.classList.toggle("warn", blocking.length > 0);
+      }
+      if (icancel) {
+        if (live.length) icancel.removeAttribute("hidden");
+        else icancel.setAttribute("hidden", "");
+      }
+      // A second run on top of a running one is not a thing ga_heating offers.
+      if (istart) istart.disabled = live.length > 0;
     }
 
     const tf = this.querySelector(".toggle-form");
