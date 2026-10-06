@@ -18,7 +18,7 @@ and a resident can act on them differently:
   differences the balance is looking for shrink into the noise. A recommendation,
   not a refusal - the run still starts.
 
-Measured on KIB-SON-00000055: three rooms at 25.4, 25.9 and 25.0 degrees against
+Measured on a resident test device: three rooms just above 25 degrees against
 the old 25 degree target produced no rate for any radiator.
 
 These run the SHIPPED bytes in a VM (tests/js/eval.mjs).

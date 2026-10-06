@@ -14,8 +14,8 @@
  * WHOSE BATTERIES. Only the room's own heating devices — its valves and its
  * thermometers — and the card is given that list rather than finding one. "Any
  * battery entity in this area" would have swept up the Home Assistant companion
- * app: on the first device this was written against, `sensor.nokhtari_battery_
- * level` sat at 15 %, which is a person's phone. Telling a resident their
+ * app: on the first device this was written against, a phone's
+ * `sensor.<name>_battery_level` sat at 15 %. Telling a resident their
  * heating needs maintenance because someone's phone is flat is worse than
  * saying nothing.
  *

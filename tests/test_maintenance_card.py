@@ -15,7 +15,7 @@ The two rules worth more than the feature:
   WHOSE BATTERIES   Only the room's own valves and thermometers, taken from the
                     devices rather than from "every battery entity in this
                     area". The first device this ran against had
-                    `sensor.nokhtari_battery_level` at 15 % — a person's phone.
+                    a phone's battery sensor at 15 %.
   WHAT A NAME IS    A GA label where one exists, with its padding removed, then
                     the name a person gave the device — never the radio address,
                     which cannot help anybody standing at the radiator.
@@ -210,10 +210,10 @@ def test_a_low_battery_is_rendered_with_its_name_and_class():
 def test_no_radio_address_reaches_the_screen():
     """The fleet names every z2m entity after its IEEE. A card that fell back to
     the entity id would print one."""
-    out = _render({"sensor.0x0ceff6fffe76aca7_battery":
+    out = _render({"sensor.0x00124b00000000aa_battery":
                    {"state": "5", "attributes": {"friendly_name": "Thermostat 1 Batterie"}}},
-                  ["sensor.0x0ceff6fffe76aca7_battery"])
-    assert "0x0ceff6" not in out
+                  ["sensor.0x00124b00000000aa_battery"])
+    assert "0x00124b" not in out
 
 
 # ── whose batteries: the strategy's scoping ──────────────────────────────────
@@ -253,10 +253,10 @@ def test_the_rooms_thermometer_counts_too():
 
 def test_a_phone_in_the_same_area_is_not_a_heating_device():
     """THE MUST-NOT-FLAG. `room.batts` is every battery sensor in the area, and
-    on the first device this ran against that was `sensor.nokhtari_battery_level`
-    at 15 % — somebody's phone. Telling a resident the heating needs maintenance
+    on the first device this ran against that was a phone's battery
+    sensor at 15 % — somebody's phone. Telling a resident the heating needs maintenance
     because a phone is flat is worse than saying nothing."""
-    got = scoped(["climate.0xaaa1"], extra=["sensor.nokhtari_battery_level"])
+    got = scoped(["climate.0xaaa1"], extra=["sensor.phone_battery_level"])
     assert got == ["sensor.0xaaa1_battery"]
 
 

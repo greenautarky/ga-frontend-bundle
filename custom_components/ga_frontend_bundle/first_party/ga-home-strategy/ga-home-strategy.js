@@ -322,7 +322,7 @@ function thermostatCard(entity, roomName, style, header = "Steuerung") {
  *
  * Built from the devices, never from the area's entity list. `room.batts` is
  * "every battery sensor in this area", and on the first device this was written
- * against that included `sensor.nokhtari_battery_level` at 15 % — the Home
+ * against that included a phone's `sensor.<name>_battery_level` at 15 % — the Home
  * Assistant companion app, i.e. somebody's phone. A maintenance line saying the
  * heating needs attention because a phone is flat is worse than no line.
  *
