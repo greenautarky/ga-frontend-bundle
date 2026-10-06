@@ -103,3 +103,36 @@ def delivery_plan(
     inject = [c for c in cards if c["id"] in early]
     resource = [c for c in cards if c["id"] not in early]
     return inject, resource
+
+
+def retired_resources(
+    items: list[dict], shipped_ids: set[str] | frozenset[str], url_base: str
+) -> list[dict]:
+    """Lovelace resources this bundle registered for assets it no longer ships.
+
+    A card dropped from ``first_party/`` keeps its resource entry forever:
+    registration only ever adds, and the per-asset clean-up only replaces a
+    stale ``?v=`` of an asset that still ships. The panel then imports a URL
+    that answers with Core's HTML index on every dashboard load.
+
+    OWNED means: the URL path lies under ``url_base`` (the first-party static
+    path only this integration serves). Anything else — a resident's own
+    resource, a HACS card, a community card — is never returned, whatever it is
+    called. Pure so a test can pin the ownership rule without Home Assistant.
+
+    Refuses to judge without a shipped set: an empty ``shipped_ids`` means the
+    package is broken (``first_party/`` missing), and "nothing ships" must not
+    turn into "every GA resource is retired".
+    """
+    if not shipped_ids:
+        return []
+    prefix = url_base.rstrip("/") + "/"
+    out = []
+    for item in items:
+        path = (item.get("url") or "").split("?", 1)[0]
+        if not path.startswith(prefix):
+            continue
+        asset_id = path[len(prefix):].split("/", 1)[0]
+        if asset_id and asset_id not in shipped_ids:
+            out.append(item)
+    return out

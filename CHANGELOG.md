@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **A card the bundle stops shipping no longer stays a Lovelace resource.**
+  Registration only ever added resources, and the clean-up only replaced an old
+  `?v=` of a card that still ships — so a dropped card (seen: `ga-maintenance-card`
+  on a 1.22.0 device, reported by ga_manager's `ga.frontend_cards` as
+  `stale_registrations`) stayed registered and the panel imported a URL that
+  Core answers with its HTML index. On start the integration now removes every
+  resource under `/ga_frontend_bundle_first_party/` whose asset is not in this
+  package, logged at WARNING. Only that path counts as ours: resident
+  (`/local/…`), HACS and community-card resources are never touched, and an
+  empty `first_party/` (broken package) sweeps nothing.
+
 ## 1.22.0
 
 > **Requires ga_heating 0.12.0 or newer — ship them together.** This release
