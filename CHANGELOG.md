@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.23.0 — 2026-10-06
+
+> **Requires ga_heating 0.13.0 for the balancing controls; without it the
+> section is hidden.** The Profil card shows "Hydraulischer Abgleich" only when
+> Home Assistant lists the `ga_heating.ichb` service, which ga_heating 0.13.0
+> registers. On 0.12.x the card shows everything else and no balancing button.
 
 - **A running boost can be ended where it is running.** The override row said
   a boost was going and how long it had left, and offered no way out; the only
@@ -10,7 +15,9 @@
   that was AUS comes back heating. There is a Beenden button on a boost and on a
   Sonderplan, and deliberately none on an open window: that ends when the
   contact closes, and a button saying otherwise is a lie about a contact. The
-  Profil card can end a boost for the selected rooms too.
+  Profil card can end a running boost too: "Boost beenden" ends it in every
+  room that has one, whatever the room selection says, because it sits under
+  the line that counts those rooms.
 
 - **Hydraulischer Abgleich can be started from the Profil card.** ga_heating had
   the services; nothing on screen called them, so a balancing run could only be
@@ -30,6 +37,15 @@
   recommendation rather than a refusal. Said both on the heading, where a
   resident looks before deciding, and on the press, which is what they get if
   they did not.
+
+- **A tap on a room chip is no longer lost while a countdown runs.** The Profil
+  card re-rendered itself every second, always, and rebuilt the room chips each
+  time, so a press held across a tick went down on one button and came up over
+  its replacement. The clock now runs only while a boost or a balancing run
+  counts down, a tick updates only the countdown text, and the chips and form
+  fields are rebuilt only when what they show changes. The countdown also drops
+  the red "too warm" colour once a run is going, and "Boost beenden" reports the
+  rooms it actually reached ("in 1 Raum", or "1 von 2 … nicht erreicht: …").
 
 - **Low batteries are a class and a name, not a percentage.** The thermostat
   card showed one battery number at the top with no indication whose it was.
