@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The heating log names the balancing hour.** ga_heating 0.13.0 logs a balancing
+  run's changes with the source `balancing`; the log card shows it as
+  "System · Einregulierung". Before, such an entry had no reason line.
 - **A card the bundle stops shipping no longer stays a Lovelace resource.**
   Registration only ever added resources, and the clean-up only replaced an old
   `?v=` of a card that still ships — so a dropped card (seen: `ga-maintenance-card`
