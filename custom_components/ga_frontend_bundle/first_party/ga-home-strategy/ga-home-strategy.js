@@ -158,9 +158,9 @@ function historyAvailable(hass) {
  *                               somebody renamed a sensor, and would draw a
  *                               stranger's thermometer on a resident's wall.
  *   outdoor_humidity     —       the same for the humidity chart.
- *   change_log        false     show the last changes to a room under its
- *                               thermostat (ga-heating-log-card). DEFAULT OFF
- *                               while the feature is new.
+ *   change_log        true      show the last changes to a room under its
+ *                               thermostat (ga-heating-log-card, "Aktivität").
+ *                               DEFAULT ON since 1.23.1; false hides it.
  *   hide_household    true      drop the "Haushalt" overview view. DEFAULT hidden
  *                               (resident-clean UI); set false to show it.
  *   hide_roomless     true      drop the "Ohne Raum" view. DEFAULT hidden; set
@@ -189,9 +189,12 @@ function gaOptions(config) {
     hideRoomless: c.hide_roomless !== false,
     // Unset keeps the fleet look; "" is a deliberate "no title", not unset.
     thermostatHeader: typeof c.thermostat_header === "string" ? c.thermostat_header : "Steuerung",
-    // DEFAULT OFF while it is new: a card that reads the recorder on every room
-    // view is a cost every device would pay for a feature nobody has judged yet.
-    changeLog: c.change_log === true,
+    // DEFAULT ON since 1.23.1 (Thomas, 2026-10-06). OFF "while new" meant it was
+    // on no device at all: greenautarky_site writes the strategy without options,
+    // found by a device test on BOSv1.4.0-rc6. Since ga_heating 0.12.0 the card
+    // reads the room entity first and the recorder only as a fallback, so the
+    // per-view cost that justified OFF is mostly gone. change_log:false hides it.
+    changeLog: c.change_log !== false,
     //: Absent on a device with no weather integration, which is most of them —
     //: a GA device has no `default_config`, so nothing adds one by itself.
     outdoorTemperature: typeof c.outdoor_temperature === "string" ? c.outdoor_temperature : null,

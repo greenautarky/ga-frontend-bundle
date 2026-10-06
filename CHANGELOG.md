@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.23.1 — 2026-10-06
+
+- **"Aktivität" is shown in every room by default.** The change-log card was off by
+  default "while new", and greenautarky_site writes the strategy without options, so a
+  device test on BOSv1.4.0-rc6 found it on no room view of any device. `change_log: false`
+  still hides it.
+
 ## 1.23.0 — 2026-10-06
 
 > **Requires ga_heating 0.13.0 for the balancing controls; without it the

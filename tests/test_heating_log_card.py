@@ -223,10 +223,27 @@ def test_the_history_diff_is_reversed_into_the_same_order():
 # ── the strategy ────────────────────────────────────────────────────────────
 
 
-def test_the_strategy_places_it_under_the_thermostat_behind_an_option():
+def test_the_strategy_places_it_under_the_thermostat():
     src = STRATEGY.read_text(encoding="utf-8")
     assert 'cards.push({ type: "custom:ga-heating-log-card", entity, title: "Aktivität" });' in src
-    assert "changeLog: c.change_log === true," in src, "must default OFF while new"
+
+
+@pytest.mark.parametrize(
+    "config, expected",
+    [
+        ("{}", True),                       # what greenautarky_site writes: no options
+        ("{change_log: true}", True),
+        ("{change_log: false}", False),     # an explicit opt-out still works
+    ],
+)
+def test_the_change_log_is_shown_unless_switched_off(config, expected):
+    """DEFAULT ON since 1.23.1 (Thomas, 2026-10-06). It was off "while new", and
+    a device test on BOSv1.4.0-rc6 found the result: greenautarky_site writes the
+    strategy with no options, so "Aktivität" was on no room view of any device.
+    Since ga_heating 0.12.0 the card reads the room entity first and the recorder
+    only as a fallback, so the per-view cost that justified OFF is mostly gone."""
+    got = json.loads(run_js(STRATEGY, f"JSON.stringify(gaOptions({config}).changeLog)"))
+    assert got is expected
 
 
 def test_the_title_is_home_assistants_own_german_for_this():
