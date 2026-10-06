@@ -64,6 +64,22 @@ def test_an_open_window_offers_none():
     assert "endov" not in row
 
 
+def test_an_open_window_outranks_whatever_else_is_recorded():
+    """The row returns the FIRST active entry, so the list order has to be
+    ga_heating's precedence — window > ichb > boost > absence.
+
+    The window used to be LAST, which nothing noticed until a balancing run made
+    it visible (CI, 2026-10-06). ga_heating shuts the valves for an open window
+    whatever else is in force, so naming the boost here put "Boost" on a room
+    that was not heating — and offered a Beenden button for an override whose
+    cancellation would change nothing on the wall.
+    """
+    for other in ("boost", "absence", "ichb"):
+        row = _row({"window": {"active": True}, other: _running(other)[other]})
+        assert "Fenster offen" in row, other
+        assert "Beenden" not in row, other
+
+
 def test_a_room_with_nothing_running_grows_no_button():
     assert _row({}).strip() == ""
     assert _row({"boost": {"active": False, "until": "2099-01-01T00:00:00+00:00"}}).strip() == ""

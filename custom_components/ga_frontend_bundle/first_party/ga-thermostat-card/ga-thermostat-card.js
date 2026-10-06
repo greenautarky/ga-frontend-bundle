@@ -364,16 +364,23 @@ class GaThermostatCard extends HTMLElement {
     //: run — so cancelling one puts the room back exactly as it was, with no
     //: bookkeeping to restore. A WINDOW has no button: it ends when the window
     //: closes, and a button that says otherwise would be a lie about a contact.
+    //:
+    //: THIS ORDER IS THE PRECEDENCE, and it is ga_heating's own:
+    //: window > ichb > boost > absence > slot (`effective_target`). The loop
+    //: below returns the FIRST active entry, so the row names the override
+    //: actually driving the radiators rather than the first one written down.
+    //:
+    //: The window used to be last, which was wrong in a way nothing noticed
+    //: until a balancing run made it visible: a window open during a boost put
+    //: "Boost" on a room whose valves ga_heating had already shut, and a window
+    //: open during a run put "Abgleich läuft" on a cold one (CI, 2026-10-06).
     const kinds = [
-      // A balancing run, FIRST: it outranks a boost in ga_heating's own
-      // precedence (window > ichb > boost), so when both are somehow present the
-      // row has to name the one actually driving the radiators.
-      //
-      // No Beenden button. `cancel_ichb` ends the run for the WHOLE flat — the
-      // hour only means anything if every room is measured at once — and a
-      // button inside one room's card that silently stops all six would be a lie
-      // about its own scope. It is cancelled from the Profil card, where the
-      // scope is stated.
+      ["window", "Fenster offen", "mdi:window-open-variant", "Heizt wieder, sobald es zu ist", null],
+      // No Beenden button on a balancing run. `cancel_ichb` ends it for the
+      // WHOLE flat — the hour only means anything if every room is measured at
+      // once — and a button inside one room's card that silently stops all six
+      // would be a lie about its own scope. It is cancelled from the Profil
+      // card, where the scope is stated.
       ["ichb", "Abgleich läuft", "mdi:scale-balance",
        "Hydraulischer Abgleich — danach gilt wieder der Plan", null],
       ["boost", "Boost", "mdi:rocket-launch-outline", "Danach gilt wieder der Plan", "boost"],
@@ -387,7 +394,6 @@ class GaThermostatCard extends HTMLElement {
       // a wall saying "Krank" records why somebody is at home, which is a
       // decision about health data, not a label.
       ["absence", "Sonderplan", "mdi:calendar-clock", "Bis zum Ende des Sonderplans", "absence"],
-      ["window", "Fenster offen", "mdi:window-open-variant", "Heizt wieder, sobald es zu ist", null],
     ];
     for (const [key, label, icon, hint, end] of kinds) {
       const o = ov[key];
