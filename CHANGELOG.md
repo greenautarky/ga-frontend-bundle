@@ -1,6 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- **A card the bundle stops shipping no longer stays a Lovelace resource.**
+  Registration only ever added resources, and the clean-up only replaced an old
+  `?v=` of a card that still ships — so a dropped card (seen: `ga-maintenance-card`
+  on a 1.22.0 device, reported by ga_manager's `ga.frontend_cards` as
+  `stale_registrations`) stayed registered and the panel imported a URL that
+  Core answers with its HTML index. On start the integration now removes every
+  resource under `/ga_frontend_bundle_first_party/` whose asset is not in this
+  package, logged at WARNING. Only that path counts as ours: resident
+  (`/local/…`), HACS and community-card resources are never touched, and an
+  empty `first_party/` (broken package) sweeps nothing.
+
 ## 1.22.0
+
+> **Requires ga_heating 0.12.0 or newer — ship them together.** This release
+> shows −/+ on an off room, and a press there sends only
+> `climate.set_temperature`. ga_heating 0.12.0 turns an OFF room on in MANUEL
+> for that; on 0.11.x the radiators go to `heat` while the room stays "off", so
+> the card shows AUS over a radiator that is heating, with no manual period to
+> end it. The bundle has no mechanism to declare a minimum ga_heating version
+> (`manifest.json` `dependencies` take no versions, and listing ga_heating there
+> would stop the bundle loading on a device without it), so this is enforced
+> only by pinning both in the same OS release. The change-log card also expects
+> ga_heating 0.12.0's `changes` attribute; without it the card falls back to
+> history, which is correct but carries no reasons.
 
 - **The thermostat card's "Steuerung" title can be turned off.** It sits
   directly under the room's "Heizung" heading and says the same thing twice.
