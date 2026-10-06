@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+- **A running boost can be ended where it is running.** The override row said
+  a boost was going and how long it had left, and offered no way out; the only
+  escape was to press KI or AUS, which is not the same thing — an override never
+  replaced the room's decision, so cancelling it puts the room back exactly as
+  it was, while pressing KI writes a new decision over the old one and a room
+  that was AUS comes back heating. There is a Beenden button on a boost and on a
+  Sonderplan, and deliberately none on an open window: that ends when the
+  contact closes, and a button saying otherwise is a lie about a contact. The
+  Profil card can end a boost for the selected rooms too.
+
+- **Hydraulischer Abgleich can be started from the Profil card.** ga_heating had
+  the services; nothing on screen called them, so a balancing run could only be
+  started from Developer Tools. The cancel button appears only while a run is
+  going. A run is also named in the room card it is running in — first in the
+  row, since ga_heating ranks window > ichb > boost — with no Beenden there,
+  because `cancel_ichb` ends the hour for every room and a button inside one
+  room's card would silently stop all six.
+
+- **The card warns before a balancing hour is wasted.** The run measures each
+  radiator's catch-up rate at a common flow, so every room needs somewhere to
+  climb; the first run on a real flat produced no rate for any radiator because
+  three rooms sat at 25.4, 25.9 and 25.0 °C. Two limits, because a warm room
+  spoils the hour two different ways: above 26 °C (the 30 °C target less 4 K of
+  headroom) a room cannot be measured at all and is named in red, and above
+  21 °C it still can be but the rates compress together, which is a
+  recommendation rather than a refusal. Said both on the heading, where a
+  resident looks before deciding, and on the press, which is what they get if
+  they did not.
+
+- **Low batteries are a class and a name, not a percentage.** The thermostat
+  card showed one battery number at the top with no indication whose it was.
+  There is now a "Wartung" section under Aktivität listing every sensor in the
+  room that needs attention — valves and thermometers alike — named by its GA
+  label with the padding stripped (`THD-SON-202`), at "Batterie niedrig" below
+  30 % and "Batterie fast leer" below 20 %. Built from the room's own devices,
+  so a resident's phone cannot appear in it. Heating faults are meant to join
+  them here rather than become a second list elsewhere.
+
+- **Speichern and Verwerfen stop disagreeing with the plan on screen.** A
+  resident who typed 21, thought better of it and typed 18 again was left with
+  both buttons armed over a plan identical to the stored one. Whether anything
+  changed is now derived from the diff instead of remembered in a flag that
+  never came back down.
+
+- **A backtick inside a shipped `<style>` block fails the build.** The card
+  bodies are template literals, so a backtick in their CSS ends the literal and
+  the card throws `SyntaxError` on import — which reaches a resident as
+  "Konfigurationsfehler" and nothing else. It shipped twice in one afternoon
+  before a check existed.
+
 - **A card the bundle stops shipping no longer stays a Lovelace resource.**
   Registration only ever added resources, and the clean-up only replaced an old
   `?v=` of a card that still ships — so a dropped card (seen: `ga-maintenance-card`
