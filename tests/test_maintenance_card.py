@@ -472,3 +472,120 @@ def test_the_worst_thing_is_first_across_every_kind():
         + ").map(r => r.name + '|' + r.detail))"))
     assert out[0] == "Fenster|Batterie fast leer", out
     assert len(out) == 3, out
+
+
+# -- a radiator that answered with its own setpoint (ga_heating 0.13.3) --------
+#
+# A TRVZB switched to `heat` restores the setpoint it last stored instead of
+# keeping ours. Its answer is on time, so `lag_s` is about 0 and the lag rule
+# alone would hide it; ga_heating counts these as `substituted` per valve.
+
+_VALVE = {"climate.0xaaa": {"state": "heat", "attributes": {"friendly_name": "Thermostat 1"}}}
+
+
+def _late(entry):
+    return {"climate.wohnzimmer": {"state": "auto", "attributes": {
+        "valves_late": {"climate.0xaaa": entry}}}, **_VALVE}
+
+
+def test_a_radiator_that_set_its_own_setpoint_is_named():
+    out = radio_rows(_late({"lag_s": 0, "count": 2, "substituted": 2}),
+                     climate="climate.wohnzimmer")
+    assert out == ["Thermostat 1|setzt eigenen Sollwert (2×)"], out
+
+
+def test_a_single_substitution_carries_no_count():
+    out = radio_rows(_late({"lag_s": 1, "count": 1, "substituted": 1}),
+                     climate="climate.wohnzimmer")
+    assert out == ["Thermostat 1|setzt eigenen Sollwert"], out
+
+
+def test_a_radiator_that_did_both_gets_one_line_saying_both():
+    """The row names a device; a device gets one line."""
+    out = radio_rows(_late({"lag_s": 58, "count": 3, "substituted": 1}),
+                     climate="climate.wohnzimmer")
+    assert out == ["Thermostat 1|antwortet verzögert (58 s), setzt eigenen Sollwert"], out
+
+
+def test_an_older_ga_heating_without_the_counter_changes_nothing():
+    """Must-not-flag: before 0.13.3 the key is absent, and a short lag stays quiet."""
+    assert radio_rows(_late({"lag_s": 4, "count": 1}), climate="climate.wohnzimmer") == []
+    assert radio_rows(_late({"lag_s": 4, "count": 1, "substituted": 0}),
+                      climate="climate.wohnzimmer") == []
+
+
+def test_within_a_level_a_battery_outranks_the_radio():
+    """The kinds' sort keys are different units (a percentage, a link quality),
+    so within one level the kind decides first. A weak radio at 20 must not come
+    out above a low battery at 25 %."""
+    states = {
+        "sensor.a_battery": {"state": "25", "attributes": {"friendly_name": "Fenster Batterie"}},
+        "sensor.b_linkquality": lqi(20, "Thermostat 2 Linkqualität"),
+        **_late({"lag_s": 58}),
+    }
+    out = json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows(" + json.dumps(states)
+        + ', ["sensor.a_battery"], '
+        + json.dumps({"links": ["sensor.b_linkquality"], "climate": "climate.wohnzimmer"})
+        + ").map(r => r.name + '|' + r.detail))"))
+    assert out == ["Fenster|Batterie niedrig",
+                   "Thermostat 2|Funkverbindung schwach",
+                   "Thermostat 1|antwortet verzögert (58 s)"], out
+
+
+# -- the card element itself, configured the way the strategy configures it ----
+
+
+def _render_cfg(entities, config):
+    return run_js(CARD, f"""
+      (() => {{
+        const el = Object.create(GaMaintenanceCard.prototype);
+        el.setConfig({json.dumps(config)});
+        let html = "";
+        Object.defineProperty(el, "innerHTML", {{
+          get: () => html, set: (v) => {{ html = v; }}, configurable: true }});
+        el._hass = {{ states: {json.dumps(entities)} }};
+        el._render();
+        return html;
+      }})()
+    """)
+
+
+def test_the_card_renders_a_weak_link_from_its_config():
+    out = _render_cfg({"sensor.a_linkquality": lqi(22)},
+                      {"batteries": [], "links": ["sensor.a_linkquality"]})
+    assert "Funkverbindung schwach" in out and "Thermostat 1" in out, out
+    assert "Keine Auffälligkeiten" not in out
+
+
+def test_the_card_renders_a_late_radiator_from_its_config():
+    out = _render_cfg(_late({"lag_s": 58, "count": 1}),
+                      {"batteries": [], "climate": "climate.wohnzimmer"})
+    assert "antwortet verzögert (58 s)" in out and "Thermostat 1" in out, out
+
+
+def test_the_card_renders_a_substituted_radiator_from_its_config():
+    out = _render_cfg(_late({"lag_s": 0, "count": 1, "substituted": 1}),
+                      {"batteries": [], "climate": "climate.wohnzimmer"})
+    assert "setzt eigenen Sollwert" in out and "Thermostat 1" in out, out
+
+
+def test_the_strategy_hands_the_card_the_links_and_the_room():
+    """The card finds nothing itself: without these two keys in the built view,
+    none of the rows above can ever appear on a device."""
+    cfg = json.loads(run_js(STRATEGY, """
+      (() => {
+        const room = { name: "Flur", area_id: "flur", climate: ["climate.flur"],
+          temps: [], hums: [], batts: [], lights: [], switches: [] };
+        const hass = { states: {
+          "climate.flur": { state: "auto", attributes: { valves: ["climate.0xaaa1"] } },
+          "sensor.0xaaa1_linkquality": { state: "unknown", attributes: {} },
+        } };
+        const secs = roomSections(room, { changeLog: true, singleThermostat: true }, hass);
+        const cards = (secs[0] && secs[0].cards) || [];
+        return JSON.stringify(cards.find((c) => c.type === "custom:ga-maintenance-card"));
+      })()
+    """))
+    assert cfg["links"] == ["sensor.0xaaa1_linkquality"], cfg
+    assert cfg["climate"] == "climate.flur", cfg

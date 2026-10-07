@@ -321,20 +321,6 @@ function thermostatCard(entity, roomName, style, header = "Steuerung") {
 }
 
 /**
- * The battery sensors of a room's OWN heating devices.
- *
- * Built from the devices, never from the area's entity list. `room.batts` is
- * "every battery sensor in this area", and on the first device this was written
- * against that included a phone's `sensor.<name>_battery_level` at 15 % — the Home
- * Assistant companion app, i.e. somebody's phone. A maintenance line saying the
- * heating needs attention because a phone is flat is worse than no line.
- *
- * So: take the radio ids of the valves ga_heating names and of the room's own
- * thermometers, and accept the battery sensor that belongs to each. An
- * allow-list by construction — anything that is not one of this room's devices
- * cannot appear, whatever it is called or wherever it is assigned.
- */
-/**
  * The z2m device keys behind a room: its valves, thermometers and hygrometers.
  *
  * Factored out of roomBatteries when the Wartung section learned to report radio
@@ -370,6 +356,20 @@ function roomDeviceSensors(room, clim, hass, suffix) {
   return out;
 }
 
+/**
+ * The battery sensors of a room's OWN heating devices.
+ *
+ * Built from the devices, never from the area's entity list. `room.batts` is
+ * "every battery sensor in this area", and on the first device this was written
+ * against that included a phone's `sensor.<name>_battery_level` at 15 % — the Home
+ * Assistant companion app, i.e. somebody's phone. A maintenance line saying the
+ * heating needs attention because a phone is flat is worse than no line.
+ *
+ * So: take the radio ids of the valves ga_heating names and of the room's own
+ * thermometers, and accept the battery sensor that belongs to each. An
+ * allow-list by construction — anything that is not one of this room's devices
+ * cannot appear, whatever it is called or wherever it is assigned.
+ */
 function roomBatteries(room, clim, hass) {
   return roomDeviceSensors(room, clim, hass, "battery");
 }

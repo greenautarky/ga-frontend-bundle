@@ -114,12 +114,6 @@ function deviceName(state) {
   return gaLabel(a.ga_label) || gaLabel(friendly) || friendly || null;
 }
 
-/**
- * The maintenance lines for one room: `[{ kind, name, detail, sort }]`.
- *
- * Worst first, because a resident reads the first line. Exported shape rather
- * than markup so the ordering and the thresholds can be tested without a DOM.
- */
 //: LINK QUALITY, as Zigbee2MQTT reports it: 0-255, higher is better. The exact
 //: number means different things on different coordinators, so these are
 //: deliberately low: a radiator this far down is struggling on anyone's scale,
@@ -144,8 +138,15 @@ function linkBand(lqi) {
 //: on the dial. ga_heating publishes these per room as `valves_late`; it is the
 //: cause behind "the room went to MANUEL by itself", which is otherwise invisible
 //: here (reported 2026-10-06 on a resident device: 58 s late after a balancing
-//: run).
+//: run). Under 30 s is not said: a TRV reports on its own cycle, and a few seconds
+//: behind is normal.
 const LATE_SECONDS_WORTH_SAYING = 30;
+
+//: Within one level, which KIND is read first: a battery outranks the radio, the
+//: radio outranks what the radio cost us. Without it the sort keys of different
+//: kinds are compared directly — a percentage against a link quality — and a
+//: weak radio at 20 came out above a battery at 25 %.
+const KIND_RANK = { battery: 0, link: 1, late: 2 };
 
 /** A reading that is actually a number, or null. Never `Number("")`, which is 0. */
 function reading(state) {
@@ -156,6 +157,12 @@ function reading(state) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * The maintenance lines for one room: `[{ kind, name, detail, sort }]`.
+ *
+ * Worst first, because a resident reads the first line. Exported shape rather
+ * than markup so the ordering and the thresholds can be tested without a DOM.
+ */
 function maintenanceRows(states, batteries, extra) {
   const rows = [];
   const { links, climate } = extra || {};
@@ -206,16 +213,33 @@ function maintenanceRows(states, batteries, extra) {
 
   // A LATE RADIATOR, read from the room ga_heating publishes it on. No threshold
   // band: ga_heating only records an answer it had to forgive, so the entry
-  // existing IS the finding.
+  // existing IS the finding — except a lag under 30 s, which is a TRV's own
+  // reporting cycle and not worth a line.
+  //
+  // A RADIATOR THAT ANSWERED WITH ITS OWN SETPOINT (ga_heating 0.13.3,
+  // `substituted`: how many times). Switched to `heat`, a TRVZB restores the
+  // setpoint it last stored instead of keeping ours, so its answer is on time
+  // (lag about 0) but carries a value we never sent. The lag rule above would
+  // hide it, so it is said on its own; when one radiator has done both, one line
+  // says both, because the row names a device and a device gets one line.
   const late = ((states[climate] || {}).attributes || {}).valves_late || {};
   for (const [valve, info] of Object.entries(late)) {
     const lag = Number((info || {}).lag_s);
-    if (!Number.isFinite(lag) || lag < LATE_SECONDS_WORTH_SAYING) continue;
+    const isLate = Number.isFinite(lag) && lag >= LATE_SECONDS_WORTH_SAYING;
+    const subs = Number((info || {}).substituted);
+    const isSubstituted = Number.isFinite(subs) && subs > 0;
+    if (!isLate && !isSubstituted) continue;
+    const said = [];
+    if (isLate) said.push(`antwortet verzögert (${Math.round(lag)} s)`);
+    if (isSubstituted) {
+      said.push(`setzt eigenen Sollwert${subs > 1 ? ` (${Math.round(subs)}×)` : ""}`);
+    }
     rows.push({
-      kind: "late", level: "low", icon: "mdi:timer-sand",
+      kind: "late", level: "low",
+      icon: isLate ? "mdi:timer-sand" : "mdi:swap-horizontal",
       name: deviceName(states[valve]) || "Heizkörper",
-      detail: `antwortet verzögert (${Math.round(lag)} s)`,
-      sort: 1000 - lag,
+      detail: said.join(", "),
+      sort: 1000 - (isLate ? lag : 0),
     });
   }
 
@@ -224,7 +248,8 @@ function maintenanceRows(states, batteries, extra) {
   // each kind keeps its own sort key, so two weak radios still come out worst
   // first.
   const RANK = { critical: 0, low: 1 };
-  rows.sort((a, b) => (RANK[a.level] - RANK[b.level]) || (a.sort - b.sort));
+  rows.sort((a, b) => (RANK[a.level] - RANK[b.level])
+    || (KIND_RANK[a.kind] - KIND_RANK[b.kind]) || (a.sort - b.sort));
   return rows;
 }
 
