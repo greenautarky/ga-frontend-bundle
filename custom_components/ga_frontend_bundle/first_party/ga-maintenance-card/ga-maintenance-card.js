@@ -257,10 +257,17 @@ function maintenanceRows(states, batteries, extra) {
   // measured threshold behind it. A dead sensor usually shows up as a flat battery
   // too, and both lines are shown — the battery says what to buy, this says what
   // it is costing.
+  // SINCE, NOT A DURATION, and the card does the arithmetic. ga_heating publishes
+  // when the device was last heard from and rewrites the room only when the
+  // VERDICT changes; a duration in the attribute would differ every tick and cost
+  // a state write per room per minute. So the age is computed here, which also
+  // means the line stays current between republishes instead of ageing with them.
   const silent = ((states[climate] || {}).attributes || {}).sensor_silent || {};
   for (const [sensor, info] of Object.entries(silent)) {
-    const quiet = Number((info || {}).silent_s);
-    if (!Number.isFinite(quiet) || quiet <= 0) continue;
+    const at = Date.parse(((info || {}).since) || "");
+    if (!Number.isFinite(at)) continue;
+    const quiet = (Date.now() - at) / 1000;
+    if (!(quiet > 0)) continue;
     const hours = Math.floor(quiet / 3600);
     const since = hours >= 1 ? `${hours} h` : `${Math.round(quiet / 60)} min`;
     const what = (info || {}).kind === "humidity" ? "Feuchtesensor" : "Temperatursensor";

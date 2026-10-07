@@ -611,20 +611,27 @@ def silent_rows(entities, climate="climate.wohnzimmer"):
         + ").map(r => r.name + '|' + r.detail))"))
 
 
+def _ago(seconds):
+    """An ISO timestamp `seconds` in the past, as ga_heating publishes `since`."""
+    import datetime as _dt
+    return (_dt.datetime.now(_dt.UTC)
+            - _dt.timedelta(seconds=seconds)).isoformat()
+
+
 def _room(silent):
     return {"climate.wohnzimmer": {"state": "auto",
                                    "attributes": {"sensor_silent": silent}}}
 
 
 def test_a_silent_temperature_sensor_is_named_with_how_long():
-    states = _room({"sensor.0xaaa_temperature": {"kind": "temperature", "silent_s": 14400}})
+    states = _room({"sensor.0xaaa_temperature": {"kind": "temperature", "since": _ago(14400)}})
     states["sensor.0xaaa_temperature"] = {"state": "19.5", "attributes": {
         "friendly_name": "Bad Sensor Temperatur"}}
     assert silent_rows(states) == ["Bad Sensor Temperatur|Temperatursensor meldet nicht (seit 4 h)"]
 
 
 def test_a_silent_hygrometer_says_which_kind_it_is():
-    states = _room({"sensor.0xaaa_humidity": {"kind": "humidity", "silent_s": 10800}})
+    states = _room({"sensor.0xaaa_humidity": {"kind": "humidity", "since": _ago(10800)}})
     out = silent_rows(states)
     assert out == ["Feuchtesensor|Feuchtesensor meldet nicht (seit 3 h)"], out
 
@@ -638,14 +645,14 @@ def test_a_healthy_room_grows_no_row():
 def test_a_silence_of_zero_or_nonsense_is_not_rendered():
     """Must-not-flag, the same shape as the battery and link guards: a key present
     with nothing useful in it must not become a fault on screen."""
-    for bad in ({"silent_s": 0}, {"silent_s": None}, {"silent_s": "soon"}, {}):
+    for bad in ({"since": None}, {"since": "soon"}, {"since": ""}, {}):
         assert silent_rows(_room({"sensor.0xaaa_temperature": bad})) == [], bad
 
 
 def test_a_dead_sensor_outranks_everything_else():
     """It is the only entry that changes what the heating does — the room is being
     warmed on a number that is not its own until somebody acts."""
-    states = _room({"sensor.0xaaa_temperature": {"kind": "temperature", "silent_s": 14400}})
+    states = _room({"sensor.0xaaa_temperature": {"kind": "temperature", "since": _ago(14400)}})
     states["sensor.0xaaa_temperature"] = {"state": "19.5", "attributes": {
         "friendly_name": "Bad Sensor Temperatur"}}
     states["sensor.b_battery"] = {"state": "12", "attributes": {
@@ -662,8 +669,8 @@ def test_a_dead_sensor_outranks_everything_else():
 
 def test_the_longest_silence_comes_first():
     states = _room({
-        "sensor.0xaaa_temperature": {"kind": "temperature", "silent_s": 10800},
-        "sensor.0xbbb_humidity": {"kind": "humidity", "silent_s": 86400},
+        "sensor.0xaaa_temperature": {"kind": "temperature", "since": _ago(10800)},
+        "sensor.0xbbb_humidity": {"kind": "humidity", "since": _ago(86400)},
     })
     states["sensor.0xaaa_temperature"] = {"state": "19.5", "attributes": {"friendly_name": "Bad"}}
     states["sensor.0xbbb_humidity"] = {"state": "44", "attributes": {"friendly_name": "Flur"}}
