@@ -321,6 +321,42 @@ function thermostatCard(entity, roomName, style, header = "Steuerung") {
 }
 
 /**
+ * The z2m device keys behind a room: its valves, thermometers and hygrometers.
+ *
+ * Factored out of roomBatteries when the Wartung section learned to report radio
+ * quality too — the same devices, a different suffix. Copying the walk would have
+ * let the two lists drift apart as rooms gain and lose sensors.
+ */
+function roomDeviceKeys(room, clim) {
+  const keys = new Set();
+  const add = (entityId) => {
+    const object = String(entityId || "").split(".").pop() || "";
+    // z2m names every entity of a device after its IEEE: `0x…_battery`,
+    // `0x…_temperature`, and the climate entity is the bare address.
+    const m = /^(0x[0-9a-f]+)/i.exec(object);
+    if (m) keys.add(m[1].toLowerCase());
+  };
+  for (const v of (clim && clim.attributes && clim.attributes.valves) || []) add(v);
+  for (const t of room.temps || []) add(t);
+  for (const h of room.hums || []) add(h);
+  return keys;
+}
+
+/** The entities of one suffix that actually exist for this room's devices. */
+function roomDeviceSensors(room, clim, hass, suffix) {
+  const states = (hass && hass.states) || {};
+  const out = [];
+  for (const key of roomDeviceKeys(room, clim)) {
+    const id = `sensor.${key}_${suffix}`;
+    if (states[id]) out.push(id);
+  }
+  // Stable order so the rendered config does not churn between builds; the card
+  // sorts by what matters (worst first) when it renders.
+  out.sort();
+  return out;
+}
+
+/**
  * The battery sensors of a room's OWN heating devices.
  *
  * Built from the devices, never from the area's entity list. `room.batts` is
@@ -335,28 +371,15 @@ function thermostatCard(entity, roomName, style, header = "Steuerung") {
  * cannot appear, whatever it is called or wherever it is assigned.
  */
 function roomBatteries(room, clim, hass) {
-  const states = (hass && hass.states) || {};
-  const keys = new Set();
-  const add = (entityId) => {
-    const object = String(entityId || "").split(".").pop() || "";
-    // z2m names every entity of a device after its IEEE: `0x…_battery`,
-    // `0x…_temperature`, and the climate entity is the bare address.
-    const m = /^(0x[0-9a-f]+)/i.exec(object);
-    if (m) keys.add(m[1].toLowerCase());
-  };
-  for (const v of (clim && clim.attributes && clim.attributes.valves) || []) add(v);
-  for (const t of room.temps || []) add(t);
-  for (const h of room.hums || []) add(h);
+  return roomDeviceSensors(room, clim, hass, "battery");
+}
 
-  const out = [];
-  for (const key of keys) {
-    const id = `sensor.${key}_battery`;
-    if (states[id]) out.push(id);
-  }
-  // Stable order so the rendered config does not churn between builds; the card
-  // sorts by what matters (emptiest first) when it renders.
-  out.sort();
-  return out;
+//: Link quality was enabled across the fleet on 2026-10-06. Passed the same way
+//: as the batteries — only the entities that EXIST — so a device or a deployment
+//: without it simply contributes nothing, and the card renders no row rather than
+//: an empty one.
+function roomLinkQuality(room, clim, hass) {
+  return roomDeviceSensors(room, clim, hass, "linkquality");
 }
 
 /**
@@ -419,7 +442,22 @@ function roomSections(room, opt, hass) {
     badges.push({ type: "entity", entity: temps[0], name: "Temperatur",
       icon: "mdi:thermometer" });
   }
-  for (const e of hums.slice(0, 1)) badges.push({ type: "entity", entity: e, name: "Luftfeuchtigkeit" });
+  // HUMIDITY, the same shape as the temperature above it. A room with its own
+  // hygrometer binds to that sensor; a room without one binds to the climate
+  // entity, which carries ga_heating's `current_humidity` — the house average of
+  // every room that HAS one. A TRV does not measure humidity, so unlike the
+  // temperature there is no third case to fall through to: either the house has
+  // hygrometers or there is no badge.
+  //
+  // `state_content` and an explicit icon for the same reason as above: bound to a
+  // climate entity, an entity badge shows the ENTITY'S STATE when the attribute is
+  // missing — "Heat" where a percentage belongs — and takes the thermostat glyph.
+  if (hums.length) {
+    badges.push({ type: "entity", entity: hums[0], name: "Luftfeuchtigkeit" });
+  } else if (clim && typeof (clim.attributes || {}).current_humidity === "number") {
+    badges.push({ type: "entity", entity: climate[0], name: "Luftfeuchtigkeit",
+      icon: "mdi:water-percent", state_content: "current_humidity" });
+  }
   // NO BATTERY BADGE. It was `batts.slice(0, 1)` — one percentage for a room
   // that may hold three battery devices, and nothing said which one it came
   // from, so a healthy valve beside a dying thermometer showed 100 %. The
@@ -453,6 +491,12 @@ function roomSections(room, opt, hass) {
         type: "custom:ga-maintenance-card",
         title: "Wartung",
         batteries: roomBatteries(room, clim, hass),
+        links: roomLinkQuality(room, clim, hass),
+        // The room itself, for `valves_late`: ga_heating publishes there which of
+        // this room's radiators answered our own write late enough to look like a
+        // hand on the dial. That is the cause behind "the room went to MANUEL by
+        // itself", and it has no sensor of its own to read.
+        climate: (room.climate || [])[0] || null,
       });
     }
     sections.push({ type: "grid", cards });

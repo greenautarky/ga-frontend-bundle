@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.23.2 — 2026-10-07
+
+> **The radio-health rows read ga_heating's `valves_late`, published from
+> ga_heating 0.13.2; the "own setpoint" line needs 0.13.3.** Older ga_heating
+> publishes neither, and the Wartung section then shows batteries and link
+> quality only.
+
+- **A room without a hygrometer shows the house humidity** (Ahmad, #45). The
+  humidity badge bound to the room's own sensor or showed nothing; a room without
+  one now binds to the climate entity, which carries ga_heating's
+  `current_humidity` — the average of the rooms that have a hygrometer. A room
+  with its own sensor keeps it, and a house with none grows no badge.
+
+- **Wartung reports radio health** (Ahmad, #46). A thermostat or sensor with a
+  weak Zigbee link gets a line ("Funkverbindung schwach" / "sehr schwach"); an
+  unreported link quality says nothing. A radiator that answered ga_heating's own
+  write 30 s or more late is named with its lag ("antwortet verzögert (58 s)") —
+  the reason a room can drop to MANUEL after nobody touched it.
+
+- **A radiator that answered with a setpoint of its own is named too**
+  ("setzt eigenen Sollwert"). Such an answer is on time, so the lag rule hid it;
+  ga_heating 0.13.3 counts these per radiator. A radiator that did both gets one
+  line saying both.
+
+- **Worst first across every kind.** Within a level a battery is listed before a
+  weak link, and a weak link before a late or substituting radiator.
+
 ## 1.23.1 — 2026-10-06
 
 - **"Aktivität" is shown in every room by default.** The change-log card was off by
