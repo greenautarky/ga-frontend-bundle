@@ -589,3 +589,93 @@ def test_the_strategy_hands_the_card_the_links_and_the_room():
     """))
     assert cfg["links"] == ["sensor.0xaaa1_linkquality"], cfg
     assert cfg["climate"] == "climate.flur", cfg
+
+
+# -- a room sensor that has stopped talking ----------------------------------
+#
+# Thomas's open points 2 and 3, 2026-10-07. ga_heating 0.13.5 stops believing a
+# sensor whose DEVICE has not been heard from for three hours (measured: these
+# sensors report on change, so their own timestamp cannot tell a stable room from
+# a dead one; the linkquality heartbeat can). The room then falls to the house
+# average, and this row is where the fault becomes something a person can act on.
+#
+# The card re-decides nothing. It renders `sensor_silent`, so the engine and the
+# card cannot disagree about whether a room is measuring itself.
+
+
+def silent_rows(entities, climate="climate.wohnzimmer"):
+    return json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows(" + json.dumps(entities) + ", [], "
+        + json.dumps({"links": [], "climate": climate})
+        + ").map(r => r.name + '|' + r.detail))"))
+
+
+def _room(silent):
+    return {"climate.wohnzimmer": {"state": "auto",
+                                   "attributes": {"sensor_silent": silent}}}
+
+
+def test_a_silent_temperature_sensor_is_named_with_how_long():
+    states = _room({"sensor.0xaaa_temperature": {"kind": "temperature", "silent_s": 14400}})
+    states["sensor.0xaaa_temperature"] = {"state": "19.5", "attributes": {
+        "friendly_name": "Bad Sensor Temperatur"}}
+    assert silent_rows(states) == ["Bad Sensor Temperatur|Temperatursensor meldet nicht (seit 4 h)"]
+
+
+def test_a_silent_hygrometer_says_which_kind_it_is():
+    states = _room({"sensor.0xaaa_humidity": {"kind": "humidity", "silent_s": 10800}})
+    out = silent_rows(states)
+    assert out == ["Feuchtesensor|Feuchtesensor meldet nicht (seit 3 h)"], out
+
+
+def test_a_healthy_room_grows_no_row():
+    assert silent_rows(_room({})) == []
+    assert silent_rows({"climate.wohnzimmer": {"state": "auto", "attributes": {}}}) == []
+    assert silent_rows({}, climate=None) == []
+
+
+def test_a_silence_of_zero_or_nonsense_is_not_rendered():
+    """Must-not-flag, the same shape as the battery and link guards: a key present
+    with nothing useful in it must not become a fault on screen."""
+    for bad in ({"silent_s": 0}, {"silent_s": None}, {"silent_s": "soon"}, {}):
+        assert silent_rows(_room({"sensor.0xaaa_temperature": bad})) == [], bad
+
+
+def test_a_dead_sensor_outranks_everything_else():
+    """It is the only entry that changes what the heating does — the room is being
+    warmed on a number that is not its own until somebody acts."""
+    states = _room({"sensor.0xaaa_temperature": {"kind": "temperature", "silent_s": 14400}})
+    states["sensor.0xaaa_temperature"] = {"state": "19.5", "attributes": {
+        "friendly_name": "Bad Sensor Temperatur"}}
+    states["sensor.b_battery"] = {"state": "12", "attributes": {
+        "friendly_name": "Thermostat 2 Batterie"}}
+    out = json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows(" + json.dumps(states)
+        + ', ["sensor.b_battery"], '
+        + json.dumps({"links": [], "climate": "climate.wohnzimmer"})
+        + ").map(r => r.name + '|' + r.detail))"))
+    assert out[0].startswith("Bad Sensor Temperatur|"), out
+    assert len(out) == 2, out
+
+
+def test_the_longest_silence_comes_first():
+    states = _room({
+        "sensor.0xaaa_temperature": {"kind": "temperature", "silent_s": 10800},
+        "sensor.0xbbb_humidity": {"kind": "humidity", "silent_s": 86400},
+    })
+    states["sensor.0xaaa_temperature"] = {"state": "19.5", "attributes": {"friendly_name": "Bad"}}
+    states["sensor.0xbbb_humidity"] = {"state": "44", "attributes": {"friendly_name": "Flur"}}
+    out = silent_rows(states)
+    assert out[0].startswith("Flur|"), out
+
+
+def test_an_older_ga_heating_publishes_nothing_and_nothing_breaks():
+    """A device still on 0.13.4 has no `sensor_silent` at all. The section must
+    carry on showing batteries and radio rather than failing."""
+    states = {"climate.wohnzimmer": {"state": "auto", "attributes": {
+        "valves_late": {"climate.0xaaa": {"lag_s": 58}}}},
+        "climate.0xaaa": {"state": "auto", "attributes": {"friendly_name": "Thermostat 1"}}}
+    out = silent_rows(states)
+    assert out == ["Thermostat 1|antwortet verzögert (58 s)"], out
