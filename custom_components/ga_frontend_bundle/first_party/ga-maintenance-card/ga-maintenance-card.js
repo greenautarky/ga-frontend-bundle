@@ -253,6 +253,17 @@ function maintenanceRows(states, batteries, extra) {
   return rows;
 }
 
+/**
+ * Text for HTML. Names and texts from Home Assistant (entity names, room names,
+ * attributes, stored plans) are escaped before they are rendered, so they show
+ * as written. Every first-party card carries this same helper; a test keeps the
+ * copies identical.
+ */
+function esc(v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 class GaMaintenanceCard extends HTMLElement {
   setConfig(config) {
     this._config = { ...config };
@@ -280,7 +291,7 @@ class GaMaintenanceCard extends HTMLElement {
     if (!this._hass) return;
     const rows = this._rows();
     const title = this._config.title == null ? "Wartung" : this._config.title;
-    const head = title ? `<div class="hdr">${title}</div>` : "";
+    const head = title ? `<div class="hdr">${esc(title)}</div>` : "";
     // "Nothing to do" is said out loud. A card that renders empty reads as one
     // that failed to load, which is the complaint the actions card's own status
     // line exists to answer — and here it is the difference between "we checked"
@@ -288,8 +299,8 @@ class GaMaintenanceCard extends HTMLElement {
     const body = rows.length
       ? `<ul>${rows.map((r) =>
           `<li class="${r.level}"><ha-icon icon="${r.icon}"></ha-icon>` +
-          `<span class="who">${r.name}</span>` +
-          `<span class="what">${r.detail}</span></li>`).join("")}</ul>`
+          `<span class="who">${esc(r.name)}</span>` +
+          `<span class="what">${esc(r.detail)}</span></li>`).join("")}</ul>`
       : `<p class="quiet">Keine Auffälligkeiten.</p>`;
     this.innerHTML = `<ha-card><div class="card-content">${head}${body}</div></ha-card>
       <style>

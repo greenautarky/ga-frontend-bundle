@@ -200,10 +200,10 @@ function curveHtml(slots, saved) {
     .map((b) => {
       const w = was[b.h];
       const ghost = w && w.t !== b.t
-        ? `<i style="height:${w.pct}%" title="jetzt ${w.t} °C"></i>`
+        ? `<i style="height:${w.pct}%" title="jetzt ${esc(w.t)} °C"></i>`
         : "";
-      return `<div style="height:${b.pct}%" data-h="${b.h}" data-t="${b.t}"` +
-        ` title="${String(b.h).padStart(2, "0")}:00 · ${b.t} °C">${ghost}</div>`;
+      return `<div style="height:${b.pct}%" data-h="${b.h}" data-t="${esc(b.t)}"` +
+        ` title="${String(b.h).padStart(2, "0")}:00 · ${esc(b.t)} °C">${ghost}</div>`;
     })
     .join("");
 }
@@ -214,6 +214,17 @@ function curveAxisHtml(slots) {
   return curveAxisLabels()
     .map((label) => `<span>${label}</span>`)
     .join("");
+}
+
+/**
+ * Text for HTML. Names and texts from Home Assistant (entity names, room names,
+ * attributes, stored plans) are escaped before they are rendered, so they show
+ * as written. Every first-party card carries this same helper; a test keeps the
+ * copies identical.
+ */
+function esc(v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 class GaHeatingCard extends HTMLElement {
@@ -352,7 +363,7 @@ class GaHeatingCard extends HTMLElement {
   //: duplication one line up, so the default is nothing at all.
   _header() {
     const title = this._config.title ?? "";
-    return title ? ` header="${title}"` : "";
+    return title ? ` header="${esc(title)}"` : "";
   }
 
   _build() {
@@ -471,15 +482,15 @@ class GaHeatingCard extends HTMLElement {
           // two badges in half the width, and the row has to hold a time, a
           // temperature and this on a phone (asked for 2026-10-02).
           const parts = [];
-          if (d.time != null) parts.push(d.time);
-          if (d.temp != null) parts.push(`${d.temp} °C`);
+          if (d.time != null) parts.push(esc(d.time));
+          if (d.temp != null) parts.push(`${esc(d.temp)} °C`);
           const was = d.added
             ? '<span class="was">neu</span>'
             : parts.length ? `<span class="was">jetzt ${parts.join(" · ")}</span>` : "";
           return `
           <div class="slot${d.added || parts.length ? " edited" : ""}">
-            <input type="time" step="${SNAP_MINUTES * 60}" class="t${mark("time")}" value="${s.time}" data-i="${i}" data-f="time">
-            <input type="number" class="v${mark("temp")}" min="${TMIN}" max="${TMAX}" step="0.5" value="${s.temp}" data-i="${i}" data-f="temp">
+            <input type="time" step="${SNAP_MINUTES * 60}" class="t${mark("time")}" value="${esc(s.time)}" data-i="${i}" data-f="time">
+            <input type="number" class="v${mark("temp")}" min="${TMIN}" max="${TMAX}" step="0.5" value="${esc(s.temp)}" data-i="${i}" data-f="temp">
             <span class="unit">°C</span>${was}
           </div>`;
         }).join("")

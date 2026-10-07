@@ -129,6 +129,17 @@ const STYLE = `
   ga-thermostat-card svg.dial .d-cur { font-size: 12px; fill: var(--secondary-text-color, #888); }
 `;
 
+/**
+ * Text for HTML. Names and texts from Home Assistant (entity names, room names,
+ * attributes, stored plans) are escaped before they are rendered, so they show
+ * as written. Every first-party card carries this same helper; a test keeps the
+ * copies identical.
+ */
+function esc(v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 class GaThermostatCard extends HTMLElement {
   setConfig(config) {
     if (!config || !config.entity || !config.entity.startsWith("climate.")) {
@@ -574,7 +585,7 @@ class GaThermostatCard extends HTMLElement {
   /** The title line every variant shows: title, running-state badge, or both. */
   _hdr(s, header) {
     const badge = this._actionBadge(s);
-    if (header) return `<div class="hdr">${header}${badge}</div>`;
+    if (header) return `<div class="hdr">${esc(header)}${badge}</div>`;
     return badge ? `<div class="hdr notitle">${badge}</div>` : "";
   }
 

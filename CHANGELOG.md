@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.3 — 2026-10-07
+
+- Names and texts from Home Assistant are escaped before rendering in the GA cards.
+
 ## 1.23.2 — 2026-10-07
 
 > **The radio-health rows read ga_heating's `valves_late`, published from
