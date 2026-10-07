@@ -343,6 +343,17 @@ function timeOpts(current) {
     `<option value="${t}"${t === current ? " selected" : ""}>${t}</option>`).join("");
 }
 
+/**
+ * Text for HTML. Names and texts from Home Assistant (entity names, room names,
+ * attributes, stored plans) are escaped before they are rendered, so they show
+ * as written. Every first-party card carries this same helper; a test keeps the
+ * copies identical.
+ */
+function esc(v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 class GaHeatingActionsCard extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
@@ -754,7 +765,7 @@ class GaHeatingActionsCard extends HTMLElement {
   _build() {
     this.innerHTML = `
       <ha-card>
-        <h1 class="card-title">${this._config.title || "Heizung — Ganzes Zuhause"}</h1>
+        <h1 class="card-title">${esc(this._config.title || "Heizung — Ganzes Zuhause")}</h1>
         <div class="card-content">
           <div class="msg"></div>
           <h4>Boost <span class="sub boosthint"></span></h4>
@@ -1006,7 +1017,7 @@ class GaHeatingActionsCard extends HTMLElement {
       const lines = [a, b].filter(Boolean);
       st.classList.toggle("on", lines.length > 0);
       st.innerHTML = lines.length
-        ? `<div><b>AKTIV</b></div>` + lines.map((l) => `<div>${l}</div>`).join("")
+        ? `<div><b>AKTIV</b></div>` + lines.map((l) => `<div>${esc(l)}</div>`).join("")
         : '<div class="quiet"><b>Inaktiv</b> — es gilt der Wochenplan.</div>';
     }
 
@@ -1116,17 +1127,17 @@ class GaHeatingActionsCard extends HTMLElement {
     const tempField = offField +
       (showTemp
         ? `<label>🌡️ Zieltemp.<span class="in"><input type="number" class="temp" min="${TMIN}" `
-          + `max="${TMAX}" step="0.5" value="${f.temperature}"><em>°C</em></span></label>`
+          + `max="${TMAX}" step="0.5" value="${esc(f.temperature)}"><em>°C</em></span></label>`
         : "");
     const fieldsHtml = f.kind === "sick"
       ? `<label>⏱️ Dauer ab jetzt<span class="in">`
-        + `<input type="number" class="hours" min="1" max="${SICK_MAX_HOURS}" value="${f.hours}">`
+        + `<input type="number" class="hours" min="1" max="${SICK_MAX_HOURS}" value="${esc(f.hours)}">`
         + `<em>h</em></span></label>`
         + tempField
         + `<p class="hint wide">Beginnt sofort, höchstens ${SICK_MAX_HOURS} h. Danach gilt wieder der Wochenplan.</p>`
-      : `<label>Von<span class="in"><input type="date" class="start" value="${f.start}">`
+      : `<label>Von<span class="in"><input type="date" class="start" value="${esc(f.start)}">`
         + `<select class="starttime">${timeOpts(f.startTime)}</select></span></label>`
-        + `<label>Bis<span class="in"><input type="date" class="end" value="${f.end}">`
+        + `<label>Bis<span class="in"><input type="date" class="end" value="${esc(f.end)}">`
         + `<select class="endtime">${timeOpts(f.endTime)}</select></span></label>`
         + tempField
         + `<p class="hint wide">Die Uhrzeit bei „Bis“ entscheidet, ab wann wieder normal geheizt `
@@ -1182,18 +1193,18 @@ class GaHeatingActionsCard extends HTMLElement {
       const open = rooms.length <= MAX_CHIPS || this._openRooms;
       const chip = (label, on, attr) =>
         `<button type="button" class="chip${on ? " on" : ""}" ${attr} `
-        + `aria-pressed="${on}">${label}</button>`;
+        + `aria-pressed="${on}">${esc(label)}</button>`;
       const roomsHtml =
         chip("Alle", f.allRooms, 'data-all="1"')
         + (rooms.length > MAX_CHIPS
             ? `<button class="btn ghost toggle-rooms">`
-              + `${scopeLabel(this._hass.states, rooms, f, this._openRooms)}</button>`
+              + `${esc(scopeLabel(this._hass.states, rooms, f, this._openRooms))}</button>`
             : "")
         + (open
             ? rooms.map((id) => chip(
                 roomName(this._hass.states[id]) || id,
                 f.allRooms || f.rooms.includes(id),
-                `data-id="${id}"`)).join("")
+                `data-id="${esc(id)}"`)).join("")
             : "");
       if (roomsHtml === this._roomsHtml) return;
       this._roomsHtml = roomsHtml;

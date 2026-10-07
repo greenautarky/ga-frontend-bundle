@@ -188,6 +188,17 @@ function formatWhen(iso, now) {
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}. ${hhmm}`;
 }
 
+/**
+ * Text for HTML. Names and texts from Home Assistant (entity names, room names,
+ * attributes, stored plans) are escaped before they are rendered, so they show
+ * as written. Every first-party card carries this same helper; a test keeps the
+ * copies identical.
+ */
+function esc(v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 class GaHeatingLogCard extends HTMLElement {
   setConfig(config) {
     if (!config || !config.entity || !String(config.entity).startsWith("climate.")) {
@@ -264,7 +275,7 @@ class GaHeatingLogCard extends HTMLElement {
 
   _headerHtml() {
     const t = this._config.title;
-    return t ? `<div class="hdr">${t}</div>` : "";
+    return t ? `<div class="hdr">${esc(t)}</div>` : "";
   }
 
   _listHtml() {
@@ -283,7 +294,7 @@ class GaHeatingLogCard extends HTMLElement {
       const d = describe(e);
       const why = d.why ? `<span class="why"> · ${d.why}</span>` : "";
       return `<li><span class="when">${formatWhen(e.when, now)}</span>` +
-        `<span class="what"><ha-icon icon="${d.icon}"></ha-icon>${d.text}${why}</span></li>`;
+        `<span class="what"><ha-icon icon="${d.icon}"></ha-icon>${esc(d.text)}${why}</span></li>`;
     }).join("")}</ul>`;
   }
 }

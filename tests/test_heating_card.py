@@ -153,4 +153,4 @@ def test_the_card_ships_no_header_by_default():
     src = CARD.read_text(encoding="utf-8")
     assert 'const title = this._config.title ?? "";' in src
     assert '"Heizplan"' not in src.split("_header()")[1][:200]
-    assert 'return title ? ` header="${title}"` : "";' in src
+    assert 'return title ? ` header="${esc(title)}"` : "";' in src

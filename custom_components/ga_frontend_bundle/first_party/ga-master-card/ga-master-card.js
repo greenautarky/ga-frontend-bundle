@@ -27,6 +27,17 @@ const API = "greenautarky_site/sub_user";
 const API_HOUSEHOLD = "greenautarky_site/household";
 const API_SITE_RESET = "greenautarky_site/site_reset";
 
+/**
+ * Text for HTML. Names and texts from Home Assistant (entity names, room names,
+ * attributes, stored plans) are escaped before they are rendered, so they show
+ * as written. Every first-party card carries this same helper; a test keeps the
+ * copies identical.
+ */
+function esc(v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 class GaMasterCard extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
@@ -230,7 +241,7 @@ class GaMasterCard extends HTMLElement {
 
     // areas
     const sel = this._root.querySelector(".area-sel");
-    sel.innerHTML = s.areas.map((a) => `<option value="${a.area_id}">${a.name}</option>`).join("");
+    sel.innerHTML = s.areas.map((a) => `<option value="${esc(a.area_id)}">${esc(a.name)}</option>`).join("");
 
     // users x ROOMS — the master grants rooms; the dashboard is generated from them
     // by the ga-home strategy. There is no per-user dashboard to hand out anymore.
@@ -247,16 +258,16 @@ class GaMasterCard extends HTMLElement {
           ? s.areas
               .map((a) => {
                 const on = assigned.indexOf(a.area_id) >= 0 ? " checked" : "";
-                return `<label class="dash"><input type="checkbox" data-uid="${u.user_id}" data-area="${a.area_id}"${on}> ${a.name}</label>`;
+                return `<label class="dash"><input type="checkbox" data-uid="${esc(u.user_id)}" data-area="${esc(a.area_id)}"${on}> ${esc(a.name)}</label>`;
               })
               .join("")
           : '<span class="muted">Keine Räume angelegt.</span>';
         const badge = active ? "" : ' <span class="badge">gesperrt</span>';
         const toggle = active ? "Sperren" : "Entsperren";
-        return `<tr><td><b>${u.name || "?"}</b>${badge}<br><span class="muted">${u.username || ""}</span>
+        return `<tr><td><b>${esc(u.name || "?")}</b>${badge}<br><span class="muted">${esc(u.username || "")}</span>
             <div class="actions">
-              <button class="btn small tgl" data-uid="${u.user_id}" data-enable="${active ? "0" : "1"}">${toggle}</button>
-              <button class="btn small danger rm" data-uid="${u.user_id}" data-name="${(u.name || u.username || "").replace(/"/g, "")}">Entfernen</button>
+              <button class="btn small tgl" data-uid="${esc(u.user_id)}" data-enable="${active ? "0" : "1"}">${toggle}</button>
+              <button class="btn small danger rm" data-uid="${esc(u.user_id)}" data-name="${esc(u.name || u.username || "")}">Entfernen</button>
             </div></td><td>${checks}</td></tr>`;
       })
       .join("");
@@ -518,8 +529,6 @@ class GaMasterCard extends HTMLElement {
  * bytes without a DOM. Everything interpolated is escaped.
  */
 function renderInvite(d) {
-  const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
-    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const until = new Date(d.expires_at).toLocaleString();
   const pin = `PIN: <code>${esc(d.pin)}</code> <span class="muted">(gültig bis ${esc(until)})</span>`;
   if (!d.invite_url) {
