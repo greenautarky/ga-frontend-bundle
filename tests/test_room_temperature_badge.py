@@ -464,7 +464,19 @@ def test_aktuell_labels_the_readings_and_comes_first():
 
 
 def test_the_label_is_dropped_when_there_is_no_room_entity():
-    """It is bound to the climate entity the other badges report on; with none
-    there is nothing to label."""
+    """It is bound to the climate entity the other badges report on.
+
+    A room with no climate entity builds no heating section at all — the first
+    heading it has is "Verlauf", which carries no badges — so the question is not
+    "what is in the badge row" but "does anything anywhere claim to show this
+    room's current readings". Asked that way it does not depend on which heading
+    happens to come first (CI, 2026-10-08)."""
     room = _ROOM.replace('climate: ["climate.wz"]', "climate: []")
-    assert [x["name"] for x in _badges(room, _STATES)] != ["Aktuell"]
+    names = run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {_STATES} }};
+      return roomSections({room}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => c.type === "heading")
+        .flatMap(h => (h.badges || []).map(b => b.name));
+    }})()""")
+    assert "Aktuell" not in names, names
