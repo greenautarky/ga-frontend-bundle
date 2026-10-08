@@ -7,7 +7,7 @@ UI polish by @ahmad-greenautarky, merged as #52.
 - Each room's view is headed by the room's name instead of "Heizung"; the readings carry an "Aktuell" label; the section headings (Heizplan, Verlauf, Geräte, Aktivität) get icons. The "Profil" view is labelled "Services" — its path is unchanged, so bookmarks keep working.
 - Heizplan: when a plan is edited, the old and the new plan are drawn on one scale and the size of each change is shown, instead of a dashed marker behind the edited bar.
 - Aktivität shows 5 entries by default (was 3) and lists balancing runs by name ("Hydraulischer Abgleich gestartet / beendet / abgebrochen").
-- Wartung and the thermostat card: label the numbers they show.
+- The thermostat card labels its big number "Ziel"; Wartung gets an icon in its heading (only `mdi:` icon names are rendered).
 
 > **Needs ga_heating 0.13.6** for the balancing-run lines in Aktivität. With older ga_heating the log shows setpoint and mode changes as before.
 
