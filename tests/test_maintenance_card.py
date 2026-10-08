@@ -313,8 +313,13 @@ def test_the_battery_badge_is_gone_from_the_top_of_the_room():
 
 
 def test_the_temperature_badge_is_untouched():
-    """Must-not-flag: removing one badge must not take the row with it."""
-    assert room_view()["badges"] == ["Temperatur|sensor.0xccc3_temperature"]
+    """Must-not-flag: removing one badge must not take the row with it.
+
+    "Aktuell" joined the row on 2026-10-08 as a LABEL for the readings — it
+    carries no value of its own — so the reading this test is about is the one
+    after it."""
+    assert room_view()["badges"] == [
+        "Aktuell|climate.wohnzimmer", "Temperatur|sensor.0xccc3_temperature"]
 
 
 def test_wartung_sits_under_aktivitaet():

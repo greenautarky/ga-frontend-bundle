@@ -224,8 +224,23 @@ def test_the_history_diff_is_reversed_into_the_same_order():
 
 
 def test_the_strategy_places_it_under_the_thermostat():
-    src = STRATEGY.read_text(encoding="utf-8")
-    assert 'cards.push({ type: "custom:ga-heating-log-card", entity, title: "Aktivität" });' in src
+    """Asserted on the BUILT view, not on the source line that builds it. The
+    source form broke the day the card gained an icon (CI, 2026-10-08) while the
+    placement it was guarding had not changed at all — and it would equally have
+    passed if the card had stopped being placed and the line merely survived in a
+    comment."""
+    cards = json.loads(run_js(
+        STRATEGY,
+        """JSON.stringify((() => {
+          const hass = { config: { components: ["history"] }, states: {} };
+          const room = { name: "WZ", area_id: "wz", climate: ["climate.wz"],
+                         temps: [], hums: [], batts: [], lights: [], switches: [] };
+          return roomSections(room, gaOptions({}), hass).flatMap(s => s.cards || [])
+            .map(c => c.type);
+        })())"""))
+    assert "custom:ga-thermostat-card" in cards, cards
+    assert "custom:ga-heating-log-card" in cards, cards
+    assert cards.index("custom:ga-heating-log-card") > cards.index("custom:ga-thermostat-card")
 
 
 @pytest.mark.parametrize(

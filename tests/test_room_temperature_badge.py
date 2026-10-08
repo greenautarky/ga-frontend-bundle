@@ -22,11 +22,22 @@ def _badges(room: str, states: str = "{}") -> list:
     expr = f"""(() => {{
       const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
       const secs = roomSections({room}, gaOptions({{}}), hass);
-      const h = secs.flatMap(s => s.cards || [])
-        .find(c => c.type === "heading" && c.heading === "Heizung");
+      // THE FIRST HEADING, not one matched by its text. It used to be found by
+      // `heading === "Heizung"`, and every test in this file went vacuous the day
+      // that heading became the room name (CI, 2026-10-08) — the helper returned
+      // null and the assertions fell over somewhere else entirely.
+      const h = secs.flatMap(s => s.cards || []).find(c => c.type === "heading");
       return h ? h.badges : null;
     }})()"""
     return run_js(STRATEGY, expr)
+
+
+
+def _readings(room: str, states: str = "{}") -> list:
+    """The badges that carry a VALUE. "Aktuell" is a label for the pair, not a
+    reading, so tests about which sensor a reading comes from skip it — rather
+    than every one of them renumbering around a word (2026-10-08)."""
+    return [b for b in (_readings(room, states) or []) if b.get("name") != "Aktuell"]
 
 
 _STATES = """{
@@ -51,9 +62,11 @@ def test_temperature_badge_comes_first_then_humidity():
     b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
                 ' hums: ["sensor.wz_h"], batts: ["sensor.wz_b"], lights: [], switches: [] }',
                 _STATES)
-    assert b is not None, "no Heizung heading built — the test would be vacuous"
-    assert [x["name"] for x in b] == ["Temperatur", "Luftfeuchtigkeit"], b
-    assert b[1]["entity"] == "sensor.wz_h"
+    assert b is not None, "no heading built — the test would be vacuous"
+    # "Aktuell" labels the pair (2026-10-08); the ORDER of the two readings after
+    # it is what this test is about and is unchanged.
+    assert [x["name"] for x in b] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], b
+    assert b[2]["entity"] == "sensor.wz_h"
 
 
 # -- a room with no hygrometer of its own ------------------------------------
@@ -72,7 +85,7 @@ _NO_HYGRO = """{
 
 
 def test_a_room_without_a_hygrometer_shows_the_house_figure():
-    b = _badges('{ name: "Flur", climate: ["climate.flur"], temps: [], hums: [],'
+    b = _readings('{ name: "Flur", climate: ["climate.flur"], temps: [], hums: [],'
                 ' batts: [], lights: [], switches: [] }', _NO_HYGRO)
     assert b is not None
     assert [x["name"] for x in b] == ["Temperatur", "Luftfeuchtigkeit"], b
@@ -87,7 +100,7 @@ def test_a_room_without_a_hygrometer_shows_the_house_figure():
 
 def test_a_room_with_its_own_hygrometer_still_uses_it():
     """Must-not-flag: the fallback must not capture rooms that can measure."""
-    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+    b = _readings('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
                 ' hums: ["sensor.wz_h"], batts: [], lights: [], switches: [] }', _STATES)
     assert b[1]["entity"] == "sensor.wz_h"
     assert "state_content" not in b[1], "a sensor's own state IS the reading"
@@ -99,7 +112,7 @@ def test_no_hygrometer_anywhere_means_no_humidity_badge():
     states = """{
       "climate.flur": { state: "heat", attributes: { current_temperature: 20.6 } }
     }"""
-    b = _badges('{ name: "Flur", climate: ["climate.flur"], temps: [], hums: [],'
+    b = _readings('{ name: "Flur", climate: ["climate.flur"], temps: [], hums: [],'
                 ' batts: [], lights: [], switches: [] }', states)
     assert [x["name"] for x in b] == ["Temperatur"], b
 
@@ -107,7 +120,7 @@ def test_no_hygrometer_anywhere_means_no_humidity_badge():
 def test_no_temperature_source_means_no_temperature_badge_and_no_null():
     """Room without a temperature sensor and without a usable current_temperature."""
     states = '{ "climate.wz": { state: "heat", attributes: { temperature: 21 } } }'
-    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: ["sensor.wz_h"],'
+    b = _readings('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: ["sensor.wz_h"],'
                 ' batts: [], lights: [], switches: [] }', states)
     assert b is not None
     assert [x["name"] for x in b] == ["Luftfeuchtigkeit"], b
@@ -116,7 +129,7 @@ def test_no_temperature_source_means_no_temperature_badge_and_no_null():
 
 
 def test_without_a_sensor_the_thermostat_measurement_is_the_fallback():
-    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: [],'
+    b = _readings('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: [],'
                 ' batts: [], lights: [], switches: [] }', _STATES)
     assert b == [{"type": "entity", "entity": "climate.wz", "name": "Temperatur",
                   "icon": "mdi:thermometer",
@@ -126,7 +139,7 @@ def test_without_a_sensor_the_thermostat_measurement_is_the_fallback():
 def test_a_room_climate_entity_wins_over_temps():
     """ga_heating's room entity decides (room sensor first, valve fallback), so
     its current_temperature (19.5) must beat temps[0] (20.1)."""
-    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+    b = _readings('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
                 ' hums: [], batts: [], lights: [], switches: [] }', _STATES)
     assert b[0] == {"type": "entity", "entity": "climate.wz", "name": "Temperatur",
                     "icon": "mdi:thermometer",
@@ -141,7 +154,7 @@ def test_temps_is_the_fallback_when_the_climate_has_no_measurement():
       "climate.wz": { state: "heat", attributes: { temperature: 21 } },
       "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } }
     }"""
-    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+    b = _readings('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
                 ' hums: [], batts: [], lights: [], switches: [] }', states)
     assert b == [{"type": "entity", "entity": "sensor.wz_t", "name": "Temperatur",
                   "icon": "mdi:thermometer"}], b
@@ -151,9 +164,9 @@ def test_the_temperature_badge_carries_a_thermometer_from_either_source():
     """Read off a climate entity, the badge inherits the THERMOSTAT icon — the
     dial, which is the control, not the reading. Stated on both branches, so the
     badge looks the same whichever source answers."""
-    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: [],'
+    b = _readings('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: [],'
                 ' batts: [], lights: [], switches: [] }', _STATES)
-    assert b is not None, "no Heizung heading built — the test would be vacuous"
+    assert b is not None, "no heading built — the test would be vacuous"
     assert b[0]["icon"] == "mdi:thermometer"
 
     # The sensor branch needs a climate entity to exist (the badges live on the
@@ -164,9 +177,9 @@ def test_the_temperature_badge_carries_a_thermometer_from_either_source():
       "climate.wz": { state: "heat", attributes: { temperature: 21 } },
       "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } }
     }"""
-    b2 = _badges('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+    b2 = _readings('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
                  ' hums: [], batts: [], lights: [], switches: [] }', states)
-    assert b2 is not None, "no Heizung heading built — the test would be vacuous"
+    assert b2 is not None, "no heading built — the test would be vacuous"
     assert b2[0]["entity"] == "sensor.wz_t"
     assert b2[0]["icon"] == "mdi:thermometer"
 
@@ -282,8 +295,8 @@ def test_the_badge_is_the_sensor_ga_heating_named():
     room's, so reading it keeps the one-place rule AND gives the badge an entity
     whose state IS the temperature.
     """
-    b = _badges(_ROOM_SRC, _SOURCED)
-    assert b is not None, "no Heizung heading built — the test would be vacuous"
+    b = _readings(_ROOM_SRC, _SOURCED)
+    assert b is not None, "no heading built — the test would be vacuous"
     assert b[0] == {"type": "entity", "entity": "sensor.wz_t", "name": "Temperatur",
                     "icon": "mdi:thermometer"}, b
     assert "state_content" not in b[0], (
@@ -304,7 +317,7 @@ def test_a_room_reading_its_valve_keeps_the_climate_entity():
     }"""
     room = ('{ name: "WZ", climate: ["climate.wz"], temps: [],'
             ' hums: ["sensor.wz_h"], batts: [], lights: [], switches: [] }')
-    b = _badges(room, states)
+    b = _readings(room, states)
     assert b[0]["entity"] == "climate.wz"
     assert b[0]["state_content"] == "current_temperature"
 
@@ -312,7 +325,7 @@ def test_a_room_reading_its_valve_keeps_the_climate_entity():
 def test_an_older_ga_heating_without_the_attribute_still_gets_a_badge():
     """The attribute is not guaranteed; a device one release behind must not lose
     its temperature badge over it."""
-    b = _badges('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: [],'
+    b = _readings('{ name: "WZ", climate: ["climate.wz"], temps: [], hums: [],'
                 ' batts: [], lights: [], switches: [] }', _STATES)
     assert b[0]["entity"] == "climate.wz"
     assert b[0]["icon"] == "mdi:thermometer"
