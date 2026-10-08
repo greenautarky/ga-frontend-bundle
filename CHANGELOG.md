@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.23.4 — 2026-10-08
+
+- Wartung: a room sensor that has stopped talking is listed first, with how long it has been silent ("Temperatursensor meldet nicht (seit 4 h)"). The card renders ga_heating's `sensor_silent` verdict and re-decides nothing (Ahmad, #50).
+
+> **Needs ga_heating 0.13.5** (`sensor_silent`). Older ga_heating publishes nothing, and the section shows batteries, link quality and late valves as before.
+
 ## 1.23.3 — 2026-10-07
 
 - Names and texts from Home Assistant are escaped before rendering in the GA cards.
