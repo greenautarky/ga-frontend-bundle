@@ -266,14 +266,20 @@ _HASS_WITH_ROOM = (
 _HASS_NO_ROOM = "{ states: { 'light.flur': { attributes: {} } } }"
 
 
-def test_the_profile_view_is_named_for_the_place_that_already_existed():
-    """The previous system's view was called `Profil`, and residents look there.
+def test_the_profile_view_keeps_the_path_residents_already_have():
+    """THE PATH is the part that must not move. The previous system's view was
+    called `Profil` and lives at `/profil` — read in
+    ha-dashboard-automation/templates/profile_view_template.j2 on 2026-09-23 —
+    and that path is in bookmarks and in any dashboard link pointing here.
 
-    Read in ha-dashboard-automation/templates/profile_view_template.j2 on
-    2026-09-23: `title: Profil`, grid `"boost override" / "schedule override"`.
+    The TITLE is "Services" since 2026-10-08: "Profil" said nothing about Boost,
+    the whole flat on or off, the balancing run and the Sonderpläne. A label can
+    be read afresh; a path breaks silently.
     """
     v = run_js(STRATEGY, "(() => heatingProfileView({ textTabs: true }))()")
-    assert v["title"] == "Profil" and v["path"] == "profil"
+    assert v["path"] == "profil", "a bookmark would 404"
+    assert v["title"] == "Services"
+    assert "icon" not in v, "a view with an icon shows only the icon in the tab bar"
     assert [c["type"] for c in v["cards"]] == ["custom:ga-heating-actions-card"]
 
 

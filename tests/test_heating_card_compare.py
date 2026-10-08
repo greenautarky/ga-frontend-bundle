@@ -23,6 +23,7 @@ These run the SHIPPED bytes in a VM (tests/js/eval.mjs).
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from conftest import PKG
@@ -166,3 +167,99 @@ def test_the_input_asks_the_picker_for_half_hours_too():
     src = CARD.read_text(encoding="utf-8")
     assert 'step="${SNAP_MINUTES * 60}"' in src
     assert "const SNAP_MINUTES = 30;" in src
+
+
+# ── the two plans are drawn on ONE scale ────────────────────────────────────
+#
+# THE DEFECT THESE EXIST FOR, reported 2026-10-08: "the difference between
+# current and new is not clear in the plot down".
+#
+# It was not a styling problem. The "jetzt" line was an <i> nested INSIDE the
+# bar with `height: <saved>%`, so its percentage was of the BAR, not of the
+# chart. It therefore sat too low in every case, and could never rise above the
+# bar top — so turning an hour DOWN drew the old plan BELOW the new one, which
+# is the exact comparison the drawing exists to make.
+#
+# Measured against the reported screenshot (TMIN 5, TMAX 30, chart 56px): with
+# new 24 °C over saved 16 °C the line was 5.9px low; with new 16 °C over saved
+# 24 °C it was 24px low and on the wrong side of the bar.
+#
+# Both are now placed in a full-height column, so each is a share of the same
+# scale and the comparison can be read off the picture.
+
+
+def _col(new_t, saved_t):
+    return run_js(
+        CARD,
+        f'curveHtml({json.dumps([{"time": "00:00", "temp": new_t}])},'
+        f' {json.dumps([{"time": "00:00", "temp": saved_t}])})',
+    ).split("</div>")[0]
+
+
+def _pct(style, prop):
+    m = re.search(rf"{prop}:\s*([0-9.]+)%", style)
+    return float(m.group(1)) if m else None
+
+
+def test_the_now_line_is_placed_against_the_chart_not_against_the_bar():
+    """THE RED ONE. 16 °C on a 5–30 scale is 44% of the CHART, wherever the new
+    bar happens to end. Nested, it came out as 44% of the bar."""
+    col = _col(24, 16)
+    assert 'bottom:44%' in col.replace(" ", ""), col
+
+
+def test_a_lower_new_value_puts_the_old_plan_ABOVE_the_bar():
+    """The case that read backwards: the line could not leave the bar, so an hour
+    turned down showed its old value underneath the new one."""
+    col = _col(16, 24)
+    bar = _pct(col.split("<b ")[1].split(">")[0], "height")
+    line = _pct(col.split("<i ")[1].split(">")[0], "bottom")
+    assert line > bar, f"old plan drawn at {line}% under a bar of {bar}%"
+
+
+def test_the_band_is_the_size_of_the_change():
+    """The difference as an area: two levels say they differ, the band says how
+    much without reading either number."""
+    col = _col(24, 16)
+    style = col.split("<u ")[1].split(">")[0]
+    assert _pct(style, "bottom") == 44.0, style
+    assert _pct(style, "height") == 32.0, style        # 76% - 44%
+
+
+def test_the_band_says_which_way_it_went():
+    assert 'class="up"' in _col(24, 16), "warmer"
+    assert 'class="down"' in _col(16, 24), "colder"
+
+
+def test_an_unchanged_hour_has_neither_band_nor_line():
+    """MUST-NOT-FLAG: the comparison is only drawn where there is one to make."""
+    html = run_js(CARD, f"curveHtml({json.dumps(SAVED)}, {json.dumps(SAVED)})")
+    assert "<u " not in html and "<i " not in html
+    assert "moved" not in html
+
+
+def test_a_changed_hour_is_marked_so_it_can_be_coloured():
+    """Every bar used to look the same, so "which hours did I touch" meant
+    scanning 24 near-identical shapes."""
+    assert "col moved" in _col(24, 16)
+    assert "col moved" not in run_js(CARD, f"curveHtml({json.dumps(SAVED)}, {json.dumps(SAVED)})")
+
+
+def test_the_old_value_rides_along_for_the_readout():
+    """Tapping a changed hour shows "16 → 24 °C" rather than just the new number,
+    which needs the old one on the element."""
+    assert 'data-was="16"' in _col(24, 16)
+    assert "data-was" not in run_js(CARD, f"curveHtml({json.dumps(SAVED)}, {json.dumps(SAVED)})")
+
+
+def test_the_legend_cannot_be_left_on_screen_by_its_own_stylesheet():
+    """`hidden` is set on the legend when no hour differs — and did nothing,
+    because the card's own `display:flex` rule outranks the browser default that
+    makes `hidden` work. The legend stayed up on untouched days (2026-10-08).
+
+    Asserted on the stylesheet because that IS the mechanism: the attribute and
+    the rule have to exist together or the element does not hide."""
+    src = CARD.read_text(encoding="utf-8")
+    assert "ga-heating-card .legend[hidden]" in src, (
+        "without this rule the hidden attribute is overridden by display:flex"
+    )

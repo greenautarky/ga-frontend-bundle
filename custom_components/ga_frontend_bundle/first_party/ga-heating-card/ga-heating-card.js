@@ -199,11 +199,33 @@ function curveHtml(slots, saved) {
   return curveModel(slots)
     .map((b) => {
       const w = was[b.h];
-      const ghost = w && w.t !== b.t
-        ? `<i style="height:${w.pct}%" title="jetzt ${esc(w.t)} °C"></i>`
+      const moved = w && w.t !== b.t;
+      // EVERY COLUMN IS FULL HEIGHT, and both the bar and the "now" line are
+      // placed inside it as a share of the CHART.
+      //
+      // They used to be nested — the line was an <i> inside the bar with
+      // `height: <saved>%` — so its percentage was of the BAR, not of the
+      // chart. It therefore sat too low always, and could never rise above the
+      // bar top: turn an hour DOWN and the old plan appeared lower than the new
+      // one, which is the exact comparison this drawing exists to make
+      // (measured 2026-10-08: 24 -> 16 put the line 5.9px low; 16 -> 24 put it
+      // 24px low, on the wrong side of the bar).
+      // THE DIFFERENCE ITSELF, as an area. Two levels tell you they differ; the
+      // band between them is how MUCH, without reading either number. Tinted by
+      // direction, because "warmer" and "colder" are the two answers a resident
+      // is actually looking for.
+      const band = moved
+        ? `<u class="${b.t > w.t ? "up" : "down"}" style="bottom:${Math.min(b.pct, w.pct)}%;` +
+          `height:${Math.abs(b.pct - w.pct)}%"></u>`
         : "";
-      return `<div style="height:${b.pct}%" data-h="${b.h}" data-t="${esc(b.t)}"` +
-        ` title="${String(b.h).padStart(2, "0")}:00 · ${esc(b.t)} °C">${ghost}</div>`;
+      const line = moved
+        ? `<i style="bottom:${w.pct}%" title="jetzt ${esc(w.t)} °C"></i>`
+        : "";
+      return `<div class="col${moved ? " moved" : ""}" data-h="${b.h}"` +
+        ` data-t="${esc(b.t)}"${moved ? ` data-was="${esc(w.t)}"` : ""}` +
+        ` title="${String(b.h).padStart(2, "0")}:00 · ${esc(b.t)} °C` +
+        `${moved ? ` (jetzt ${esc(w.t)} °C)` : ""}">` +
+        `<b style="height:${b.pct}%"></b>${band}${line}</div>`;
     })
     .join("");
 }
@@ -376,6 +398,9 @@ class GaHeatingCard extends HTMLElement {
           <div class="slots"></div>
           <div class="curve"></div>
           <div class="axis"></div>
+          <div class="legend" hidden>
+            <span><i class="k"></i>neu</span><span><i class="k was"></i>jetzt</span>
+          </div>
           <div class="readout"></div>
           <div class="actions">
             <button class="btn copy-week">Auf Mo–Fr übernehmen</button>
@@ -422,22 +447,52 @@ class GaHeatingCard extends HTMLElement {
           color: var(--primary-text-color,#212121); }
         ga-heating-card .curve { display:flex; align-items:flex-end; gap:2px; height:56px; margin:14px 0 4px;
           border-bottom:1px solid var(--divider-color,#e0e0e0); }
-        ga-heating-card .curve div { flex:1; background: var(--primary-color,#03a9f4); opacity:.35; border-radius:2px 2px 0 0;
-          cursor:pointer; }
-        ga-heating-card .curve div.on { opacity:.85; }
-        /* The hour as it stands TODAY, behind the edited bar: the comparison a
-           resident wants is "warmer or colder than now", and two heights in one
-           column answer that better than two numbers in a list. */
-        ga-heating-card .curve div { position:relative; }
-        ga-heating-card .curve div i { position:absolute; left:0; right:0; bottom:0;
-          border-top:2px dashed var(--ga-heat,#ff8a3d); opacity:.85; }
+        /* A COLUMN IS THE FULL HEIGHT OF THE CHART; the bar and the "now" line
+           are both positioned within it, so both are a share of the same scale. */
+        ga-heating-card .curve .col { flex:1; position:relative; height:100%; cursor:pointer; }
+        ga-heating-card .curve .col b { position:absolute; left:0; right:0; bottom:0;
+          background: var(--primary-color,#03a9f4); opacity:.28; border-radius:2px 2px 0 0; }
+        /* THE HOURS YOU CHANGED carry the colour. Before, every bar looked the
+           same and only a dash marked an edit, so "which hours did I touch" had
+           to be read off 24 near-identical shapes. */
+        ga-heating-card .curve .col.moved b { opacity:.9; background: var(--ga-heat,#ff8a3d); }
+        /* THE SIZE OF THE CHANGE. Over the bar when the hour got warmer (the
+           part that was added), above it when it got colder (the part taken
+           away) — so the band is visible either way, and its height is the
+           change. Translucent, so the bar underneath still reads. */
+        ga-heating-card .curve .col u { position:absolute; left:0; right:0; display:block;
+          border-radius:2px 2px 0 0; opacity:.2; }
+        ga-heating-card .curve .col u.up { background: var(--ga-heat,#ff8a3d); }
+        ga-heating-card .curve .col u.down { background: var(--primary-color,#03a9f4); }
+        /* Today's plan, for the changed hours only: a quiet reference line, not
+           the loudest thing in the picture. It marks a LEVEL, so it is drawn at
+           its own height with no fill under it. */
+        ga-heating-card .curve .col i { position:absolute; left:-1px; right:-1px;
+          border-top:2px dotted var(--secondary-text-color,#6b6b6b); opacity:.75; }
+        ga-heating-card .curve .col.on b { outline:2px solid var(--primary-text-color,#212121);
+          outline-offset:1px; }
+        /* Said in words, because a dotted line explains itself to nobody. */
+        ga-heating-card .legend { display:flex; gap:14px; font-size:.75em; opacity:.7;
+          margin:4px 0 0; align-items:center; }
+        /* THE hidden ATTRIBUTE ALONE DOES NOT HIDE THIS. It works through a
+           browser default of display:none, and the author rule above outranks it
+           — so the legend was set hidden on an untouched day and stayed on screen
+           anyway (reported 2026-10-08). Any element given both a display rule and
+           a hidden attribute needs this line. */
+        ga-heating-card .legend[hidden] { display:none; }
+        ga-heating-card .legend span { display:inline-flex; align-items:center; gap:5px; }
+        ga-heating-card .legend .k { width:14px; height:0; border-top:3px solid var(--ga-heat,#ff8a3d); }
+        ga-heating-card .legend .k.was { border-top:2px dotted var(--secondary-text-color,#6b6b6b); }
         ga-heating-card .axis { display:flex; justify-content:space-between; font-size:.75em; opacity:.65;
           margin:2px 0 0; font-variant-numeric:tabular-nums; }
         ga-heating-card .axis span:first-child { margin-left:-2px; }
         ga-heating-card .axis span:last-child { margin-right:-2px; }
-        ga-heating-card .readout { min-height:1.25em; font-size:.85em; margin-top:4px; opacity:.8; }
+        /* The height is RESERVED rather than grown into, so tapping an hour does
+           not shove the buttons down — but it was a full line plus two margins
+           of blank on a card where nothing had been tapped yet (2026-10-08). */
+        ga-heating-card .readout { min-height:1.1em; font-size:.85em; margin-top:2px; opacity:.8; }
         ga-heating-card .empty { opacity:.6; font-size:.9em; padding:8px 0; }
-        ga-heating-card .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+        ga-heating-card .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
         ga-heating-card .btn { font-family:inherit; font-size:.9em; font-weight:600; padding:8px 14px; border:none;
           border-radius:20px; cursor:pointer; background: var(--secondary-background-color,#e8e8e8);
           color: var(--primary-text-color,#212121); }
@@ -518,13 +573,23 @@ class GaHeatingCard extends HTMLElement {
     curve.innerHTML = curveHtml(list, (this._saved || {})[this._day]);
     axis.innerHTML = curveAxisHtml(list);
     readout.textContent = "";
-    curve.querySelectorAll("div").forEach((bar) => {
+    // The legend only while there is something to compare: two keys explaining
+    // a line that is not drawn would be noise on a plan nobody has touched.
+    const legend = this.querySelector(".legend");
+    const movedHours = curve.querySelectorAll(".col.moved").length;
+    legend.hidden = movedHours === 0;
+
+    curve.querySelectorAll(".col").forEach((bar) => {
       bar.addEventListener("click", () => {
-        curve.querySelectorAll("div.on").forEach((b) => b.classList.remove("on"));
+        curve.querySelectorAll(".col.on").forEach((b) => b.classList.remove("on"));
         bar.classList.add("on");
+        // THE CHANGE, not just the new number. "21 °C" on an hour you have just
+        // edited leaves the reader to remember what it used to be.
+        const was = bar.dataset.was;
         readout.textContent =
           `${String(bar.dataset.h).padStart(2, "0")}:00 – ` +
-          `${String((+bar.dataset.h + 1) % 24).padStart(2, "0")}:00 · ${bar.dataset.t} °C`;
+          `${String((+bar.dataset.h + 1) % 24).padStart(2, "0")}:00 · ` +
+          (was != null ? `${was} → ${bar.dataset.t} °C` : `${bar.dataset.t} °C`);
       });
     });
 

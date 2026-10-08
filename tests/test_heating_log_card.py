@@ -224,8 +224,23 @@ def test_the_history_diff_is_reversed_into_the_same_order():
 
 
 def test_the_strategy_places_it_under_the_thermostat():
-    src = STRATEGY.read_text(encoding="utf-8")
-    assert 'cards.push({ type: "custom:ga-heating-log-card", entity, title: "Aktivität" });' in src
+    """Asserted on the BUILT view, not on the source line that builds it. The
+    source form broke the day the card gained an icon (CI, 2026-10-08) while the
+    placement it was guarding had not changed at all — and it would equally have
+    passed if the card had stopped being placed and the line merely survived in a
+    comment."""
+    cards = json.loads(run_js(
+        STRATEGY,
+        """JSON.stringify((() => {
+          const hass = { config: { components: ["history"] }, states: {} };
+          const room = { name: "WZ", area_id: "wz", climate: ["climate.wz"],
+                         temps: [], hums: [], batts: [], lights: [], switches: [] };
+          return roomSections(room, gaOptions({}), hass).flatMap(s => s.cards || [])
+            .map(c => c.type);
+        })())"""))
+    assert "custom:ga-thermostat-card" in cards, cards
+    assert "custom:ga-heating-log-card" in cards, cards
+    assert cards.index("custom:ga-heating-log-card") > cards.index("custom:ga-thermostat-card")
 
 
 @pytest.mark.parametrize(
@@ -394,3 +409,106 @@ def test_manuell_is_not_used_for_the_user_side():
         ".flatMap(s => [s.who, s.why]).filter(Boolean))",
     )
     assert "Manuell" not in json.loads(words)
+
+
+# ── a balancing run, named ──────────────────────────────────────────────────
+#
+# ga_heating 0.13.6 records the run itself as a `kind: "event"` entry. The
+# setpoints it writes were always logged, but "Soll 19 -> 30" and an hour later
+# "30 -> 19" only reads as a balancing run to somebody who knows what one is
+# (asked for 2026-10-08).
+
+
+def _said(entry):
+    return json.loads(run_js(CARD, f"JSON.stringify(describe({json.dumps(entry)}))"))
+
+
+def _event(to, source="balancing"):
+    return {"when": "2026-10-08T12:00:00+02:00", "kind": "event",
+            "from": None, "to": to, "source": source}
+
+
+def test_a_run_start_is_said_in_words():
+    assert _said(_event("ichb_started"))["text"] == "Hydraulischer Abgleich gestartet"
+
+
+def test_an_end_and_a_cancel_are_different_lines():
+    """A resident coming home to a cold flat needs to tell "it ran" from
+    "somebody stopped it"."""
+    assert _said(_event("ichb_ended"))["text"] == "Hydraulischer Abgleich beendet"
+    assert _said(_event("ichb_cancelled"))["text"] == "Hydraulischer Abgleich abgebrochen"
+
+
+def test_the_reason_is_not_repeated_after_the_line_that_already_says_it():
+    """It read "Hydraulischer Abgleich abgebrochen · System · Einregulierung" —
+    the same thing twice in two vocabularies (seen on a device, 2026-10-08). The
+    actor stays; the reason goes, exactly as it does for a resident at a button."""
+    said = _said(_event("ichb_cancelled"))
+    assert said["why"] == "System"
+    assert "Einregulierung" not in said["why"]
+
+
+def test_an_event_nobody_has_taught_this_card_still_renders():
+    """A line a resident cannot read beats a line that silently disappears — and
+    a newer ga_heating may well record something this bundle has not learned."""
+    said = _said(_event("ichb_paused"))
+    assert said["text"] == "ichb_paused"
+    assert said["icon"]
+
+
+def test_a_value_change_is_untouched_by_any_of_this():
+    """MUST-NOT-FLAG: the ordinary entries keep their actor AND their reason."""
+    said = _said({"when": "2026-10-08T12:00:00+02:00", "kind": "target",
+                  "from": 19, "to": 21, "source": "plan"})
+    assert said["why"] == "System · Heizplan"
+
+
+def test_events_survive_the_attribute_reader():
+    """`fromAttribute` filters by kind, so an unlisted kind is dropped before it
+    is ever described — which is how a new entry type silently vanishes."""
+    got = json.loads(run_js(
+        CARD,
+        "JSON.stringify(fromAttribute(" + json.dumps([
+            {"at": "2026-10-08T12:00:00+02:00", "kind": "event",
+             "from": None, "to": "ichb_started", "source": "balancing"}]) + "))"))
+    assert len(got) == 1 and got[0]["to"] == "ichb_started", got
+
+
+# ── five kept, three shown ──────────────────────────────────────────────────
+
+
+def test_five_entries_are_kept():
+    """A balancing run alone writes four lines into a room (started, the setpoint
+    up, the setpoint back, ended); three would hide everything before it. The
+    list is capped at the height of three and scrolls (asked for 2026-10-08)."""
+    assert json.loads(run_js(CARD, "JSON.stringify(DEFAULT_COUNT)")) == 5
+
+
+def test_the_list_is_capped_rather_than_grown_into():
+    src = CARD.read_text(encoding="utf-8")
+    assert "max-height" in src and "overflow-y: auto" in src
+
+
+# ── the title can carry an icon ─────────────────────────────────────────────
+
+
+def test_a_configured_icon_reaches_the_header():
+    html = run_js(
+        CARD,
+        "(() => { const c = Object.create(GaHeatingLogCard.prototype);"
+        " c.setConfig({ entity: 'climate.x', title: 'Aktivität', icon: 'mdi:history' });"
+        " return c._headerHtml(); })()",
+    )
+    assert 'icon="mdi:history"' in html, html
+    assert "Aktivität" in html
+
+
+def test_an_icon_that_is_not_an_icon_is_refused():
+    """The icon is CONFIG that lands in an HTML attribute, so it cannot be escaped
+    as text: a quote would close the attribute and the rest would parse as markup.
+    Only a plain mdi name is let through."""
+    src = CARD.read_text(encoding="utf-8")
+    assert "SAFE_ICON" in src
+    for bad in ('mdi:x" onload="alert(1)', "javascript:alert(1)", "<img src=x>"):
+        assert not json.loads(run_js(CARD, f"JSON.stringify(SAFE_ICON.test({json.dumps(bad)}))"))
+    assert json.loads(run_js(CARD, 'JSON.stringify(SAFE_ICON.test("mdi:history"))'))

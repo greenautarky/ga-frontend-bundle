@@ -313,8 +313,13 @@ def test_the_battery_badge_is_gone_from_the_top_of_the_room():
 
 
 def test_the_temperature_badge_is_untouched():
-    """Must-not-flag: removing one badge must not take the row with it."""
-    assert room_view()["badges"] == ["Temperatur|sensor.0xccc3_temperature"]
+    """Must-not-flag: removing one badge must not take the row with it.
+
+    "Aktuell" joined the row on 2026-10-08 as a LABEL for the readings — it
+    carries no value of its own — so the reading this test is about is the one
+    after it."""
+    assert room_view()["badges"] == [
+        "Aktuell|climate.flur", "Temperatur|sensor.0xccc3_temperature"]
 
 
 def test_wartung_sits_under_aktivitaet():
@@ -686,3 +691,29 @@ def test_an_older_ga_heating_publishes_nothing_and_nothing_breaks():
         "climate.0xaaa": {"state": "auto", "attributes": {"friendly_name": "Thermostat 1"}}}
     out = silent_rows(states)
     assert out == ["Thermostat 1|antwortet verzögert (58 s)"], out
+
+
+# ── the section title can carry an icon ─────────────────────────────────────
+
+
+def test_a_configured_icon_reaches_the_header():
+    html = run_js(
+        CARD,
+        "(() => { const c = Object.create(GaMaintenanceCard.prototype);"
+        " c.setConfig({ title: 'Wartung', icon: 'mdi:wrench-outline', batteries: [] });"
+        " c._hass = { states: {} };"
+        " const stub = { innerHTML: '' };"
+        " Object.defineProperty(c, 'innerHTML', { set(v) { stub.innerHTML = v; },"
+        "   get() { return stub.innerHTML; }, configurable: true });"
+        " c._render(); return stub.innerHTML; })()",
+    )
+    assert 'icon="mdi:wrench-outline"' in html, html
+    assert "Wartung" in html
+
+
+def test_an_icon_that_is_not_an_icon_is_refused():
+    """It lands in an HTML attribute, where escaping as text does not apply: a
+    quote would close the attribute and the rest would parse as markup."""
+    for bad in ('mdi:x" onload="alert(1)', "javascript:alert(1)", "<img src=x>"):
+        assert not json.loads(run_js(CARD, f"JSON.stringify(SAFE_ICON.test({json.dumps(bad)}))"))
+    assert json.loads(run_js(CARD, 'JSON.stringify(SAFE_ICON.test("mdi:wrench-outline"))'))

@@ -398,6 +398,19 @@ function roomSections(room, opt, hass) {
 
   // Named badges — the raw entities carry IEEE-address names on fleet devices.
   const badges = [];
+  // THE LABEL GOES WITH THE READINGS, not above the target. It was a row inside
+  // the thermostat card at first, which printed the same two numbers a second
+  // time under the ones already in this heading (2026-10-08). A badge whose
+  // content is its own name renders as icon + word and sits first, so the row
+  // reads "Aktuell 23,4 °C 49,4 %".
+  //
+  // Bound to the room's climate entity because that is what the two badges
+  // below report on, and `state_content: "name"` is what makes a badge show a
+  // word instead of a value.
+  if (climate.length) {
+    badges.push({ type: "entity", entity: climate[0], name: "Aktuell",
+      icon: "mdi:home-thermometer-outline", state_content: "name" });
+  }
   // Temperature badge FIRST, then humidity. The #1060 decision (2026-09-23) had
   // dropped it — "the resident acts on the target" — and was REVERSED for this
   // badge on 2026-09-25 at Thomas's request: the measured room temperature
@@ -468,7 +481,17 @@ function roomSections(room, opt, hass) {
 
   // Heating — the control MyVibe called KI / MANUEL / AUS.
   if (climate.length) {
-    const cards = [{ type: "heading", heading: "Heizung", heading_style: "title", badges }];
+    // THE ROOM, NOT THE SUBJECT. "Heizung" was the same word in every room; the
+    // name is what tells one view from another at a glance (2026-10-08). The tab
+    // carries it too, but a tab is small and easy to lose on a phone.
+    //
+    // NO ICON HERE, deliberately. A room name is already specific — an icon
+    // beside it decorates rather than tells you anything the word did not, and
+    // the one room named after a person could not be given a true one at all.
+    // The headings BELOW this one keep theirs: "Heizplan" and "Verlauf" are the
+    // same words in every room, so there the picture does the distinguishing.
+    const cards = [{ type: "heading", heading: room.name || room.area_id,
+      heading_style: "title", badges }];
     for (const entity of climate) {
       cards.push(thermostatCard(entity, room.name, opt.thermostatStyle, opt.thermostatHeader));
       // Under the control, the last few things that happened to this room
@@ -482,7 +505,8 @@ function roomSections(room, opt, hass) {
       // the same thing by two names, the same reason the thermostat card says
       // "Leerlauf". The title rides ON the card, like every other title here.
       if (opt.changeLog) {
-        cards.push({ type: "custom:ga-heating-log-card", entity, title: "Aktivität" });
+        cards.push({ type: "custom:ga-heating-log-card", entity, title: "Aktivität",
+          icon: "mdi:history" });
       }
       // Under the activity, because it answers the next question: that was what
       // happened, this is what needs doing. Batteries today; heating faults are
@@ -490,6 +514,7 @@ function roomSections(room, opt, hass) {
       cards.push({
         type: "custom:ga-maintenance-card",
         title: "Wartung",
+        icon: "mdi:wrench-outline",
         batteries: roomBatteries(room, clim, hass),
         links: roomLinkQuality(room, clim, hass),
         // The room itself, for `valves_late`: ga_heating publishes there which of
@@ -506,7 +531,8 @@ function roomSections(room, opt, hass) {
   // with ANY thermostat, not just the Zigbee TRV we happen to ship).
   for (const entity of climate) {
     sections.push({ type: "grid", cards: [
-      { type: "heading", heading: "Heizplan", heading_style: "title" },
+      { type: "heading", heading: "Heizplan", heading_style: "title",
+        icon: "mdi:calendar-clock" },
       // No `title`: the heading directly above says "Heizplan" and the tab says
       // the room, so a room-name header inside the card was the third telling
       // (2026-09-30). The card still honours one when a hand-written config
@@ -602,14 +628,16 @@ function roomSections(room, opt, hass) {
   }
   if (history.length) {
     sections.push({ type: "grid", cards: [
-      { type: "heading", heading: "Verlauf", heading_style: "title" }, ...history] });
+      { type: "heading", heading: "Verlauf", heading_style: "title",
+        icon: "mdi:chart-line" }, ...history] });
   }
 
   // Everything else a resident operates, as tiles.
   const rest = [...lights, ...switches];
   if (rest.length) {
     sections.push({ type: "grid", cards: [
-      { type: "heading", heading: "Geräte", heading_style: "title" },
+      { type: "heading", heading: "Geräte", heading_style: "title",
+        icon: "mdi:devices" },
       ...rest.map((entity) => deviceTile(hass, entity)),
     ] });
   }
@@ -786,7 +814,17 @@ function householdOverview(name, model, rooms, opt) {
  */
 function heatingProfileView(opt) {
   return {
-    title: "Profil",
+    // "Profil" said nothing about what is inside: Boost, the whole flat on or
+    // off, the hydraulic balancing run, the Sonderpläne (2026-10-08).
+    //
+    // A NAME, NOT AN ICON. A view with an icon shows only the icon in the tab
+    // bar; the others here are words, and one picture among them reads as a
+    // different kind of thing rather than as the same kind, newly decorated.
+    //
+    // THE PATH IS UNCHANGED. It is in people's bookmarks and in any dashboard
+    // link pointing here; renaming the label costs nothing, renaming the path
+    // breaks those silently.
+    title: "Services",
     path: "profil",
     ...(opt.textTabs ? {} : { icon: "mdi:thermostat" }),
     cards: [{ type: "custom:ga-heating-actions-card" }],

@@ -113,6 +113,12 @@ const STYLE = `
   ga-thermostat-card .off { text-align: center; opacity: .6; padding: 20px 0; }
   /* setpoint */
   ga-thermostat-card .sp .cur { text-align: center; opacity: .6; font-size: 13px; margin-bottom: 4px; }
+  /* The label over the big number. Uppercase and small so it reads as a caption
+     rather than as another value. */
+  ga-thermostat-card .ziel { display: flex; align-items: center; gap: 5px;
+    justify-content: center; font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; opacity: .55; margin-bottom: 2px; }
+  ga-thermostat-card .ziel ha-icon { --mdc-icon-size: 15px; }
   ga-thermostat-card .sp .big { display: flex; align-items: center; justify-content: center;
     gap: 16px; margin: 2px 0 14px; }
   ga-thermostat-card .sp .big button { width: 52px; height: 52px; border-radius: 16px; border: none;
@@ -505,7 +511,7 @@ class GaThermostatCard extends HTMLElement {
         `<button data-delta="1" aria-label="wärmer">+</button></div>`
       : "";
     this._root.innerHTML = `<div class="ga-body">${this._hdr(s, header)}` +
-      `${big}${setRow}${this._modeRow(s)}</div>`;
+      `${this._showCurrent ? "" : this._targetLabel()}${big}${setRow}${this._modeRow(s)}</div>`;
   }
 
   _renderSetpoint(s, header) {
@@ -517,6 +523,7 @@ class GaThermostatCard extends HTMLElement {
       (this._showCurrent
         ? `<div class="cur">aktuell ${cur != null ? Number(cur).toFixed(1) : "–"} °C</div>`
         : "") +
+      this._targetLabel() +
       `<div class="big"><button data-delta="-1">−</button>` +
       `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
       `<button data-delta="1">+</button></div>`;
@@ -583,6 +590,12 @@ class GaThermostatCard extends HTMLElement {
   }
 
   /** The title line every variant shows: title, running-state badge, or both. */
+  /** "Ziel" over the number the room is being driven to. */
+  _targetLabel() {
+    return `<div class="ziel"><ha-icon icon="mdi:target"></ha-icon>` +
+      `<span>Ziel</span></div>`;
+  }
+
   _hdr(s, header) {
     const badge = this._actionBadge(s);
     if (header) return `<div class="hdr">${esc(header)}${badge}</div>`;
