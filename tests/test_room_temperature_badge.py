@@ -37,7 +37,7 @@ def _readings(room: str, states: str = "{}") -> list:
     """The badges that carry a VALUE. "Aktuell" is a label for the pair, not a
     reading, so tests about which sensor a reading comes from skip it — rather
     than every one of them renumbering around a word (2026-10-08)."""
-    return [b for b in (_readings(room, states) or []) if b.get("name") != "Aktuell"]
+    return [b for b in (_badges(room, states) or []) if b.get("name") != "Aktuell"]
 
 
 _STATES = """{

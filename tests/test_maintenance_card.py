@@ -319,7 +319,7 @@ def test_the_temperature_badge_is_untouched():
     carries no value of its own — so the reading this test is about is the one
     after it."""
     assert room_view()["badges"] == [
-        "Aktuell|climate.wohnzimmer", "Temperatur|sensor.0xccc3_temperature"]
+        "Aktuell|climate.flur", "Temperatur|sensor.0xccc3_temperature"]
 
 
 def test_wartung_sits_under_aktivitaet():
