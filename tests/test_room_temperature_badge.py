@@ -402,3 +402,56 @@ def test_a_named_entity_that_does_not_exist_is_not_charted():
     got = _graph_series('{ outdoor_temperature: "sensor.tippfehler" }')
     assert got[0] == ["Raum Temperatur"]
 
+
+# ── the heading names the room, and the badges are labelled ────────────────
+#
+# Asked for 2026-10-08. "Heizung" was the same word in every room; the name is
+# what tells one view from another. And the two readings had no label at all, so
+# "Aktuell" joins them as a badge rather than as a second copy of the numbers
+# inside the thermostat card — which is where it went first, and was wrong.
+
+
+def _heading(room: str, states: str = "{}"):
+    expr = f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
+      return roomSections({room}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || [])
+        .find(c => c.type === "heading") || null;
+    }})()"""
+    return run_js(STRATEGY, expr)
+
+
+_ROOM = ('{ name: "Wohnzimmer", area_id: "wohnzimmer", climate: ["climate.wz"],'
+         ' temps: ["sensor.wz_t"], hums: ["sensor.wz_h"], batts: [],'
+         ' lights: [], switches: [] }')
+
+
+def test_the_heading_is_the_room_name():
+    assert _heading(_ROOM, _STATES)["heading"] == "Wohnzimmer"
+
+
+def test_the_heading_carries_no_icon():
+    """A room name is already specific; an icon beside it decorates rather than
+    distinguishes, and a room named after a person cannot be given a true one."""
+    assert "icon" not in _heading(_ROOM, _STATES), _heading(_ROOM, _STATES)
+
+
+def test_a_room_with_no_name_still_has_a_heading():
+    """MUST-NOT-FLAG: the area id is a poor title but an empty one is worse."""
+    room = _ROOM.replace('name: "Wohnzimmer"', 'name: ""')
+    assert _heading(room, _STATES)["heading"] == "wohnzimmer"
+
+
+def test_aktuell_labels_the_readings_and_comes_first():
+    b = _badges(_ROOM, _STATES)
+    assert [x["name"] for x in b] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], b
+    assert b[0]["state_content"] == "name", "without this the badge shows a value"
+    assert b[0]["icon"] == "mdi:home-thermometer-outline"
+    assert b[0]["entity"] == "climate.wz"
+
+
+def test_the_label_is_dropped_when_there_is_no_room_entity():
+    """It is bound to the climate entity the other badges report on; with none
+    there is nothing to label."""
+    room = _ROOM.replace('climate: ["climate.wz"]', "climate: []")
+    assert [x["name"] for x in _badges(room, _STATES)] != ["Aktuell"]

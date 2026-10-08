@@ -148,6 +148,13 @@ const LATE_SECONDS_WORTH_SAYING = 30;
 //: weak radio at 20 came out above a battery at 25 %.
 //: A SILENT ROOM SENSOR comes first within its level. It is the one entry here
 //: that changes what the heating is doing: ga_heating stops trusting the reading
+//: An icon name is CONFIG that lands in an HTML attribute, so it cannot be
+//: escaped as text the way a title is — a quote in it would close the attribute
+//: and everything after would be parsed as markup. Only a plain mdi name passes;
+//: anything else renders no icon rather than something unsafe. (Same reasoning as
+//: the escaping pass in 1.23.3.)
+const SAFE_ICON = /^mdi:[a-z0-9-]+$/;
+
 //: and the room falls to the house average, so until somebody acts the room is
 //: being heated on a number that is not its own.
 const KIND_RANK = { sensor: 0, battery: 1, link: 2, late: 3 };
@@ -308,6 +315,7 @@ class GaMaintenanceCard extends HTMLElement {
     this._batteries = Array.isArray(config.batteries) ? config.batteries : [];
     this._links = Array.isArray(config.links) ? config.links : [];
     this._climate = typeof config.climate === "string" ? config.climate : null;
+    this._icon = typeof config.icon === "string" ? config.icon : "";
   }
 
   set hass(hass) {
@@ -329,7 +337,9 @@ class GaMaintenanceCard extends HTMLElement {
     if (!this._hass) return;
     const rows = this._rows();
     const title = this._config.title == null ? "Wartung" : this._config.title;
-    const head = title ? `<div class="hdr">${esc(title)}</div>` : "";
+    const ic = SAFE_ICON.test(this._icon || "")
+      ? `<ha-icon icon="${this._icon}"></ha-icon>` : "";
+    const head = title ? `<div class="hdr">${ic}${esc(title)}</div>` : "";
     // "Nothing to do" is said out loud. A card that renders empty reads as one
     // that failed to load, which is the complaint the actions card's own status
     // line exists to answer — and here it is the difference between "we checked"
@@ -348,7 +358,9 @@ class GaMaintenanceCard extends HTMLElement {
            heading ("make the font and size of wartung similar to aktivitat",
            2026-10-05). These are ga-heating-log-card's own numbers. */
         ga-maintenance-card .card-content { padding: 12px 16px 14px; }
-        ga-maintenance-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 8px; }
+        ga-maintenance-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 7px; }
+  ga-maintenance-card .hdr ha-icon { --mdc-icon-size: 19px; opacity: .85; }
         ga-maintenance-card ul { list-style: none; margin: 0; padding: 0;
           display: grid; gap: 8px; }
         ga-maintenance-card li { display: flex; align-items: center; gap: 10px;

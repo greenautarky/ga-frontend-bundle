@@ -33,7 +33,24 @@
  *   title: "Letzte Änderungen"     # optional, default none
  */
 
-const DEFAULT_COUNT = 3;
+//: KEPT, not shown. Five entries are held and the list is capped at the height
+//: of three, so the card looks the same until a resident scrolls — a balancing
+//: run alone writes four lines into a room (started, the setpoint up, the
+//: An icon name is CONFIG that lands in an HTML attribute, so it cannot be
+//: escaped as text the way a title is — a quote in it would close the attribute
+//: and everything after would be parsed as markup. Only a plain mdi name passes;
+//: anything else renders no icon rather than something unsafe. (Same reasoning as
+//: the escaping pass in 1.23.3.)
+const SAFE_ICON = /^mdi:[a-z0-9-]+$/;
+
+//: setpoint back, ended) and three would hide everything that came before it
+//: (asked for 2026-10-08).
+const DEFAULT_COUNT = 5;
+
+//: How many rows are visible before the list scrolls. Rows vary in height, so
+//: this is applied as a max-height computed from the row height below rather
+//: than as a count.
+const VISIBLE_ROWS = 3;
 const DEFAULT_HOURS = 72;
 
 //: A room's own modes, in the resident's words. Same mapping as
@@ -77,8 +94,17 @@ const REFETCH_DEBOUNCE_MS = 2000;
 
 const STYLE = `
   ga-heating-log-card .ga-body { padding: 12px 16px 14px; }
-  ga-heating-log-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 8px; }
-  ga-heating-log-card ul { list-style: none; margin: 0; padding: 0; }
+  ga-heating-log-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 7px; }
+  ga-heating-log-card .hdr ha-icon { --mdc-icon-size: 19px; opacity: .85; }
+  /* FIVE KEPT, THREE SHOWN. A row is 14px text with 5px padding either side and
+     a 1px rule between, so three come to about 90px; the cap is set a little
+     over that so the fourth row is clipped mid-line and the list reads as
+     scrollable rather than as if it ended. overscroll-behavior keeps a flick
+     inside the card instead of scrolling the dashboard behind it. */
+  ga-heating-log-card ul { list-style: none; margin: 0; padding: 0;
+    max-height: 96px; overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin; }
   ga-heating-log-card li { display: flex; align-items: baseline; gap: 10px;
     padding: 5px 0; font-size: 14px; }
   ga-heating-log-card li + li { border-top: 1px solid var(--divider-color, #e0e0e0); }
@@ -149,14 +175,38 @@ function changesFrom(points) {
 function fromAttribute(changes) {
   if (!Array.isArray(changes)) return null;
   return changes
-    .filter((e) => e && (e.kind === "mode" || e.kind === "target"))
+    .filter((e) => e && (e.kind === "mode" || e.kind === "target" || e.kind === "event"))
     .map((e) => ({ when: e.at, kind: e.kind, from: e.from, to: e.to, source: e.source }));
 }
+
+//: WHAT HAPPENED, for the entries that are an event rather than a value moving.
+//: A balancing run writes its setpoints into the log already; these are the two
+//: lines that say what those setpoints were for, so a resident who was out can
+//: read the hour without knowing what "Einregulierung" means.
+const EVENT_WORDS = {
+  ichb_started: { icon: "mdi:scale-balance", text: "Hydraulischer Abgleich gestartet" },
+  ichb_ended: { icon: "mdi:scale-balance", text: "Hydraulischer Abgleich beendet" },
+  ichb_cancelled: { icon: "mdi:scale-balance", text: "Hydraulischer Abgleich abgebrochen" },
+};
 
 /** One entry as `{icon, text, why}` — the words a resident reads. */
 function describe(entry) {
   const s = SOURCE_WORDS[entry.source];
   const why = s ? [s.who, s.why].filter(Boolean).join(" · ") : "";
+  if (entry.kind === "event") {
+    // THE ACTOR ONLY. An event names itself — "Hydraulischer Abgleich
+    // abgebrochen" — so appending the reason gave "... · System ·
+    // Einregulierung", which says the same thing twice in two vocabularies
+    // (seen on a device, 2026-10-08). Same rule the table above already
+    // follows for a resident at a button: drop the reason where it only
+    // restates what the line says.
+    //
+    // An unknown event renders its own key rather than nothing: a line a
+    // resident cannot read still beats a line that silently disappears.
+    const e = EVENT_WORDS[entry.to];
+    return { icon: e ? e.icon : "mdi:information-outline",
+             text: e ? e.text : String(entry.to), why: s ? s.who : "" };
+  }
   if (entry.kind === "mode") {
     const from = MODE_WORDS[entry.from] || entry.from;
     const to = MODE_WORDS[entry.to] || entry.to;
@@ -206,6 +256,7 @@ class GaHeatingLogCard extends HTMLElement {
     }
     this._config = config;
     this._count = Number(config.count) > 0 ? Number(config.count) : DEFAULT_COUNT;
+    this._icon = typeof config.icon === "string" ? config.icon : "";
     this._hours = Number(config.hours) > 0 ? Number(config.hours) : DEFAULT_HOURS;
     this._entries = null;
     this._error = null;
@@ -275,7 +326,13 @@ class GaHeatingLogCard extends HTMLElement {
 
   _headerHtml() {
     const t = this._config.title;
-    return t ? `<div class="hdr">${esc(t)}</div>` : "";
+    if (!t) return "";
+    // The icon is config, so it is NOT escaped as text — it is an attribute
+    // value, and a quote in it would break out of the attribute. Only an mdi
+    // name is let through.
+    const ic = SAFE_ICON.test(this._icon || "")
+      ? `<ha-icon icon="${this._icon}"></ha-icon>` : "";
+    return `<div class="hdr">${ic}${esc(t)}</div>`;
   }
 
   _listHtml() {
