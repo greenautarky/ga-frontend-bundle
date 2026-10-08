@@ -189,11 +189,25 @@ def test_no_backtick_inside_a_shipped_style_block():
     none, so the only check that mattered ran after the mistake was already on
     a device. This one is a string scan: it runs anywhere, in milliseconds, and
     names the line.
+
+    THE THIRD TIME was 2026-10-08, and this guard did not catch it: the CSS was
+    in `const STYLE = `...`` rather than between <style> tags, so the scan below
+    never looked at it. The card went to a device syntax check and failed there.
+    Both shapes are scanned now — a template literal holding CSS is the hazard,
+    whatever it is called.
     """
-    offenders = []
+    blocks = []
     for path in sorted((PKG / "first_party").rglob("*.js")):
         src = path.read_text(encoding="utf-8")
-        for block in re.finditer(r"<style>(.*?)</style>", src, re.S):
+        for m in re.finditer(r"<style>(.*?)</style>", src, re.S):
+            blocks.append((path, src, m))
+        # `const STYLE = ` + backtick, up to the backtick that closes it.
+        for m in re.finditer(r"const\s+STYLE\s*=\s*`(.*?)`;", src, re.S):
+            blocks.append((path, src, m))
+
+    offenders = []
+    for path, src, block in blocks:
+        if True:
             css = block.group(1)
             if "`" in css:
                 at = block.start(1) + css.index("`")
