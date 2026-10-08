@@ -146,7 +146,16 @@ const LATE_SECONDS_WORTH_SAYING = 30;
 //: radio outranks what the radio cost us. Without it the sort keys of different
 //: kinds are compared directly — a percentage against a link quality — and a
 //: weak radio at 20 came out above a battery at 25 %.
-const KIND_RANK = { battery: 0, link: 1, late: 2 };
+//: A SILENT ROOM SENSOR comes first within its level. It is the one entry here
+//: that changes what the heating is doing: ga_heating stops trusting the reading
+//: and the room falls to the house average, so until somebody acts the room is
+//: being heated on a number that is not its own.
+const KIND_RANK = { sensor: 0, battery: 1, link: 2, late: 3 };
+
+//: How long ga_heating has to have heard nothing before it stops believing a room
+//: sensor (ROOM_SENSOR_SILENCE, three hours). Not re-decided here — the card only
+//: renders what the engine already concluded, so the two cannot disagree about
+//: whether a room is measuring itself.
 
 /** A reading that is actually a number, or null. Never `Number("")`, which is 0. */
 function reading(state) {
@@ -240,6 +249,35 @@ function maintenanceRows(states, batteries, extra) {
       name: deviceName(states[valve]) || "Heizkörper",
       detail: said.join(", "),
       sort: 1000 - (isLate ? lag : 0),
+    });
+  }
+
+  // A ROOM SENSOR THAT HAS STOPPED TALKING (ga_heating 0.13.5+, `sensor_silent`).
+  // The engine decides this, not the card: it has the device's heartbeat and the
+  // measured threshold behind it. A dead sensor usually shows up as a flat battery
+  // too, and both lines are shown — the battery says what to buy, this says what
+  // it is costing.
+  // SINCE, NOT A DURATION, and the card does the arithmetic. ga_heating publishes
+  // when the device was last heard from and rewrites the room only when the
+  // VERDICT changes; a duration in the attribute would differ every tick and cost
+  // a state write per room per minute. So the age is computed here, which also
+  // means the line stays current between republishes instead of ageing with them.
+  const silent = ((states[climate] || {}).attributes || {}).sensor_silent || {};
+  for (const [sensor, info] of Object.entries(silent)) {
+    const at = Date.parse(((info || {}).since) || "");
+    if (!Number.isFinite(at)) continue;
+    const quiet = (Date.now() - at) / 1000;
+    if (!(quiet > 0)) continue;
+    const hours = Math.floor(quiet / 3600);
+    const since = hours >= 1 ? `${hours} h` : `${Math.round(quiet / 60)} min`;
+    const what = (info || {}).kind === "humidity" ? "Feuchtesensor" : "Temperatursensor";
+    rows.push({
+      kind: "sensor", level: "critical", icon: "mdi:thermometer-off",
+      name: deviceName(states[sensor]) || what,
+      detail: `${what} meldet nicht (seit ${since})`,
+      // Longest silence first, and negative so the shared ascending sort keeps
+      // the worst one at the top like every other kind.
+      sort: -quiet,
     });
   }
 
