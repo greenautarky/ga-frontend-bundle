@@ -48,39 +48,19 @@ def test_master_card_defines_element_and_registers():
 
 
 def test_master_card_danger_zone_targets_the_core_endpoints():
-    """Still a thin client: both resets go through greenautarky_site, never
-    straight at the addon."""
+    """Still a thin client: the household reset goes through greenautarky_site,
+    never straight at the addon. The site reset is withdrawn (1.23.6)."""
     src = MASTER_CARD.read_text(encoding="utf-8")
     assert '"greenautarky_site/household"' in src
-    assert '"greenautarky_site/site_reset"' in src
-    assert "/reset" in src and "/request" in src and "/status" in src
+    assert "site_reset" not in src
+    assert "/reset" in src
 
 
 def test_master_card_danger_actions_start_disabled():
-    """Both destructive buttons ship disabled and are armed only by the
-    confirmation handlers — a mis-click can never fire one."""
+    """The destructive button ships disabled and is armed only by the
+    confirmation handler — a mis-click can never fire it."""
     src = MASTER_CARD.read_text(encoding="utf-8")
     assert 'class="btn danger hh-go" disabled' in src
-    assert 'class="btn danger site-go" disabled' in src
-
-
-def test_master_card_site_reset_requires_pin_and_phrase():
-    """The server gates this too; the card must not offer a path that skips
-    either input, or the user meets a 401 instead of a form error."""
-    src = MASTER_CARD.read_text(encoding="utf-8")
-    assert "_phraseOk" in src and "_pinOk" in src
-    # armSite only enables when BOTH hold
-    assert "this._phraseOk(siteConfirm.value) && this._pinOk(sitePin.value)" in src
-
-
-def test_master_card_says_rooms_return_to_their_default_names():
-    """A tenant can rename rooms, and the full reset puts the defaults back
-    (greenautarky-site 2.1.0 re-seeds them). The dialog has to say so — a
-    renamed room silently reverting is exactly the kind of surprise that
-    makes people distrust the button."""
-    src = MASTER_CARD.read_text(encoding="utf-8")
-    assert "Umbenannte Räume" in src
-    assert "Wohnzimmer" in src
 
 
 def test_master_card_states_what_the_soft_reset_does_not_delete():
@@ -150,8 +130,8 @@ def test_dialog_prompt_is_a_single_element():
     destructive dialog, broken. Caught on baked rc36 (K0, 2026-07-28); no
     string assertion could have seen it."""
     src = MASTER_CARD.read_text(encoding="utf-8")
-    assert src.count('<label class="dlg-label"><span>Tippe') == 2, (
-        "both dialogs must wrap the prompt sentence in one element"
+    assert src.count('<label class="dlg-label"><span>Tippe') == 1, (
+        "the dialog must wrap the prompt sentence in one element"
     )
     assert "ga-master-card .dlg-label > span { display:block; }" in src
 

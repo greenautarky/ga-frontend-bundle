@@ -35,7 +35,6 @@ BROWSER_DIR = REPO / "tests" / "browser"
 HARNESS = BROWSER_DIR / "master-card-danger-zone.mjs"
 
 HH = "/api/greenautarky_site/household/reset"
-SITE = "/api/greenautarky_site/site_reset/request"
 
 # Pinned expectations — never derived from the card under test.
 EXPECTED = {
@@ -45,14 +44,9 @@ EXPECTED = {
         (HH, {"confirm": "LÖSCHEN"}),
     ],
     "household_reset_reopened_dialog_sends": [(HH, {"confirm": "LÖSCHEN"})],
-    "site_reset_sends": [
-        (SITE, {"pin": "123-456", "confirm": "LÖSCHEN", "wipe_zigbee_pairing": True}),
-    ],
-    "site_reset_retry_after_failure_sends": [
-        (SITE, {"pin": "123456", "confirm": "löschen", "wipe_zigbee_pairing": False}),
-        (SITE, {"pin": "123456", "confirm": "löschen", "wipe_zigbee_pairing": False}),
-    ],
 }
+# Not request scenarios: the DOM + "never calls site_reset" proof (1.23.6).
+DOM_SCENARIO = "danger_zone_dom_and_no_site_reset"
 
 _RESULT: dict | None = None
 
@@ -86,7 +80,8 @@ def _result() -> dict:
 def test_every_scenario_ran():
     """Coverage, not exit code: every pinned scenario must come back."""
     got = set(_result()["scenarios"])
-    assert got == set(EXPECTED), f"scenarios run {sorted(got)} != pinned {sorted(EXPECTED)}"
+    want = set(EXPECTED) | {DOM_SCENARIO}
+    assert got == want, f"scenarios run {sorted(got)} != pinned {sorted(want)}"
 
 
 @pytest.mark.parametrize("scenario", sorted(EXPECTED))
@@ -98,3 +93,35 @@ def test_danger_zone_click_sends_the_request(scenario: str):
     assert sent == EXPECTED[scenario], (
         f"requests that left the page: {sent}\nexpected: {EXPECTED[scenario]}"
     )
+
+
+def test_site_reset_and_radio_sensor_option_are_gone():
+    """Hotfix 1.23.6: the site reset wiped rooms/heating config and its
+    "Funk-Sensoren trennen" option left Core + z2m stopped. The rendered card
+    offers neither, points to support, and no click reaches site_reset."""
+    res = _result()["scenarios"][DOM_SCENARIO]
+    assert not res["errors"], f"the card threw in the page: {res['errors']}"
+    assert res["dom"] == {
+        "siteResetButton": False,
+        "siteDialog": False,
+        "zigbeeOption": False,
+        "textAllesLoeschen": False,
+        "textFunkSensoren": False,
+        "householdButton": True,
+        "householdButtonText": "Nutzer zurücksetzen…",
+        "supportNote": True,
+    }
+    assert res["siteResetCalls"] == []
+
+
+def test_no_scenario_ever_reaches_site_reset():
+    for name, res in _result()["scenarios"].items():
+        assert not res.get("siteResetCalls"), f"{name} reached site_reset: {res['siteResetCalls']}"
+
+
+def test_card_source_has_no_site_reset_code():
+    """Static twin of the browser proof (the endpoint string, the zigbee flag)."""
+    src = CARD.read_text(encoding="utf-8")
+    needles = ("site_reset", "wipe_zigbee_pairing", "site-zigbee", "Funk-Sensoren", "Alles löschen")
+    for needle in needles:
+        assert needle not in src, needle
