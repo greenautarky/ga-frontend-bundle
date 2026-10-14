@@ -7,10 +7,10 @@
  *   - grant/revoke ROOMS (the [sub-user x room] matrix) — the sub-user's dashboard
  *     is GENERATED from them by the ga-home strategy; no dashboard is handed out
  *   - rename rooms (areas)
- *   - Danger zone (KB #169): remove all sub-users, or erase the whole site.
- *     The household could previously be managed here but not unmade — erasing a
- *     tenant was operator-only, which is the wrong shape for a GDPR erasure
- *     request from the person whose data it is.
+ *   - Danger zone (KB #169): remove all sub-users. The full site reset is
+ *     withdrawn from the card since 1.23.6 (it wiped rooms and heating config
+ *     and one of its options left Core + z2m stopped). The card shows a note
+ *     to ask support instead and sends no request for it.
  *
  * It is a THIN CLIENT: every action calls the in-Core greenautarky_site
  * endpoints, which enforce the master flag + parent relation server-side.
@@ -21,11 +21,8 @@
  */
 
 const API = "greenautarky_site/sub_user";
-// Danger zone (KB #169). The household reset is executed in Core; the site
-// reset only FILES a request — Core cannot stop Core, so the ga_manager addon
-// performs the wipe and reports back through the status endpoint.
+// Danger zone (KB #169). The household reset is executed in Core.
 const API_HOUSEHOLD = "greenautarky_site/household";
-const API_SITE_RESET = "greenautarky_site/site_reset";
 
 /**
  * Text for HTML. Names and texts from Home Assistant (entity names, room names,
@@ -106,12 +103,9 @@ class GaMasterCard extends HTMLElement {
             <div class="danger-item">
               <div>
                 <b>Persönliche Daten löschen</b>
-                <div class="muted">Löscht alle Daten dieses Zuhauses — Konten,
-                  Dashboards, Automationen, Räume und den gesamten Verlauf. Das
-                  Gerät startet neu und beginnt wieder mit der
-                  Ersteinrichtung.</div>
+                <div class="muted site-note">Zum vollständigen Löschen deiner
+                  Daten wende dich bitte an den Support.</div>
               </div>
-              <button class="btn danger site-reset">Alles löschen…</button>
             </div>
           </div>
         </div>
@@ -136,37 +130,6 @@ class GaMasterCard extends HTMLElement {
         </form>
       </dialog>
 
-      <dialog class="ga-dlg site-dlg">
-        <form method="dialog">
-          <h3>Alle persönlichen Daten löschen?</h3>
-          <p><b>Das lässt sich nicht rückgängig machen.</b> Alle Konten,
-             Dashboards, Automationen, Einstellungen und der gesamte
-             Messwert-Verlauf dieses Zuhauses werden gelöscht.</p>
-          <p class="muted">Umbenannte Räume heißen danach wieder Wohnzimmer,
-             Küche und Schlafzimmer — genau wie bei der Ersteinrichtung.</p>
-          <p class="muted">Das Gerät selbst bleibt eingerichtet und mit dem
-             Internet verbunden. Nach dem Löschen startet es neu und zeigt die
-             Ersteinrichtung.</p>
-          <label class="dlg-label">Geräte-PIN vom Aufkleber
-            <input class="site-pin" type="text" inputmode="numeric"
-                   autocomplete="off" placeholder="000-000" />
-          </label>
-          <label class="dlg-label"><span>Tippe <code>LÖSCHEN</code> zum Bestätigen</span>
-            <input class="site-confirm" type="text" autocomplete="off" />
-          </label>
-          <label class="dlg-check">
-            <input class="site-zigbee" type="checkbox" />
-            <span>Auch die Verbindung zu allen Funk-Sensoren trennen. Sie müssen
-              danach neu angelernt werden — normalerweise nicht nötig, die
-              Sensoren gehören zum Haus.</span>
-          </label>
-          <div class="dlg-msg site-msg"></div>
-          <div class="dlg-actions">
-            <button type="button" class="btn dlg-cancel">Abbrechen</button>
-            <button type="button" class="btn danger site-go" disabled>Endgültig löschen</button>
-          </div>
-        </form>
-      </dialog>
       <style>
         ga-master-card .card-content { padding: 16px; }
         ga-master-card h4 { margin: 18px 0 8px; }
@@ -355,8 +318,7 @@ class GaMasterCard extends HTMLElement {
 
   // ── Danger zone ─────────────────────────────────────────────────────────
   //
-  // Both actions are gated server-side (master flag; the site reset also wants
-  // a fresh device PIN). Everything here is UX: it must be hard to fire by
+  // The action is gated server-side (master flag). Everything here is UX: it must be hard to fire by
   // accident and honest about what survives. The typed phrase mirrors the
   // operator tool, which makes an operator type the device id.
 
@@ -364,7 +326,6 @@ class GaMasterCard extends HTMLElement {
     const $ = (sel) => this._root.querySelector(sel);
 
     this._hhDlg = $(".household-dlg");
-    this._siteDlg = $(".site-dlg");
 
     this._root.querySelectorAll(".dlg-cancel").forEach((b) =>
       b.addEventListener("click", () => b.closest("dialog").close())
@@ -385,45 +346,14 @@ class GaMasterCard extends HTMLElement {
     });
     hhGo.addEventListener("click", () => this._runHouseholdReset(hhGo, hhConfirm.value));
 
-    // Full site reset.
-    const sitePin = $(".site-pin");
-    const siteConfirm = $(".site-confirm");
-    const siteGo = $(".site-go");
-    const armSite = () => {
-      siteGo.disabled = !(
-        this._phraseOk(siteConfirm.value) && this._pinOk(sitePin.value)
-      );
-    };
-    sitePin.addEventListener("input", armSite);
-    siteConfirm.addEventListener("input", armSite);
-    $(".site-reset").addEventListener("click", () => {
-      sitePin.value = "";
-      siteConfirm.value = "";
-      $(".site-zigbee").checked = false;
-      siteGo.disabled = true;
-      this._dlgMsg(".site-msg", "", "");
-      this._siteDlg.showModal();
-      sitePin.focus();
-    });
-    siteGo.addEventListener("click", () =>
-      this._runSiteReset(siteGo, {
-        pin: sitePin.value,
-        confirm: siteConfirm.value,
-        wipe_zigbee_pairing: $(".site-zigbee").checked,
-      })
-    );
   }
 
   _phraseOk(value) {
     return (value || "").trim().toUpperCase() === "LÖSCHEN";
   }
 
-  _pinOk(value) {
-    return /^\d{6}$/.test((value || "").replace(/[-\s]/g, ""));
-  }
-
   _dlgMsg(sel, kind, text) {
-    // Touch ONLY the state class. `sel` (".hh-msg" / ".site-msg") is a class
+    // Touch ONLY the state class. `sel` (".hh-msg") is a class
     // on this same element; assigning `className` wholesale dropped it, so the
     // next lookup returned null and both Danger Zone buttons threw before
     // sending anything (1.9.0–1.20.0). tests/test_master_card_danger_zone_submits.py
@@ -445,55 +375,6 @@ class GaMasterCard extends HTMLElement {
     } catch (e) {
       btn.disabled = false;
       this._dlgMsg(".hh-msg", "err", this._errText(e));
-    }
-  }
-
-  async _runSiteReset(btn, body) {
-    btn.disabled = true;
-    this._dlgMsg(".site-msg", "", "Löschung wird gestartet…");
-    try {
-      await this._api("POST", API_SITE_RESET + "/request", body);
-    } catch (e) {
-      btn.disabled = false;
-      this._dlgMsg(".site-msg", "err", this._errText(e));
-      return;
-    }
-    // Accepted, not done: the addon picks the request up within seconds and
-    // stops Home Assistant as its first step. This connection dies with it —
-    // which is the expected ending, not a failure to report.
-    this._dlgMsg(
-      ".site-msg",
-      "ok",
-      "Löschung läuft. Das Gerät startet gleich neu und zeigt danach die " +
-        "Ersteinrichtung. Diese Seite reagiert bis dahin nicht mehr."
-    );
-    this._pollSiteReset();
-  }
-
-  async _pollSiteReset() {
-    // Best-effort progress until Core goes down. A failed request here means
-    // the wipe has started, so it is never surfaced as an error.
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      let s;
-      try {
-        s = await this._api("GET", API_SITE_RESET + "/status");
-      } catch (e) {
-        return;
-      }
-      const state = (s.status || {}).state;
-      if (state === "rejected") {
-        this._dlgMsg(
-          ".site-msg",
-          "err",
-          "Das Gerät hat die Löschung abgelehnt: " +
-            ((s.status || {}).reason || "unbekannter Grund") +
-            ". Bitte erneut versuchen."
-        );
-        this._root.querySelector(".site-go").disabled = false;
-        return;
-      }
-      if (state === "accepted" && !s.pending) return;
     }
   }
 

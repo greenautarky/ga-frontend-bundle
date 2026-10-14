@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.23.6 — 2026-10-14
+
+Protective hotfix: the full-site reset is withdrawn from the "Haushalt verwalten" card.
+
+- The "Alles löschen…" action and its dialog are removed from the Gefahrenbereich. In its place the card shows: "Zum vollständigen Löschen deiner Daten wende dich bitte an den Support." The card no longer sends any request to `greenautarky_site/site_reset`.
+- The "Auch die Verbindung zu allen Funk-Sensoren trennen" option is gone with it.
+- Why: the full reset is being reworked; until then deletion of all personal data goes through support.
+- Unchanged: "Nutzer zurücksetzen" and everything else on the card.
+- Tests: `tests/browser/master-card-danger-zone.mjs` renders the shipped card and asserts there is no site-reset button, dialog or radio-sensor option, a support note, and that no click reaches `site_reset`; the household reset still sends its request.
+
 ## 1.23.5 — 2026-10-08
 
 UI polish by @ahmad-greenautarky, merged as #52.

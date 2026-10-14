@@ -54,7 +54,6 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
 
 /** Each scenario: the answers the fake device gives, in order, per endpoint. */
 const HH = "/api/greenautarky_site/household/reset";
-const SITE = "/api/greenautarky_site/site_reset/request";
 
 const SCENARIOS = [
   {
@@ -79,23 +78,6 @@ const SCENARIOS = [
       ["open", ".household-reset"], ["fill", ".hh-confirm", "LÖSCHEN"], ["click", ".hh-go"],
     ],
   },
-  {
-    name: "site_reset_sends",
-    answers: { [SITE]: [[200, { accepted: true }]] },
-    steps: [
-      ["open", ".site-reset"], ["fill", ".site-pin", "123-456"],
-      ["fill", ".site-confirm", "LÖSCHEN"], ["check", ".site-zigbee"], ["click", ".site-go"],
-    ],
-  },
-  {
-    name: "site_reset_retry_after_failure_sends",
-    answers: { [SITE]: [[403, { message: "boom-site" }], [200, { accepted: true }]] },
-    steps: [
-      ["open", ".site-reset"], ["fill", ".site-pin", "123456"],
-      ["fill", ".site-confirm", "löschen"], ["click", ".site-go"],
-      ["waitText", ".site-dlg .dlg-msg", "boom-site"], ["click", ".site-go"],
-    ],
-  },
 ];
 
 const browser = await chromium.launch({ headless: true });
@@ -106,6 +88,7 @@ try {
     const page = await browser.newPage();
     const errors = [];
     const posts = [];
+    const siteResetCalls = [];
     page.on("pageerror", (e) => errors.push(String(e.message || e)));
     const queues = Object.fromEntries(
       Object.entries(sc.answers).map(([k, v]) => [k, [...v]])
@@ -120,8 +103,11 @@ try {
       if (path === "/card.js") return route.fulfill({ status: 200, contentType: "text/javascript", body: CARD_JS });
       if (path === "/api/greenautarky_site/sub_user/list")
         return json(200, { sub_users: [], dashboards: [], areas: [] });
-      if (path === "/api/greenautarky_site/site_reset/status")
-        return json(200, { status: { state: "accepted" }, pending: false });
+      if (path.includes("site_reset")) {
+        // The card must never reach this endpoint (withdrawn in 1.23.6).
+        siteResetCalls.push({ method: req.method(), path });
+        return json(200, { accepted: true, status: { state: "accepted" }, pending: false });
+      }
       if (req.method() === "POST" && queues[path]) {
         posts.push({ path, body: JSON.parse(req.postData() || "null") });
         const next = queues[path].shift() || [599, { message: "unexpected extra request" }];
@@ -158,9 +144,60 @@ try {
       stepError = String(e.message || e).split("\n")[0];
     }
 
-    out.scenarios[sc.name] = { posts, errors, stepError, expected };
+    out.scenarios[sc.name] = { posts, errors, stepError, expected, siteResetCalls };
     await page.close();
   }
+// What the danger zone SHOWS: no site-reset button, no radio-sensor option,
+// a note pointing to support; and no request to site_reset after every control
+// of the rendered card has been clicked.
+{
+  const page = await browser.newPage();
+  const errors = [];
+  const siteResetCalls = [];
+  page.on("pageerror", (e) => errors.push(String(e.message || e)));
+  await page.route(`${ORIGIN}/**`, async (route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    const json = (status, body) =>
+      route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    if (path === "/") return route.fulfill({ status: 200, contentType: "text/html", body: PAGE });
+    if (path === "/card.js") return route.fulfill({ status: 200, contentType: "text/javascript", body: CARD_JS });
+    if (path.includes("site_reset")) { siteResetCalls.push(path); return json(200, {}); }
+    if (path === "/api/greenautarky_site/sub_user/list")
+      return json(200, { sub_users: [], dashboards: [], areas: [] });
+    return json(404, { message: "not found: " + path });
+  });
+  await page.goto(ORIGIN + "/");
+  await page.evaluate(() => {
+    const el = document.createElement("ga-master-card");
+    el.setConfig({});
+    document.body.appendChild(el);
+    el.hass = window.__hass;
+  });
+  await page.waitForTimeout(300);
+  const dom = await page.evaluate(() => {
+    const el = document.querySelector("ga-master-card");
+    const root = el.shadowRoot || el;
+    const text = root.textContent || "";
+    return {
+      siteResetButton: !!root.querySelector(".site-reset"),
+      siteDialog: !!root.querySelector(".site-dlg"),
+      zigbeeOption: !!root.querySelector(".site-zigbee"),
+      textAllesLoeschen: text.includes("Alles löschen"),
+      textFunkSensoren: text.includes("Funk-Sensoren"),
+      householdButton: !!root.querySelector(".household-reset"),
+      householdButtonText: (root.querySelector(".household-reset") || {}).textContent || null,
+      supportNote: text.includes("wende dich bitte an den Support"),
+    };
+  });
+  // Click every button the card renders; none may reach site_reset.
+  for (const b of await page.$$("ga-master-card button:not([disabled])")) {
+    await b.click({ timeout: 1000 }).catch(() => {});
+  }
+  await page.waitForTimeout(500);
+  out.scenarios["danger_zone_dom_and_no_site_reset"] = { dom, errors, siteResetCalls, posts: [], stepError: null, expected: 0 };
+  await page.close();
+}
 } finally {
   await browser.close();
 }
