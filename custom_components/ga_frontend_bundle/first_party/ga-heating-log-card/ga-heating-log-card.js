@@ -55,7 +55,7 @@ const DEFAULT_HOURS = 72;
 
 //: A room's own modes, in the resident's words. Same mapping as
 //: ga-thermostat-card: KI = auto, MANUEL = heat, AUS = off.
-const MODE_WORDS = { auto: "KI", heat: "MANUEL", off: "AUS" };
+const MODE_WORDS = { auto: "KI", heat: "MANUELL", off: "AUS" };
 
 //: ga_heating's `source` vocabulary, in the resident's words: WHO, and then WHY
 //: where the why is not obvious from the who.
@@ -76,11 +76,23 @@ const MODE_WORDS = { auto: "KI", heat: "MANUEL", off: "AUS" };
 //: The reason is dropped where it would only restate the actor: a resident
 //: pressing a button needs no "· Bedienung" after "· Benutzer", and a hand on
 //: the radiator is still the user.
+//:
+//: "Benutzer" IS THE FALLBACK NOW, not the answer. ga_heating 0.13.7 names the
+//: account on every entry a person is behind, and `who` below uses it where it
+//: is there ("instead of benutzer can we put the username? the account i mean?",
+//: 2026-10-20). The word stays for the two cases that have no account to name:
+//: a hand on the radiator, and every entry written before 0.13.7.
+//: `named` is which sources an ACCOUNT can stand in for. It is not the same
+//: question as "is this the user's side": `valve` is the user's side and can
+//: never be named, because a hand on the radiator has no account behind it.
+//: ga_heating takes care not to put one there, and this makes a name on a
+//: `valve` entry unrenderable rather than merely unexpected — the log inventing
+//: a person is worse than the log saying less.
 const SOURCE_WORDS = {
-  resident: { who: "Benutzer", why: "" },
+  resident: { who: "Benutzer", why: "", named: true },
   valve: { who: "Benutzer", why: "" },
-  boost: { who: "Benutzer", why: "Boost" },
-  absence: { who: "Benutzer", why: "Urlaub" },
+  boost: { who: "Benutzer", why: "Boost", named: true },
+  absence: { who: "Benutzer", why: "Urlaub", named: true },
   plan: { who: "System", why: "Heizplan" },
   window: { who: "System", why: "Fenster" },
   expiry: { who: "System", why: "Zeit abgelaufen" },
@@ -176,7 +188,12 @@ function fromAttribute(changes) {
   if (!Array.isArray(changes)) return null;
   return changes
     .filter((e) => e && (e.kind === "mode" || e.kind === "target" || e.kind === "event"))
-    .map((e) => ({ when: e.at, kind: e.kind, from: e.from, to: e.to, source: e.source }));
+    // `by` is carried through with the rest. Named explicitly rather than
+    // spreading the entry: this mapping is the card's whole contract with the
+    // attribute, and a spread would let any future key ga_heating adds reach
+    // the renderer unseen.
+    .map((e) => ({ when: e.at, kind: e.kind, from: e.from, to: e.to,
+                   source: e.source, by: e.by }));
 }
 
 //: WHAT HAPPENED, for the entries that are an event rather than a value moving.
@@ -189,10 +206,28 @@ const EVENT_WORDS = {
   ichb_cancelled: { icon: "mdi:scale-balance", text: "Hydraulischer Abgleich abgebrochen" },
 };
 
+/**
+ * Who an entry names: the account ga_heating recorded, or the fixed word.
+ *
+ * ONLY WHERE THE SOURCE CAN BE A PERSON — `named` in the table above. An entry
+ * that carries a name it should not have (a stale context, a replay, a future
+ * version) still cannot put one on "System" or on a hand on the radiator.
+ *
+ * A name is text from outside the card — it is whatever somebody typed when the
+ * account was made — so it reaches the DOM through the same `esc` as a room
+ * name. `describe` returns the raw string and the renderer escapes it, which is
+ * the arrangement every other field here already has.
+ */
+function who(entry, s) {
+  if (!s || !s.named) return s ? s.who : "";
+  const name = typeof entry.by === "string" && entry.by.trim();
+  return name || s.who;
+}
+
 /** One entry as `{icon, text, why}` — the words a resident reads. */
 function describe(entry) {
   const s = SOURCE_WORDS[entry.source];
-  const why = s ? [s.who, s.why].filter(Boolean).join(" · ") : "";
+  const why = s ? [who(entry, s), s.why].filter(Boolean).join(" · ") : "";
   if (entry.kind === "event") {
     // THE ACTOR ONLY. An event names itself — "Hydraulischer Abgleich
     // abgebrochen" — so appending the reason gave "... · System ·
@@ -205,7 +240,7 @@ function describe(entry) {
     // resident cannot read still beats a line that silently disappears.
     const e = EVENT_WORDS[entry.to];
     return { icon: e ? e.icon : "mdi:information-outline",
-             text: e ? e.text : String(entry.to), why: s ? s.who : "" };
+             text: e ? e.text : String(entry.to), why: who(entry, s) };
   }
   if (entry.kind === "mode") {
     const from = MODE_WORDS[entry.from] || entry.from;
@@ -349,7 +384,11 @@ class GaHeatingLogCard extends HTMLElement {
     const last = this._entries.slice(0, this._count);
     return `<ul>${last.map((e) => {
       const d = describe(e);
-      const why = d.why ? `<span class="why"> · ${d.why}</span>` : "";
+      // ESCAPED. It used to be built only from the fixed table above, so it was
+      // safe by construction; since 0.13.7 it can carry an ACCOUNT NAME, which is
+      // whatever somebody typed when the account was made. `esc` is what every
+      // other outside string in this card already goes through.
+      const why = d.why ? `<span class="why"> · ${esc(d.why)}</span>` : "";
       return `<li><span class="when">${formatWhen(e.when, now)}</span>` +
         `<span class="what"><ha-icon icon="${d.icon}"></ha-icon>${esc(d.text)}${why}</span></li>`;
     }).join("")}</ul>`;

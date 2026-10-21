@@ -39,6 +39,9 @@ const climate = (friendly, attrs = {}) => ({
   last_updated: NOW,
 });
 
+//: Two hours of silence, so the row is produced whenever the harness runs.
+const SILENT_SINCE = new Date(Date.now() - 7200000).toISOString();
+
 const SCENARIOS = [
   {
     name: "maintenance",
@@ -48,8 +51,13 @@ const SCENARIOS = [
     states: {
       "sensor.b": { state: "10", attributes: { friendly_name: PROBE + " Batterie" } },
       "sensor.l": { state: "5", attributes: { friendly_name: PROBE } },
-      "climate.r": climate("Raum", { valves_late: { "climate.v1": { lag_s: 60 } } }),
-      "climate.v1": { state: "heat", attributes: { friendly_name: PROBE } },
+      // A room-derived row, so the probe is carried by a name the card reads
+      // from the ROOM's attributes rather than from its own config. This was
+      // `valves_late` until 2026-10-20, when that row stopped being rendered.
+      "climate.r": climate("Raum", {
+        sensor_silent: { "sensor.s1": { kind: "temperature", since: SILENT_SINCE } },
+      }),
+      "sensor.s1": { state: "19.5", attributes: { friendly_name: PROBE } },
     },
     attrs: [],
   },

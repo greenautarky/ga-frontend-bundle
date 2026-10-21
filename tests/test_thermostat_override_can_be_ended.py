@@ -173,3 +173,43 @@ def test_the_handler_reads_the_kind_off_the_button():
     when a boost was showing."""
     src = CARD.read_text(encoding="utf-8")
     assert "target.dataset.end" in src
+
+
+# ── the row is what makes "KI, 13 °C" readable (2026-10-21) ─────────────────
+# "wohnzimmer also is on KI with 13". It is not a contradiction: an override
+# OUTRANKS the room's mode while it runs and never replaces it, so the room is
+# still KI — that is what it goes back to — and 13 is the holiday winning now.
+#
+# The only thing on screen that says so is this row, which is why its wording
+# matters as much as its presence.
+
+
+def test_a_holiday_is_called_what_the_rest_of_the_product_calls_it():
+    """It read "Sonderplan", the umbrella word from when Krankheit and Urlaub
+    both existed. Krankheit was removed on 2026-10-20, so by then the word
+    appeared NOWHERE else: the Services section, its buttons and its messages
+    all say Urlaub. A room on KI showing 13 °C explained by a word the resident
+    has never seen is barely explained at all."""
+    row = _row(_running("absence"))
+    assert "Urlaub" in row, row
+    assert "Sonderplan" not in row, row
+
+
+def test_the_hint_says_it_too():
+    row = _row(_running("absence"))
+    assert "Bis zum Ende des Urlaubs" in row, row
+
+
+def test_a_room_on_KI_still_gets_the_row():
+    """THE CASE THAT PROMPTED IT. A holiday does not change the room's mode —
+    ga_heating's `_HEAT_NOW` is only boost and the balancing run — so a room
+    sits on KI for the whole holiday with the holiday's number showing. Without
+    this row the two read as a bug."""
+    row = run_js(
+        CARD,
+        "Object.create(GaThermostatCard.prototype)._overrideRow("
+        '{state: "auto", attributes: {override: '
+        '{absence: {active: true, temp: 13, end: "2099-01-01T00:00:00+00:00"}}}})',
+    )
+    assert "Urlaub" in row, row
+    assert "Beenden" in row, row

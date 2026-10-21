@@ -7,7 +7,17 @@ on:
 jobs:
   test:
     name: lint + unit + integrity
-    runs-on: ubuntu-latest
+    # PINNED, not `ubuntu-latest`. GitHub rolled that label to 26.04 and
+    # Playwright 1.58.2 refuses the image outright — "Playwright does not
+    # support chromium on ubuntu26.04-x64" — so the browser proofs below could
+    # not install their runtime and the whole job went red on unchanged code.
+    # Main's last green run was 2026-10-14, before the roll.
+    #
+    # The browser steps FAIL rather than skip when their runtime is missing,
+    # which is deliberate (see below) and means a runner the browser cannot be
+    # installed on takes the gate down with it. Pin the image to one Playwright
+    # supports and lift it when the pinned version does support the new one.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

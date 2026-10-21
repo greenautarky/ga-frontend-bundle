@@ -23,7 +23,7 @@ def test_card_talks_only_to_climate_services():
 def test_card_has_aus_manuel_ki_modes():
     src = CARD.read_text(encoding="utf-8")
     assert '["auto", "KI"' in src
-    assert '["heat", "MANUEL"' in src
+    assert '["heat", "MANUELL"' in src
     assert '["off", "AUS"' in src
 
 

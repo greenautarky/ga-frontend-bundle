@@ -55,7 +55,7 @@ const PENDING_TTL_MS = 8000;
 //: called are unchanged.
 const MODE_LABELS = [
   ["off", "AUS", "mdi:power"],
-  ["heat", "MANUEL", "mdi:hand-back-left"],
+  ["heat", "MANUELL", "mdi:hand-back-left"],
   ["auto", "KI", "mdi:brain"],
 ];
 
@@ -306,7 +306,7 @@ class GaThermostatCard extends HTMLElement {
     }
   }
   /**
-   * End a running boost or Sonderplan for THIS room, and nothing else.
+   * End a running boost or Urlaub for THIS room, and nothing else.
    *
    * NO MODE IS SENT WITH IT, which is the whole reason this is its own path and
    * not a press on KI. An override wins over the room's stored decision while it
@@ -401,16 +401,27 @@ class GaThermostatCard extends HTMLElement {
       ["ichb", "Abgleich läuft", "mdi:scale-balance",
        "Hydraulischer Abgleich — danach gilt wieder der Plan", null],
       ["boost", "Boost", "mdi:rocket-launch-outline", "Danach gilt wieder der Plan", "boost"],
-      // "Sonderplan", not "Urlaub": ga_heating stores ONE absence override, and
-      // the Krankheit and Urlaub forms on the actions card both write it. The
-      // card cannot tell them apart, and guessing told a resident who had just
-      // entered a sickness that they were on holiday (reported 2026-10-05).
-      // "Sonderplan" is the product's own umbrella word and is true of both.
+      // "Urlaub" SINCE 2026-10-21, and the reason the umbrella word existed is
+      // gone with it.
       //
-      // Carrying the kind would need ga_heating to store it — and a dashboard on
-      // a wall saying "Krank" records why somebody is at home, which is a
-      // decision about health data, not a label.
-      ["absence", "Sonderplan", "mdi:calendar-clock", "Bis zum Ende des Sonderplans", "absence"],
+      // It read "Sonderplan" because ga_heating stores ONE absence override and
+      // the Krankheit and Urlaub forms both wrote it, so the card could not tell
+      // them apart — guessing once told a resident who had just entered a
+      // sickness that they were on holiday (2026-10-05). Krankheit was removed
+      // from the actions card on 2026-10-20 ("remove krankheit"), so a holiday
+      // is now the only absence a resident can enter, and the word is safe.
+      //
+      // IT ALSO HAD TO CHANGE. The room view is where this is read: a room on KI
+      // showing 13 °C looks like a contradiction until something names what is
+      // overriding it, and "Sonderplan" was a word that by then appeared nowhere
+      // else in the product — the Services section, its buttons and its messages
+      // all say Urlaub ("wohnzimmer also is on KI with 13", 2026-10-21).
+      //
+      // The residual cost, written down rather than discovered: an absence set
+      // over the API with an hours-style window — the sickness shape, which no
+      // screen can produce any more — is now labelled a holiday. Mislabelling an
+      // override nobody can create beats a label nobody recognises.
+      ["absence", "Urlaub", "mdi:calendar-clock", "Bis zum Ende des Urlaubs", "absence"],
     ];
     for (const [key, label, icon, hint, end] of kinds) {
       const o = ov[key];

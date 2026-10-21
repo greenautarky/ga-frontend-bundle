@@ -134,13 +134,26 @@ function linkBand(lqi) {
   return LINK_BANDS.find((b) => lqi <= b.at) || null;
 }
 
-//: A radiator that answered our own write late enough to be mistaken for a hand
-//: on the dial. ga_heating publishes these per room as `valves_late`; it is the
-//: cause behind "the room went to MANUEL by itself", which is otherwise invisible
-//: here (reported 2026-10-06 on a resident device: 58 s late after a balancing
-//: run). Under 30 s is not said: a TRV reports on its own cycle, and a few seconds
-//: behind is normal.
-const LATE_SECONDS_WORTH_SAYING = 30;
+//: NOT SHOWN HERE ANY MORE, deliberately. ga_heating still records every one of
+//: them on the room as `valves_late` — a radiator that answered our own write
+//: late ("antwortet verzögert"), and one that answered with a setpoint of its
+//: own ("setzt eigenen Sollwert") — and still logs them. The card simply stopped
+//: rendering them on 2026-10-20:
+//:
+//:   "that not something to include in the maintenance section, that a normal
+//:    behavior, also the time it takes for teh command to be applied is not of
+//:    interest to the user, we can keep this information hidden and logged in
+//:    ga heating but dont show it"
+//:
+//: He is right about who it is for. A TRVZB restoring its stored setpoint when
+//: we switch it to `heat` is firmware habit, not a fault, and ga_heating already
+//: forgives it and drives the valve back; a 66 s answer is the radio being slow,
+//: which nobody can act on by visiting the flat. Wartung is "what needs a
+//: person" — a battery to buy, a sensor that stopped talking — and a line that
+//: needs no person is how a maintenance section stops being read.
+//:
+//: Read them from `valves_late` on the room entity, or from the ga_heating log,
+//: when diagnosing "the room went to MANUEL by itself".
 
 //: Within one level, which KIND is read first: a battery outranks the radio, the
 //: radio outranks what the radio cost us. Without it the sort keys of different
@@ -157,7 +170,7 @@ const SAFE_ICON = /^mdi:[a-z0-9-]+$/;
 
 //: and the room falls to the house average, so until somebody acts the room is
 //: being heated on a number that is not its own.
-const KIND_RANK = { sensor: 0, battery: 1, link: 2, late: 3 };
+const KIND_RANK = { sensor: 0, battery: 1, link: 2 };
 
 //: How long ga_heating has to have heard nothing before it stops believing a room
 //: sensor (ROOM_SENSOR_SILENCE, three hours). Not re-decided here — the card only
@@ -224,38 +237,6 @@ function maintenanceRows(states, batteries, extra) {
       name: deviceName(states[id]) || "Gerät",
       detail: band.word,
       sort: lqi,
-    });
-  }
-
-  // A LATE RADIATOR, read from the room ga_heating publishes it on. No threshold
-  // band: ga_heating only records an answer it had to forgive, so the entry
-  // existing IS the finding — except a lag under 30 s, which is a TRV's own
-  // reporting cycle and not worth a line.
-  //
-  // A RADIATOR THAT ANSWERED WITH ITS OWN SETPOINT (ga_heating 0.13.3,
-  // `substituted`: how many times). Switched to `heat`, a TRVZB restores the
-  // setpoint it last stored instead of keeping ours, so its answer is on time
-  // (lag about 0) but carries a value we never sent. The lag rule above would
-  // hide it, so it is said on its own; when one radiator has done both, one line
-  // says both, because the row names a device and a device gets one line.
-  const late = ((states[climate] || {}).attributes || {}).valves_late || {};
-  for (const [valve, info] of Object.entries(late)) {
-    const lag = Number((info || {}).lag_s);
-    const isLate = Number.isFinite(lag) && lag >= LATE_SECONDS_WORTH_SAYING;
-    const subs = Number((info || {}).substituted);
-    const isSubstituted = Number.isFinite(subs) && subs > 0;
-    if (!isLate && !isSubstituted) continue;
-    const said = [];
-    if (isLate) said.push(`antwortet verzögert (${Math.round(lag)} s)`);
-    if (isSubstituted) {
-      said.push(`setzt eigenen Sollwert${subs > 1 ? ` (${Math.round(subs)}×)` : ""}`);
-    }
-    rows.push({
-      kind: "late", level: "low",
-      icon: isLate ? "mdi:timer-sand" : "mdi:swap-horizontal",
-      name: deviceName(states[valve]) || "Heizkörper",
-      detail: said.join(", "),
-      sort: 1000 - (isLate ? lag : 0),
     });
   }
 

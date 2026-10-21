@@ -66,8 +66,8 @@ def render(variant, state, hvac_action):
 
 def test_the_row_reads_aus_manuel_ki():
     src = CARD.read_text(encoding="utf-8")
-    labels = re.findall(r'\["(off|heat|auto)", "(AUS|MANUEL|KI)"', src)
-    assert labels == [("off", "AUS"), ("heat", "MANUEL"), ("auto", "KI")]
+    labels = re.findall(r'\["(off|heat|auto)", "(AUS|MANUELL|KI)"', src)
+    assert labels == [("off", "AUS"), ("heat", "MANUELL"), ("auto", "KI")]
 
 
 def test_each_button_still_carries_its_own_mode():

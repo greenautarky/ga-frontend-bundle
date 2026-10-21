@@ -154,3 +154,82 @@ def test_the_card_ships_no_header_by_default():
     assert 'const title = this._config.title ?? "";' in src
     assert '"Heizplan"' not in src.split("_header()")[1][:200]
     assert 'return title ? ` header="${esc(title)}"` : "";' in src
+
+
+# ── the holiday's own plan (2026-10-21) ────────────────────────────────────
+# A holiday no longer sits on top of the plan as an override — it REPLACES it,
+# so the radiators can run it in their own `auto` and their displays say `auto`
+# instead of "Manual 15". ga_heating holds the resident's real plan while it
+# runs and puts it back afterwards.
+#
+# Which means this card shows seven identical days during a holiday. Without
+# the notice that is indistinguishable from a plan that has been wiped.
+
+
+def test_the_card_says_when_a_holiday_plan_is_running():
+    """ONE FACT ON THE LINE: what is running and until when. No temperature —
+    every row of the week below already shows it, and the banner repeating it
+    says the same number twice."""
+    src = CARD.read_text(encoding="utf-8")
+    assert "Urlaubsplan aktiv" in src
+    assert "fmtTemp" not in src, "the banner should not restate the setpoint"
+
+
+def test_the_rest_is_behind_an_i_like_the_services_card():
+    """The page is for the plan, not for paragraphs about it — the same shape
+    the Services section already uses."""
+    src = CARD.read_text(encoding="utf-8")
+    assert 'class="infobtn"' in src
+    assert 'aria-expanded' in src
+    # The two things a resident needs from it: it comes back, and how to change
+    # it now. Whitespace-normalised because the sentence wraps in the template,
+    # and a substring check against the raw source fails on correct markup.
+    flat = " ".join(src.split())
+    assert "gilt wieder, sobald der Urlaub vorbei ist" in flat
+    assert "beenden Sie den Urlaub" in flat
+
+
+def test_the_explanation_starts_closed():
+    """A panel open on arrival is the extra text the "i" exists to remove."""
+    src = CARD.read_text(encoding="utf-8")
+    assert '<div class="urlaubtip" hidden>' in src
+
+
+def test_the_week_is_read_only_while_it_runs():
+    """The week on screen is the holiday's, not the resident's. Saving an edit
+    to it would be overwritten when the holiday ended, and the edit would
+    vanish without ever being wrong enough to report."""
+    src = CARD.read_text(encoding="utf-8")
+    assert 'classList.toggle("locked"' in src
+    style = src[src.index("<style>"):src.index("</style>")]
+    assert "ga-heating-card.locked .actions button" in style
+    assert "pointer-events:none" in style
+
+
+def test_the_controls_stay_visible_rather_than_disappearing():
+    """Hiding them would read as the feature having been removed."""
+    style = CARD.read_text(encoding="utf-8")
+    locked = style[style.index("ga-heating-card.locked"):]
+    locked = locked[:locked.index("}") + 1]
+    assert "display:none" not in locked, locked
+
+
+def test_the_plan_is_reloaded_when_a_holiday_starts_or_ends():
+    """The plan under this card is swapped by the ENGINE, not by the card:
+    without a reload a holiday starting leaves the resident's week on screen,
+    and one ending leaves the flat one."""
+    src = CARD.read_text(encoding="utf-8")
+    sync = src[src.index("_syncUrlaub() {"):]
+    sync = sync[:sync.index(chr(10) + "  }")]
+    assert "this._load()" in sync, sync
+    # …but not on the very first pass, where the builder has just loaded
+    assert "first" in sync
+
+
+def test_an_off_holiday_does_not_claim_a_plan():
+    """"Aus · Frostschutz" has no temperature to build a week from, so the
+    engine leaves the plan alone — and so must the notice."""
+    src = CARD.read_text(encoding="utf-8")
+    u = src[src.index("_urlaub() {"):]
+    u = u[:u.index(chr(10) + "  }")]
+    assert "a.off" in u, u

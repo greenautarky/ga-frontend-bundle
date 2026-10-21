@@ -15,6 +15,8 @@ These run the SHIPPED bytes in a VM (tests/js/eval.mjs).
 
 from __future__ import annotations
 
+import json
+
 from test_rendered_output import STRATEGY, run_js
 
 
@@ -214,7 +216,8 @@ def test_the_valves_own_thermometer_is_not_a_second_curve():
     """It reads the radiator, not the room — the reason calibration.py exists."""
     g = _temp_graph(_ROOM, _VALVE_STATES)
     assert g is not None, "no temperature graph built — the test would be vacuous"
-    assert g["entities"] == [{"entity": "sensor.wz_t", "name": "Raum Temperatur"}]
+    assert g["entities"] == [
+        {"entity": "sensor.wz_t", "name": "Raum Temperatur", "color": "blue"}]
 
 
 def test_the_title_says_letzte_24h():
@@ -228,7 +231,10 @@ def test_a_room_whose_only_thermometer_is_the_valve_keeps_it_unrenamed():
             ' temps: ["sensor.0xdead_local_temperature"],'
             ' hums: [], batts: [], lights: [], switches: [] }')
     g = _temp_graph(room, _VALVE_STATES)
-    assert g["entities"] == ["sensor.0xdead_local_temperature"]
+    # No `name` — that is the point of the test. It is an object rather than a
+    # bare id only because every series carries a colour now.
+    assert g["entities"] == [
+        {"entity": "sensor.0xdead_local_temperature", "color": "blue"}]
 
 
 def test_two_real_room_sensors_are_both_drawn_and_keep_their_names():
@@ -243,7 +249,12 @@ def test_two_real_room_sensors_are_both_drawn_and_keep_their_names():
     room = ('{ name: "WZ", climate: ["climate.wz"],'
             ' temps: ["sensor.wz_t", "sensor.wz_t2"],'
             ' hums: [], batts: [], lights: [], switches: [] }')
-    assert _temp_graph(room, states)["entities"] == ["sensor.wz_t", "sensor.wz_t2"]
+    # Two colours, not one repeated: a legend with two identical swatches names
+    # the same thing twice as surely as two identical labels would.
+    assert _temp_graph(room, states)["entities"] == [
+        {"entity": "sensor.wz_t", "color": "blue"},
+        {"entity": "sensor.wz_t2", "color": "deep-purple"},
+    ]
 
 
 def test_the_humidity_curve_is_named_too_so_no_mean_suffix_leaks():
@@ -264,7 +275,8 @@ def test_the_humidity_curve_is_named_too_so_no_mean_suffix_leaks():
     }})()"""
     g = run_js(STRATEGY, expr)
     assert g is not None, "no humidity graph built — the test would be vacuous"
-    assert g["entities"] == [{"entity": "sensor.wz_h", "name": "Raum Luftfeuchtigkeit"}]
+    assert g["entities"] == [
+        {"entity": "sensor.wz_h", "name": "Raum Luftfeuchtigkeit", "color": "blue"}]
     assert g["title"] == "Luftfeuchtigkeit letzte 24h"
 
 
@@ -345,10 +357,14 @@ def test_every_graph_card_styles_away_HAs_history_chevron():
       return roomSections({_ROOM_SRC}, gaOptions({{}}), hass)
         .flatMap(s => s.cards || [])
         .filter(c => c.type === "statistics-graph")
-        .map(c => [c.title, (c.card_mod || {{}}).style || ""]);
+        .map(c => {{
+          const st = (c.card_mod || {{}}).style || {{}};
+          const nested = (st["statistics-chart$"] || {{}})["ha-chart-base$"] || "";
+          return [c.title, st["."] || "", nested];
+        }});
     }})()""")
     assert cards, "no graph built — the test would be vacuous"
-    for title, style in cards:
+    for title, style, legend in cards:
         assert title, "the title belongs on the card"
         assert "a { display: none; }" in style, (
             f"{title!r} would show HA's history chevron"
@@ -356,6 +372,21 @@ def test_every_graph_card_styles_away_HAs_history_chevron():
         # that header is an <h1>, styled for a page title; it sits under two
         # headings on a room view and must not shout over them
         assert "font-size: 16px" in style, f"{title!r} keeps HA's page-title size"
+        # THE LEGEND SWATCH, and the PATH TO IT. The card renders
+        # <statistics-chart>, which renders <ha-chart-base>, which draws the
+        # legend — three roots. The first attempt stopped at `ha-chart-base$`
+        # from the card and silently did nothing, because card-mod drops a
+        # selector that matches nothing: a wrong path and a working one that
+        # had no effect look identical on screen. So the NESTED key is what is
+        # asserted here, not merely that the CSS exists somewhere.
+        assert "background: currentColor" in legend, (
+            f"{title!r}: the legend CSS is not under "
+            '"statistics-chart$" -> "ha-chart-base$", so it reaches nothing'
+        )
+        # A hidden series must stay tellable from a shown one: the swatch is
+        # the button that toggles its curve, and HA draws that state as an
+        # outline we leave alone.
+        assert "li.hidden" in legend, f"{title!r} hides nothing visibly"
 
 
 # ── the outdoor series (2026-10-02) ─────────────────────────────────────────
@@ -439,8 +470,25 @@ _ROOM = ('{ name: "Wohnzimmer", area_id: "wohnzimmer", climate: ["climate.wz"],'
          ' lights: [], switches: [] }')
 
 
-def test_the_heading_is_the_room_name():
-    assert _heading(_ROOM, _STATES)["heading"] == "Wohnzimmer"
+def test_the_heading_carries_no_title_any_more():
+    """The room name moved INTO the thermostat card on 2026-10-21, where it
+    took the place the running state had. A heading repeating it would be the
+    third telling of one word on one screen — the tab says it too."""
+    assert _heading(_ROOM, _STATES)["heading"] == ""
+
+
+def test_the_room_name_is_on_the_thermostat_card_instead():
+    """Where it went, asserted here so the two halves cannot drift apart: a
+    heading that lost its title and a card that never gained one would leave
+    the room unnamed on its own view."""
+    cards = run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {_STATES} }};
+      return roomSections({_ROOM}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => String(c.type).includes("thermostat"))
+        .map(c => c.header);
+    }})()""")
+    assert cards and all(h == "Wohnzimmer" for h in cards), cards
 
 
 def test_the_heading_carries_no_icon():
@@ -449,10 +497,18 @@ def test_the_heading_carries_no_icon():
     assert "icon" not in _heading(_ROOM, _STATES), _heading(_ROOM, _STATES)
 
 
-def test_a_room_with_no_name_still_has_a_heading():
-    """MUST-NOT-FLAG: the area id is a poor title but an empty one is worse."""
+def test_a_room_with_no_name_falls_back_to_its_area_id_on_the_CARD():
+    """MUST-NOT-FLAG: the area id is a poor name but an unnamed room is worse,
+    and the fallback moved to the card with the name."""
     room = _ROOM.replace('name: "Wohnzimmer"', 'name: ""')
-    assert _heading(room, _STATES)["heading"] == "wohnzimmer"
+    got = run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {_STATES} }};
+      return roomSections({room}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => String(c.type).includes("thermostat"))
+        .map(c => c.header);
+    }})()""")
+    assert got == ["wohnzimmer"], got
 
 
 def test_aktuell_labels_the_readings_and_comes_first():
@@ -480,3 +536,164 @@ def test_the_label_is_dropped_when_there_is_no_room_entity():
         .flatMap(h => (h.badges || []).map(b => b.name));
     }})()""")
     assert "Aktuell" not in names, names
+
+
+# ── the outdoor curve is told apart by COLOUR (2026-10-21) ─────────────────
+# "check what possibilities do we have to differetiate the ausser temp using
+# the same card type from ha that we originally have".
+#
+# Read off HA 2026.8.2.1's own editor schema: per card it takes chart_type,
+# days_to_show, period, unit, stat_types, title, hide_legend, expand_legend,
+# min/max_y_axis, fit_y_data, logarithmic_scale; per ENTITY it takes entity,
+# name and COLOR. There is no per-series line style and no way to reach one —
+# the card's chunk carries no `lineStyle` and the chart is a canvas, where no
+# CSS can dash a line. So colour is the lever, and these pin it.
+
+
+def _graph_colors(cfg: str):
+    expr = f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {_OUT_STATES} }};
+      return roomSections({_OUT_ROOM}, gaOptions({cfg}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => c.type === "statistics-graph")
+        .map(c => c.entities.map(e => [e.name || e.entity, e.color]));
+    }})()"""
+    return run_js(STRATEGY, expr)
+
+
+_BOTH = ('{ outdoor_temperature: "sensor.aussentemperatur",'
+         ' outdoor_humidity: "sensor.aussenluftfeuchtigkeit" }')
+
+
+def test_the_outdoor_curve_carries_its_own_colour():
+    for chart in _graph_colors(_BOTH):
+        assert chart[-1][1] == "deep-orange", chart
+
+
+def test_the_rooms_curve_is_never_the_outdoor_colour():
+    """Left to itself the card colours by POSITION, so the room's own curve
+    could land on whatever the outdoor one has."""
+    for chart in _graph_colors(_BOTH):
+        for name, color in chart[:-1]:
+            assert color != "deep-orange", (name, color)
+
+
+def test_the_colour_belongs_to_the_entity_not_its_position():
+    """THE RULE. A room that gains a second thermometer must not hand the
+    outdoor curve a new colour — "the orange one is outside" has to hold in
+    every room and after every change."""
+    one = _graph_colors(_BOTH)
+    assert one[0][0][1] == "blue", one[0]
+    assert one[0][-1][1] == "deep-orange", one[0]
+
+
+def test_a_second_thermometer_gets_a_colour_safe_against_both_others():
+    """MEASURED, not picked. The second room colour was teal until 2026-10-21:
+    fine for protan/deutan at ΔE 11.9, but 7.0 under tritan — below the ≥8
+    target. Deep-purple holds 17.3 CVD and 24.0 tritan against both blue and
+    deep-orange, on all pairs, on both card surfaces."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert 'const ROOM_COLORS = ["blue", "deep-purple"' in src, (
+        "the second room curve must be the colour that survives tritanopia")
+
+
+def test_the_outdoor_colour_is_not_a_status_colour():
+    """Red clears every measurable gate and is still wrong: on a heating
+    dashboard red reads as a fault, and the weather outside is not one."""
+    src = STRATEGY.read_text(encoding="utf-8")
+    assert 'const OUTDOOR_COLOR = "deep-orange"' in src
+
+
+def test_a_chart_without_an_outdoor_entity_still_colours_the_room():
+    for chart in _graph_colors("{}"):
+        assert all(c for _, c in chart), chart
+
+
+# ── the outdoor group (2026-10-21) ──────────────────────────────────────────
+# "i need to show the current outdoor temperature as well", then "add aussen
+# like we have aktuell before it. also add outdoor humidity".
+#
+# The row is two groups of the same shape, a word then its numbers:
+#
+#     Außen 12,3 °C 79 %            Aktuell 21,5 °C 49 %
+#
+# split left/right by one card_mod rule, because HA pins every badge right.
+
+
+_OUT_CFG = ('{ outdoor_temperature: "sensor.aussentemperatur",'
+            ' outdoor_humidity: "sensor.aussenluftfeuchtigkeit" }')
+
+_OUT_STATES2 = """{
+  "climate.wz": { state: "auto", attributes: { current_temperature: 21.5,
+                  current_humidity: 49, temperature: 21, valves: [],
+                  temperature_source: "sensor.wz_t" } },
+  "sensor.wz_t": { state: "21.5", attributes: { device_class: "temperature" } },
+  "sensor.wz_h": { state: "49", attributes: { device_class: "humidity" } },
+  "sensor.aussentemperatur": { state: "12.3", attributes: { device_class: "temperature" } },
+  "sensor.aussenluftfeuchtigkeit": { state: "79", attributes: { device_class: "humidity" } }
+}"""
+
+
+def _head(cfg: str, states: str = _OUT_STATES2):
+    return json.loads(run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
+      const h = roomSections({_ROOM}, gaOptions({cfg}), hass)
+        .flatMap(s => s.cards || []).find(c => c.type === "heading");
+      return JSON.stringify({{ names: h.badges.map(b => b.name),
+        labels: h.badges.filter(b => b.state_content === "name").map(b => b.name),
+        style: (h.card_mod || {{}}).style || "" }});
+    }})()"""))
+
+
+def test_the_outdoor_group_comes_first_and_is_labelled_like_the_room_is():
+    got = _head(_OUT_CFG)
+    assert got["names"] == ["Außen", "Temperatur", "Luftfeuchtigkeit",
+                            "Aktuell", "Temperatur", "Luftfeuchtigkeit"], got
+
+
+def test_both_groups_open_with_a_word_not_a_number():
+    """The label badge is an entity badge whose content is its own NAME, which
+    is what makes it render as icon + word. Without it the row would read as
+    four numbers with nothing saying which two are outside."""
+    assert _head(_OUT_CFG)["labels"] == ["Außen", "Aktuell"], _head(_OUT_CFG)
+
+
+def test_the_split_follows_the_size_of_the_outdoor_group():
+    """HA pins every badge right, so one rule pushes the row apart: the LAST
+    outdoor badge takes `margin-right: auto`. The index is counted, never
+    assumed — the humidity is optional, and a hard-coded one would strand the
+    room's own readings on the left the day a device configures only one."""
+    assert "nth-child(3)" in _head(_OUT_CFG)["style"]
+    assert "nth-child(2)" in _head('{ outdoor_temperature: "sensor.aussentemperatur" }')["style"]
+    assert "nth-child(2)" in _head('{ outdoor_humidity: "sensor.aussenluftfeuchtigkeit" }')["style"]
+
+
+def test_no_outdoor_entities_means_no_group_and_no_rule():
+    """MUST-NOT-FLAG. With no outdoor badge the rule would strand "Aktuell" on
+    the left, away from the numbers it labels."""
+    got = _head("{}")
+    assert got["names"] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], got
+    assert got["style"] == "", got
+
+
+def test_an_outdoor_entity_that_does_not_exist_is_left_out():
+    """A name in a config that no longer resolves must leave the row with the
+    room's own readings rather than a badge reading "unknown"."""
+    got = _head('{ outdoor_temperature: "sensor.gone", outdoor_humidity: "sensor.also_gone" }')
+    assert got["names"] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], got
+    assert got["style"] == "", got
+
+
+def test_the_two_groups_differ_only_by_their_label_icon():
+    """The readings ARE the same two measurements, so they take the same
+    thermometer and droplet; the sun against the house is what says which side
+    of the wall they were taken on."""
+    icons = json.loads(run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {_OUT_STATES2} }};
+      const h = roomSections({_ROOM}, gaOptions({_OUT_CFG}), hass)
+        .flatMap(s => s.cards || []).find(c => c.type === "heading");
+      return JSON.stringify(h.badges.map(b => b.icon || null));
+    }})()"""))
+    assert icons[0] == "mdi:sun-thermometer-outline", icons
+    assert icons[3] == "mdi:home-thermometer-outline", icons
+    assert icons[1] == icons[4] == "mdi:thermometer", icons

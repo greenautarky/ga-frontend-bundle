@@ -119,7 +119,7 @@ def test_modes_are_named_as_the_resident_knows_them():
         CARD,
         'JSON.stringify(describe({kind:"mode", from:"auto", to:"heat"}))',
     ))
-    assert d["text"] == "KI → MANUEL"
+    assert d["text"] == "KI → MANUELL"
 
 
 def test_a_setpoint_entry_reads_as_an_observation_not_an_attribution():
@@ -512,3 +512,113 @@ def test_an_icon_that_is_not_an_icon_is_refused():
     for bad in ('mdi:x" onload="alert(1)', "javascript:alert(1)", "<img src=x>"):
         assert not json.loads(run_js(CARD, f"JSON.stringify(SAFE_ICON.test({json.dumps(bad)}))"))
     assert json.loads(run_js(CARD, 'JSON.stringify(SAFE_ICON.test("mdi:history"))'))
+
+
+# ── the account that acted (ga_heating 0.13.7) ──────────────────────────────
+#
+# "instead of benutzer can we put the username? the account i mean?"
+# (2026-10-20). ga_heating now records the display name of the account behind a
+# change, and this card renders it where "Benutzer" used to stand.
+#
+# "Benutzer" is the FALLBACK, not the answer, and these tests are mostly about
+# the cases that must keep it: a hand on the radiator has no account, every
+# entry written before 0.13.7 has none, and nothing our own executor does is a
+# person however the attribute arrives.
+
+
+def _why(entry):
+    return json.loads(run_js(CARD, f"JSON.stringify(describe({json.dumps(entry)}).why)"))
+
+
+def _mode(**kw):
+    return dict({"kind": "mode", "from": "auto", "to": "heat"}, **kw)
+
+
+def test_an_entry_with_an_account_names_it():
+    assert _why(_mode(source="resident", by="ahmad")) == "ahmad"
+
+
+def test_the_account_replaces_the_word_and_keeps_the_reason():
+    """"ahmad · Boost" — the reason is about the override, not about the actor,
+    so naming the actor must not drop it."""
+    assert _why(_mode(source="boost", by="ahmad")) == "ahmad · Boost"
+    assert _why(_mode(source="absence", by="bijan")) == "bijan · Urlaub"
+
+
+def test_two_accounts_are_told_apart():
+    """THE ASK. In a flat with one account the change says nothing; the whole
+    point is the flat where "Benutzer" could have been either of them."""
+    assert _why(_mode(source="resident", by="ahmad")) != _why(
+        _mode(source="resident", by="bijan"))
+
+
+def test_an_entry_from_before_the_name_existed_still_says_benutzer():
+    """The ring holds 20 per room, so entries recorded before ga_heating 0.13.7
+    are on screen for days after the upgrade."""
+    assert _why(_mode(source="resident")) == "Benutzer"
+
+
+def test_a_hand_on_the_radiator_is_never_named():
+    """MUST-NOT-FLAG, and the reason the card has its own guard rather than
+    trusting the attribute. `_take_over_manually` runs from a state-change
+    callback, where the entity's `_context` still holds whichever service call
+    last targeted it — so a dial turn moments after somebody pressed something
+    on the card is exactly where a wrong name would come from. ga_heating does
+    not send one; this makes it unrenderable if it ever did."""
+    assert _why(_mode(source="valve")) == "Benutzer"
+    assert _why(_mode(source="valve", by="ahmad")) == "Benutzer"
+
+
+@pytest.mark.parametrize("source, expected", [
+    ("plan", "System · Heizplan"),
+    ("window", "System · Fenster"),
+    ("expiry", "System · Zeit abgelaufen"),
+    ("balancing", "System · Einregulierung"),
+])
+def test_nothing_the_system_does_can_be_given_a_name(source, expected):
+    assert _why(_mode(source=source, by="ahmad")) == expected
+
+
+@pytest.mark.parametrize("by", ["", "   ", 42, None, [], {}])
+def test_a_name_that_is_not_a_name_falls_back(by):
+    """ga_heating strips and drops an empty one, so these should not arrive —
+    but the card renders whatever the attribute holds, and a dangling " · "
+    with nothing after it is worse than the word it replaced."""
+    assert _why(_mode(source="resident", by=by)) == "Benutzer"
+
+
+def test_an_event_line_names_the_account_too():
+    """The event branch builds `why` separately — it drops the reason because an
+    event names itself — and had its own copy of the actor."""
+    why = _why({"kind": "event", "to": "ichb_started", "source": "resident",
+                "by": "GreenAutarky Admin"})
+    assert why == "GreenAutarky Admin"
+
+
+def test_the_name_reaches_the_renderer_from_the_attribute():
+    """`fromAttribute` names every field it copies, so a new key ga_heating adds
+    is invisible until it is listed. `by` was exactly that: the card rendered
+    "Benutzer" for an entry that carried a name, and only the unit test on
+    `describe` would have caught it (browser, 2026-10-20)."""
+    out = json.loads(run_js(
+        CARD,
+        "JSON.stringify(fromAttribute("
+        + json.dumps([{"at": "2026-10-20T21:00:00+02:00", "kind": "mode",
+                       "from": "auto", "to": "heat", "source": "resident",
+                       "by": "ahmad"}])
+        + "))"))
+    assert out[0]["by"] == "ahmad", out
+
+
+def test_an_account_name_is_rendered_as_text_not_as_markup():
+    """A name is whatever somebody typed when the account was made. `why` used to
+    be built only from the fixed table, so it was interpolated unescaped — safe
+    by construction until this change made it carry outside text."""
+    html = run_js(
+        CARD,
+        "(() => { const d = describe(" + json.dumps(
+            {"kind": "mode", "from": "auto", "to": "heat", "source": "resident",
+             "by": "<img src=x onerror=alert(1)>"}) + ");"
+        " return `<span class=\"why\"> \u00b7 ${esc(d.why)}</span>`; })()")
+    assert "<img" not in html, html
+    assert "&lt;img" in html, html
