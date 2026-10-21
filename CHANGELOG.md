@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.23.7 — 2026-10-21
+
+Services rebuild and "Urlaub as a plan" by @ahmad-greenautarky, merged as #55. Developed card by card against KIB-SON-00000055.
+
+- Services: every action is the whole flat — the room picker is gone, so the scope can never disagree with the buttons. Boost / Alle → KI / Alle AUS sit in one row at every width (they used to stack on phones). Hydraulic balancing is shown only when the strategy sets `show_ichb: true`. Explanations moved behind "i" buttons.
+- Urlaub: its own section, the form is the section (no "Bearbeiten"); date fields keep what is typed (the markup no longer carries values, so a state push no longer rebuilds the field being edited). "Krankheit" and the "Aus · Frostschutz" option are removed; times are hourly.
+- Room view: the thermostat card carries the room name in its header; two groups (readings / control); optional outdoor temperature and humidity badges from the strategy options; fixed chart colours. Wartung no longer lists late valves.
+- Heating card: "Urlaubsplan aktiv bis …" banner and a read-only plan while a holiday runs. The log names the account that acted.
+- Wording: "Sonderplan" → "Urlaub", "MANUEL" → "MANUELL".
+- Removed for residents (support note): room picker, Krankheit, Frostschutz checkbox, "Bearbeiten", quarter-hour times, valves_late rows.
+
+> **Needs ga_heating 0.13.7** for the held holiday plan and the account name in the log. On ga_heating 0.13.6 the card still works (same absence API); the "Urlaubsplan aktiv" banner then locks the editor although the plan is not actually held there.
+
+Known follow-ups are tracked in Odoo #1316 (Alle → KI ends a running holiday without saying so; no confirmation on Alle AUS).
+
 ## 1.23.6 — 2026-10-14
 
 Protective hotfix: the full-site reset is withdrawn from the "Haushalt verwalten" card.
