@@ -252,7 +252,10 @@ def test_the_boost_hint_never_claims_a_valve_position():
         " return hintText; })()",
     )
     assert "100" not in hint
-    assert "Ventile kurzzeitig ganz öffnen" in hint
+    # A whole sentence, not a parenthetical: it is no longer tucked after the
+    # heading but sitting alone in the panel the "i" opens, where a fragment in
+    # brackets reads like a caption with nothing to caption.
+    assert hint == "Öffnet die Ventile kurzzeitig ganz.", hint
 
 
 def test_switching_everything_off_offers_a_way_back():
@@ -421,7 +424,12 @@ def test_the_holiday_form_uses_a_select_not_a_native_time_input():
     markup = rendered_fields("holiday")
     assert 'type="time"' not in markup
     assert 'class="endtime"' in markup and 'class="starttime"' in markup
-    assert '<option value="14:30"' in markup
+    assert '<option value="14:00"' in markup
+    # WHOLE HOURS ONLY. 96 quarter-hours is a scroll of three screens to say
+    # "Tuesday"; a holiday is not booked to the quarter hour.
+    assert '<option value="14:15"' not in markup
+    assert '<option value="14:30"' not in markup
+    assert markup.count("<option") == 48, markup.count("<option")
 
 
 def test_the_sickness_form_asks_for_hours_not_for_dates():
@@ -876,7 +884,10 @@ def test_boost_acts_on_every_room_with_no_picker_to_get_wrong():
     merely absent."""
     got = _run({}, "_boostAll")
     assert [c.split(":")[1] for c in got["sent"]] == ROOMS
-    assert got["said"] == []
+    # And it SAYS so, over the whole flat — the card's standing rule is to count
+    # what happened rather than report "done", and three rooms is the count.
+    assert got["said"] == [{"kind": "ok", "text": "3 Räume für 5 Minuten voll "
+                            "aufgedreht. Danach gilt wieder der Plan."}], got["said"]
 
 
 def test_boost_with_no_rooms_at_all_refuses_rather_than_reporting_success():
@@ -1004,7 +1015,7 @@ def test_every_block_after_the_first_is_ruled_off():
     """The blocks are what says which buttons share a scope, so they have to look
     separate. A heading alone reads as a label on the row above it."""
     m = _markup()
-    before = m[max(0, _at(m, ">Urlaub ") - 120):_at(m, ">Urlaub ")]
+    before = m[max(0, _at(m, ">Urlaub <button") - 120):_at(m, ">Urlaub <button")]
     assert "rule" in before, before
 
 
@@ -1064,7 +1075,7 @@ def test_the_page_carries_no_loose_paragraph_of_prose():
     """"we dont want extra text in the page". A `<p class="hint wide">` under a
     form is exactly that, and the Urlaub form had one."""
     src = CARD.read_text(encoding="utf-8")
-    holiday = src[src.index("const fieldsHtml"):src.index("if (fieldsHtml ===")]
+    holiday = src[src.index("const fieldsHtml"):src.index("if (fieldsHtml !==")]
     tail = holiday[holiday.index(": `<label>Von"):]
     assert "hint wide" not in tail, tail
 
@@ -1191,7 +1202,11 @@ def test_hydraulic_balancing_is_not_offered_to_residents():
 
 _ABS = {"active": True, "temp": 16, "end": "2026-11-01T12:00:00"}
 
-END_ABSENCE = """
+#: Its own name, NOT a second `END_ABSENCE`. The one further up this file takes a
+#: single `%s`; this one takes two, and re-using the name left the earlier tests
+#: formatting a two-slot template with one argument — a TypeError, not a
+#: failure, so it told them nothing about the card.
+END_ABSENCE_HANDBACK = """
 (() => {
   const c = Object.create(GaHeatingActionsCard.prototype);
   c.setConfig({});
@@ -1220,7 +1235,8 @@ def _on_holiday(*room_ids):
 
 
 def end_absence(states_obj, reject="false"):
-    return json.loads(run_js(CARD, END_ABSENCE % (json.dumps(states_obj), reject)))
+    return json.loads(
+        run_js(CARD, END_ABSENCE_HANDBACK % (json.dumps(states_obj), reject)))
 
 
 def test_ending_a_holiday_also_puts_the_room_back_on_the_plan():

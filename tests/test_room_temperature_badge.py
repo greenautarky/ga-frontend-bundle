@@ -216,7 +216,8 @@ def test_the_valves_own_thermometer_is_not_a_second_curve():
     """It reads the radiator, not the room — the reason calibration.py exists."""
     g = _temp_graph(_ROOM, _VALVE_STATES)
     assert g is not None, "no temperature graph built — the test would be vacuous"
-    assert g["entities"] == [{"entity": "sensor.wz_t", "name": "Raum Temperatur"}]
+    assert g["entities"] == [
+        {"entity": "sensor.wz_t", "name": "Raum Temperatur", "color": "blue"}]
 
 
 def test_the_title_says_letzte_24h():
@@ -230,7 +231,10 @@ def test_a_room_whose_only_thermometer_is_the_valve_keeps_it_unrenamed():
             ' temps: ["sensor.0xdead_local_temperature"],'
             ' hums: [], batts: [], lights: [], switches: [] }')
     g = _temp_graph(room, _VALVE_STATES)
-    assert g["entities"] == ["sensor.0xdead_local_temperature"]
+    # No `name` — that is the point of the test. It is an object rather than a
+    # bare id only because every series carries a colour now.
+    assert g["entities"] == [
+        {"entity": "sensor.0xdead_local_temperature", "color": "blue"}]
 
 
 def test_two_real_room_sensors_are_both_drawn_and_keep_their_names():
@@ -245,7 +249,12 @@ def test_two_real_room_sensors_are_both_drawn_and_keep_their_names():
     room = ('{ name: "WZ", climate: ["climate.wz"],'
             ' temps: ["sensor.wz_t", "sensor.wz_t2"],'
             ' hums: [], batts: [], lights: [], switches: [] }')
-    assert _temp_graph(room, states)["entities"] == ["sensor.wz_t", "sensor.wz_t2"]
+    # Two colours, not one repeated: a legend with two identical swatches names
+    # the same thing twice as surely as two identical labels would.
+    assert _temp_graph(room, states)["entities"] == [
+        {"entity": "sensor.wz_t", "color": "blue"},
+        {"entity": "sensor.wz_t2", "color": "deep-purple"},
+    ]
 
 
 def test_the_humidity_curve_is_named_too_so_no_mean_suffix_leaks():
@@ -266,7 +275,8 @@ def test_the_humidity_curve_is_named_too_so_no_mean_suffix_leaks():
     }})()"""
     g = run_js(STRATEGY, expr)
     assert g is not None, "no humidity graph built — the test would be vacuous"
-    assert g["entities"] == [{"entity": "sensor.wz_h", "name": "Raum Luftfeuchtigkeit"}]
+    assert g["entities"] == [
+        {"entity": "sensor.wz_h", "name": "Raum Luftfeuchtigkeit", "color": "blue"}]
     assert g["title"] == "Luftfeuchtigkeit letzte 24h"
 
 

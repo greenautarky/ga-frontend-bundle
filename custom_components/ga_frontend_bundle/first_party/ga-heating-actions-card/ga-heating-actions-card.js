@@ -1057,17 +1057,18 @@ class GaHeatingActionsCard extends HTMLElement {
         : '<div class="quiet"><b>Inaktiv</b> — es gilt der Wochenplan.</div>';
     }
 
-    // His two wordings, verbatim: idle and running.
+    // Two wordings: idle and running.
     const bh = this.querySelector(".boosthint");
     if (bh) {
       const live = rooms0.filter((id) =>
         ((((this._hass.states[id] || {}).attributes || {}).override || {}).boost || {}).active);
-      // On the heading line now, in brackets, so the section and its
-      // explanation are one line rather than two ("put in parentheses same line
-      // as boost not below", 2026-10-05).
+      // INSIDE THE PANEL THE "i" OPENS since 2026-10-20 ("keep all explanation
+      // in a tooltip or i icon"), not after the heading in brackets as it was
+      // from 2026-10-05. So the idle wording is a whole sentence: a fragment in
+      // brackets alone in a panel reads like a caption with nothing to caption.
       //
-      // The running sentence drops the word "Boost": it sits directly after the
-      // heading that already says it, and "BOOST (2 Räume im Boost …)" says it
+      // The running sentence still drops the word "Boost" — the heading above
+      // the "i" says it, and "BOOST · Läuft in 2 Räumen im Boost" says it
       // twice.
       bh.textContent = live.length
         ? `Läuft in ${nRooms(live.length, true)} · Ventile ganz offen.`
