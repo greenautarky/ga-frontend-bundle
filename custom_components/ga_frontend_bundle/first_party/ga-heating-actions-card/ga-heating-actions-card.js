@@ -32,20 +32,25 @@
 
 const BOOST_MINUTES = 5;
 /**
- * Quarter-hour options for the holiday's start and end time.
+ * Hourly options for the holiday's start and end time.
  *
- * TAKEN FROM THE OLD GENERATOR, including its reason. `generate_yaml_new.py`
- * built `input_select.override_start_time` / `override_end_time` as literal
- * 15-minute dropdowns and says why: "option text is literal, so
- * locale-independent - no native 12h/AM-PM picker". A native `<input
- * type="time">` renders as the browser's locale decides, and a resident
- * reading "02:00 PM" where the rest of the card says 14:00 is a bug report.
+ * ON THE HOUR, 24 entries. It was every quarter hour, 96 of them, inherited
+ * from the old generator's `input_select.override_start_time` — but that
+ * precision belongs to a weekday heating plan, not to a holiday: nobody leaves
+ * at 07:45 and needs the flat to know. 96 entries is a scroll on a phone to
+ * reach the evening, and the quarters are 72 wrong answers in the way of the
+ * right one ("no need to have time for each 15 mins, every 1 hour is enough",
+ * 2026-10-20).
+ *
+ * STILL A LIST OF LITERAL STRINGS, which is the part of the old generator's
+ * reasoning that survives: "option text is literal, so locale-independent - no
+ * native 12h/AM-PM picker". A native `<input type="time">` renders as the
+ * browser's locale decides, and a resident reading "02:00 PM" where the rest
+ * of the card says 14:00 is a bug report.
  */
 const TIME_OPTIONS = (() => {
   const out = [];
-  for (let h = 0; h < 24; h++) for (const m of [0, 15, 30, 45]) {
-    out.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-  }
+  for (let h = 0; h < 24; h++) out.push(`${String(h).padStart(2, "0")}:00`);
   return out;
 })();
 const SICK_MAX_HOURS = 48;
@@ -138,7 +143,7 @@ function overrideStatus(states, roomIds) {
   const what = first.off ? "Aus (Frostschutz)" : `${first.temp} °C`;
   const who = abs.length === rooms.length ? "alle Räume" : `${abs.length} von ${rooms.length} Räumen`;
   const until = whenText(first.end);
-  return `Sonderplan aktiv — ${what}${until ? ` · bis ${until}` : ""} · ${who}`;
+  return `Urlaub aktiv — ${what}${until ? ` · bis ${until}` : ""} · ${who}`;
 }
 
 /**
@@ -216,61 +221,8 @@ const ICHB_MIN_HEADROOM = 4;
 const ICHB_MAX_ROOM_TEMP = ICHB_TARGET - ICHB_MIN_HEADROOM;
 const ICHB_IDEAL_ROOM_TEMP = 21;
 
-//: How many rooms fit in one row of chips before it is worth collapsing. Six is
-//: two lines on a phone; a flat with more than that is the case the disclosure
-//: below was written for.
-const MAX_CHIPS = 6;
 
-/**
- * The scope after one room chip is tapped: `{allRooms, rooms}`.
- *
- * Out here rather than in the click handler because this is the part with the
- * decisions in it, and a closure over a DOM node cannot be tested — the whole
- * reason `tests/js/eval.mjs` exists is to run the shipped logic, and logic
- * reachable only through a click is logic nothing runs until a resident does.
- *
- * A LIT CHIP MEANS THIS ROOM WILL BE TOUCHED, so tapping a lit one turns it
- * off. `allRooms` is shorthand for every room, so turning one off has to start
- * from the list the row is showing, in the rooms' own order.
- */
-function toggleRoom(rooms, f, id) {
-  const lit = f.allRooms || f.rooms.includes(id);
-  const current = f.allRooms ? rooms.slice() : rooms.filter((r) => f.rooms.includes(r));
-  const next = lit ? current.filter((r) => r !== id) : current.concat([id]);
-  // A selection that covers the flat IS "alle". Without this the row shows every
-  // room lit beside a dark `Alle`, a difference with no meaning behind it — and
-  // the explicit list would also silently exclude a room added later.
-  const allRooms = next.length === rooms.length;
-  return { allRooms, rooms: allRooms ? [] : next };
-}
 
-/**
- * What the collapsed room list says about itself.
- *
- * "2 gewählt" is a COUNT, and a count is the one thing a resident already knows
- * — they just ticked them. What they cannot see with the list closed is WHICH
- * two, and that is the only question the line has to answer before someone
- * presses Boost or Aktivieren.
- *
- * Two names, then "+n", because the row sits beside a checkbox on a phone.
- *
- * WHY NOT A DROPDOWN (asked 2026-10-05). A `<select multiple>` hides the
- * selection behind a tap, needs a second tap to close, renders as a native
- * modal on iOS and Android that no theme reaches, and on a flat with three
- * rooms it would hide three words to save one line. The disclosure below keeps
- * the common case — all of them — to a single line and shows every room at
- * once when opened, which a dropdown cannot do while staying readable.
- */
-function scopeLabel(states, rooms, f, open) {
-  const caret = open ? "▾" : "▸";
-  if (f.allRooms) return `${caret} Räume: alle`;
-  const names = rooms
-    .filter((id) => f.rooms.includes(id))
-    .map((id) => roomName(states[id]) || id);
-  if (!names.length) return `${caret} Kein Raum gewählt`;
-  const shown = names.slice(0, 2).join(", ");
-  return `${caret} Räume: ${shown}${names.length > 2 ? ` +${names.length - 2}` : ""}`;
-}
 
 /**
  * The end of a sickness override, as an ISO string ga_heating accepts.
@@ -321,19 +273,20 @@ function absenceBody(entityId, form) {
     out.end = `${form.end}T${et}:00`;
     if (out.end <= out.start) return "Das Ende liegt vor dem Anfang.";
   }
-  // "Aus · Frostschutz" belongs to a holiday, not to an illness. Someone in bed
-  // wants the room WARMER; an off-switch on that form is an offer nobody wants
-  // and a mis-tap with a cold night behind it. Sickness therefore always
-  // carries a temperature, whatever `off` happens to hold.
-  if (form.off && form.kind !== "sick") {
-    out.switch_off = true;
-  } else {
-    const t = Number(form.temperature);
-    if (!Number.isFinite(t) || t < TMIN || t > TMAX) {
-      return `Bitte eine Temperatur zwischen ${TMIN} und ${TMAX} °C angeben — oder „Heizung aus“ wählen.`;
-    }
-    out.temperature = t;
+  // ALWAYS A TEMPERATURE. "Aus · Frostschutz" was a checkbox on this form and
+  // was removed on 2026-10-20 ("remove the Aus - Frostschutz option and only
+  // keep the option to set the temp"): a holiday that switches the heating off
+  // is one mis-tap away from a frozen flat, and "Alle AUS" already does it
+  // deliberately, with the frost line beside it saying what it leaves behind.
+  //
+  // `switch_off` is still READ elsewhere — `overrideStatus` renders one that is
+  // already stored on a device, set by an older card or by us. This card simply
+  // no longer sends one.
+  const t = Number(form.temperature);
+  if (!Number.isFinite(t) || t < TMIN || t > TMAX) {
+    return `Bitte eine Temperatur zwischen ${TMIN} und ${TMAX} °C angeben.`;
   }
+  out.temperature = t;
   return out;
 }
 
@@ -358,7 +311,7 @@ class GaHeatingActionsCard extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
     this._minutes = Number(this._config.boost_minutes) || BOOST_MINUTES;
-    this._form = { kind: "sick", hours: 6, temperature: 20, off: false,
+    this._form = { kind: "holiday", hours: 6, temperature: 20,
                    start: "", end: "", startTime: "00:00", endTime: "12:00",
                    // `allRooms` is EXPLICIT. The first version treated "nothing
                    // ticked" as "all rooms", which reads as "none" — the old
@@ -367,8 +320,9 @@ class GaHeatingActionsCard extends HTMLElement {
     // Status is always visible; the form is not. An override whose status is only
     // visible where it was entered is the invisible override this card exists to
     // end. (ADR-0033, amendment 2026-09-23.)
-    this._openForm = false;
-    this._openRooms = false;
+    // The Urlaub box IS the section now: there is no "Bearbeiten" toggle to
+    // open it, so it is always open.
+    this._openForm = true;
   }
 
   set hass(hass) {
@@ -561,6 +515,26 @@ class GaHeatingActionsCard extends HTMLElement {
     let ok = 0;
     const failed = [];
     for (const id of rooms) {
+      // KI FIRST, AND THE ORDER IS NOT A STYLE CHOICE.
+      //
+      // Why at all: a holiday does not change the room's mode — ga_heating's
+      // `_HEAT_NOW` is only a boost and the balancing run — so it layers over
+      // whatever each room happens to be in. Book one while two rooms are on
+      // MANUELL and one on KI and the flat reads as three different things for
+      // the whole holiday, with a stale manual period still counting down
+      // underneath ("i activated urlaub on all rooms, now each room shows
+      // different mode and tempertaure", 2026-10-21). Normalising first makes
+      // the holiday the only thing in charge, and is the mirror of what ending
+      // one already does.
+      //
+      // Why BEFORE the POST: a press on the room ends what somebody asked for
+      // earlier — `_end_requested_overrides` pops an ACTIVE boost and absence.
+      // Sent after, it would delete the holiday we had just written, in the one
+      // case that matters most: a holiday that starts now.
+      try {
+        await this._hass.callService("climate", "set_hvac_mode",
+          { entity_id: id, hvac_mode: "auto" });
+      } catch (e) { /* the holiday still outranks the mode; carry on */ }
       const body = absenceBody(id, this._form);
       try {
         await this._hass.callApi("post", "ga_heating/absence", body);
@@ -571,7 +545,7 @@ class GaHeatingActionsCard extends HTMLElement {
         failed.push(`${roomName(this._hass.states[id]) || id} (${why})`);
       }
     }
-    const what = this._form.off ? "Heizung aus" : `${this._form.temperature} °C`;
+    const what = `${this._form.temperature} °C`;
     const until = this._form.kind === "sick"
       ? `für ${this._form.hours} h`
       : `vom ${this._form.start} ${this._form.startTime || "00:00"} `
@@ -579,7 +553,7 @@ class GaHeatingActionsCard extends HTMLElement {
     if (failed.length) {
       this._say("err", `${ok} von ${rooms.length} Räumen gesetzt — abgelehnt: ${failed.join("; ")}`);
     } else {
-      this._say("ok", `Sonderplan in ${ok} Räumen: ${what}, ${until}. Danach gilt wieder der Wochenplan.`);
+      this._say("ok", `Urlaub in ${ok} Räumen: ${what}, ${until}. Danach gilt wieder der Wochenplan.`);
     }
   }
 
@@ -718,27 +692,60 @@ class GaHeatingActionsCard extends HTMLElement {
    * Räumen", and a button under that sentence has to act on THAT one. With the
    * selection elsewhere it would have reported success having done nothing.
    */
-  async _endAbsence() {
-    const rooms = this._absenceRooms();
-    if (!rooms.length) return this._say("ok", "Kein Sonderplan aktiv.");
+  /**
+   * Drop the holiday in `rooms` AND hand them back to KI. Returns how many.
+   *
+   * THE SECOND HALF IS THE POINT ("what happens when we deactivate the urlaub
+   * schedue? it should set all thermostat back to KI", 2026-10-21).
+   *
+   * Deleting the override alone does NOT do it. An absence is a layer ON TOP of
+   * the room's mode, never a change to it — ga_heating writes the stored mode
+   * in exactly three places (a press on the room, a hand on the radiator, and a
+   * takeover into manual), and ending a holiday is none of them. So removing it
+   * reveals whatever was underneath: a room that was in KI comes back to KI by
+   * itself, but one that was MANUELL or AUS when the holiday was booked stays
+   * there — heating to a dial setting from a fortnight ago, or not heating at
+   * all, with nothing on screen to explain why.
+   *
+   * ORDER MATTERS. The delete goes first: while the override is still stored it
+   * outranks the room's own mode, so an `auto` sent before it would be
+   * overwritten by the next tick.
+   *
+   * SCOPED TO THE ROOMS THAT HAD ONE. "All thermostats" means the ones the
+   * holiday covered; a room the resident deliberately left out of it is not
+   * ours to switch on because somebody came home.
+   */
+  async _endAbsenceIn(rooms) {
     let ok = 0;
     for (const id of rooms) {
-      try { await this._hass.callApi("delete", "ga_heating/absence", { entity_id: id }); ok += 1; }
-      catch (e) { /* counted by omission */ }
+      try {
+        await this._hass.callApi("delete", "ga_heating/absence", { entity_id: id });
+      } catch (e) { continue; }   // still held — do not claim it is back on plan
+      try {
+        await this._hass.callService("climate", "set_hvac_mode",
+          { entity_id: id, hvac_mode: "auto" });
+        ok += 1;
+      } catch (e) { /* the holiday IS gone; counted by omission */ }
     }
+    return ok;
+  }
+
+  async _endAbsence() {
+    const rooms = this._absenceRooms();
+    if (!rooms.length) return this._say("ok", "Kein Urlaub aktiv.");
+    const ok = await this._endAbsenceIn(rooms);
     this._say(ok === rooms.length ? "ok" : "err",
-      `Sonderplan in ${ok} von ${rooms.length} Räumen beendet.`);
+      `Urlaub in ${ok} von ${rooms.length} Räumen beendet — sie folgen wieder dem Wochenplan.`);
   }
 
   async _cancelAbsence() {
     const rooms = this._selected();
     if (!rooms.length) return this._say("err", "Kein Raum ausgewählt.");
-    let ok = 0;
-    for (const id of rooms) {
-      try { await this._hass.callApi("delete", "ga_heating/absence", { entity_id: id }); ok += 1; }
-      catch (e) { /* counted by omission */ }
-    }
-    this._say("ok", `Sonderplan in ${ok} von ${rooms.length} Räumen aufgehoben.`);
+    // Same two steps as the button above: the holiday goes, and the rooms are
+    // handed back to the plan rather than to whatever they were before it.
+    const ok = await this._endAbsenceIn(rooms);
+    this._say("ok",
+      `Urlaub in ${ok} von ${rooms.length} Räumen aufgehoben — sie folgen wieder dem Wochenplan.`);
   }
 
   // ─── UI ───────────────────────────────────────────────────────────────────
@@ -768,19 +775,17 @@ class GaHeatingActionsCard extends HTMLElement {
         <h1 class="card-title">${esc(this._config.title || "Heizung — Ganzes Zuhause")}</h1>
         <div class="card-content">
           <div class="msg"></div>
-          <h4>Boost <span class="sub boosthint"></span></h4>
-          <div class="hint roomslabel">Räume wählen</div>
-          <div class="rooms"></div>
-          <div class="quick">
-            <button class="btn primary boost">Boost setzen</button>
-            <button class="btn ghost end-boost" hidden>Boost beenden</button>
+          <h4>Boost <button type="button" class="infobtn" data-tip="boost" aria-label="Erklärung Boost" aria-expanded="false">i</button></h4>
+          <div class="tip boosttip" hidden>
+            <span class="sub boosthint"></span>
+            <span class="hint frosthint"></span>
           </div>
-          <h4 class="rule">Ganze Wohnung</h4>
           <div class="quick">
+            <button class="btn primary boost">Boost</button>
             <button class="btn ki planall">Alle → KI</button>
             <button class="btn aus offall">Alle AUS</button>
+            <button class="btn ghost end-boost" hidden>Boost beenden</button>
           </div>
-          <div class="hint frosthint"></div>
           <div class="ichb-section" hidden>
           <h4 class="rule">Hydraulischer Abgleich <span class="sub ichbhint"></span></h4>
           <div class="quick">
@@ -788,17 +793,15 @@ class GaHeatingActionsCard extends HTMLElement {
             <button class="btn ghost ichb-cancel" hidden>Abgleich abbrechen</button>
           </div>
           </div>
-          <h4 class="rule sph">Sonderpläne (Krankheit und Urlaub)</h4>
+          <h4 class="rule sph">Urlaub <button type="button" class="infobtn" data-tip="urlaub" aria-label="Erklärung Urlaub" aria-expanded="false">i</button></h4>
+          <div class="tip urlaubtip" hidden>
+            <span class="hint">Die Uhrzeit bei „Bis“ entscheidet, ab wann wieder normal geheizt wird — sonst ist die Wohnung am Rückreisetag noch kalt.</span>
+          </div>
           <div class="status"></div>
           <div class="statusactions">
-            <button class="btn ghost toggle-form"></button>
-            <button class="btn ghost end-absence" hidden>Sonderplan beenden</button>
+            <button class="btn ghost end-absence" hidden>Urlaub beenden</button>
           </div>
           <div class="form">
-          <div class="kinds">
-            <button class="btn kind" data-kind="sick">Krankheit</button>
-            <button class="btn kind" data-kind="holiday">Urlaub</button>
-          </div>
           <div class="fields"></div>
           <div class="actions">
             <button class="btn primary apply">Aktivieren</button>
@@ -848,9 +851,31 @@ class GaHeatingActionsCard extends HTMLElement {
         /* A warning that reads like the rest of the card is a warning nobody
            sees; this one costs an hour to ignore. */
         ga-heating-actions-card h4 .sub.warn { color: var(--error-color, #b3261e); }
-        /* The panel below is a place where you choose; this says what to choose.
-           Tight against it, because a label belongs to the thing it labels. */
-        ga-heating-actions-card .roomslabel { margin-bottom: -10px; }
+        /* THE EXPLANATIONS LIVE BEHIND THIS. The page is for controls, not for
+           prose ("we dont want extra text in the page", 2026-10-20), so each
+           section's sentence moved into a panel the "i" opens. The button is
+           sized off the heading's own font so it stays a small round marker
+           next to the word and never grows into a second control. */
+        ga-heating-actions-card .infobtn { font: inherit; font-size: .95em; line-height: 1;
+          width: 1.5em; height: 1.5em; padding: 0; margin-left: 6px; vertical-align: middle;
+          border-radius: 50%; cursor: pointer; font-weight: 700; text-transform: none;
+          border: 1px solid var(--divider-color, #d8dedd);
+          background: var(--secondary-background-color, #f2f5f4);
+          color: var(--secondary-text-color, #5a6b68); }
+        ga-heating-actions-card .infobtn[aria-expanded="true"] {
+          border-color: var(--primary-color, #4A7D59); color: var(--primary-color, #4A7D59); }
+        /* Open, it reads as a note ABOUT the heading above it, not as another
+           row of the card: indented, quiet, and tight under the heading. */
+        ga-heating-actions-card .tip { display: grid; gap: 4px; margin: -6px 0 2px;
+          padding: 8px 10px; border-radius: 8px;
+          background: var(--secondary-background-color, #f2f5f4);
+          border-left: 3px solid var(--primary-color, #4A7D59); }
+        ga-heating-actions-card .tip[hidden] { display: none; }
+        /* The hints inside it were styled as part of a heading line before, so
+           they need the caption treatment here instead. */
+        ga-heating-actions-card .tip .sub, ga-heating-actions-card .tip .hint {
+          font-size: .84em; text-transform: none; font-weight: 400; letter-spacing: 0;
+          color: var(--secondary-text-color, #5a6b68); }
         /* The status line is empty until something is said, and an empty GRID
            ITEM is not free: it holds a row and the 14px gap after it, which is
            the dead band between the card title and "BOOST" ("why there is a
@@ -877,11 +902,30 @@ class GaHeatingActionsCard extends HTMLElement {
         ga-heating-actions-card .msg.ok { display:block; background: rgba(76,175,80,.15); color: var(--success-color,#1d7a3a); }
         ga-heating-actions-card .msg.err { display:block; background: rgba(244,67,54,.15); color: var(--error-color,#c0392b); }
 
-        /* Boost setzen carries the weight; the two "everything" actions sit
-           beside it at equal width so neither is pressed by accident. */
-        ga-heating-actions-card .quick { display: grid; gap: 8px;
-          grid-template-columns: minmax(150px, 1.4fr) 1fr 1fr; }
-        @media (max-width: 460px) { ga-heating-actions-card .quick { grid-template-columns: 1fr; } }
+        /* THE THREE ACTIONS STAY A ROW, at every width ("place all 3 buttons
+           next to each other", 2026-10-20).
+           It was a grid with a 460px breakpoint that stacked them one per line,
+           which is every phone this is used on — so on the device it asked for,
+           the row he asked for did not exist.
+           Flex rather than fixed columns because the row is not always three:
+           the balancing block has two, and "Boost beenden" appears beside the
+           boost only while one is running. "flex: 1 1 0" with "min-width: 0"
+           gives whatever is visible equal widths and equal heights, and a
+           hidden button costs nothing. */
+        ga-heating-actions-card .quick { display: flex; flex-wrap: wrap; gap: 8px;
+          align-items: stretch; }
+        ga-heating-actions-card .quick .btn { flex: 1 1 0; min-width: 0; }
+        /* The one exception: a way OUT of something running is not a fourth
+           peer of the three that start things, and four across a phone is four
+           things too narrow to read. Its own line, under them. */
+        ga-heating-actions-card .quick .end-boost,
+        ga-heating-actions-card .quick .ichb-cancel { flex: 1 0 100%; }
+        /* Three German labels across 375px. The padding goes before the words
+           do — "Alle AUS" wrapping to two lines is what makes a row of three
+           look broken. */
+        @media (max-width: 420px) {
+          ga-heating-actions-card .quick .btn { padding: 11px 4px; font-size: .84em; }
+        }
         ga-heating-actions-card .actions { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
 
         ga-heating-actions-card .btn { padding: 11px 12px; border: none; border-radius: 10px;
@@ -925,29 +969,7 @@ class GaHeatingActionsCard extends HTMLElement {
           border-radius: 8px; border: 1px solid var(--divider-color,#ddd);
           background: var(--card-background-color, #fff); color: inherit; font: inherit; }
 
-        /* THE CHIPS ARE A CHOICE; THE BUTTON UNDER THEM IS AN ACTION.
-           Both were pills in the same filled green, so seven selected rooms and
-           "Boost setzen" read as one row of buttons and nothing said which one
-           does something ("we need to distinguish between choosing the rooms
-           and the boost button", 2026-10-05). The chips now sit on their own
-           surface: a panel is a place where you pick, and the action stands
-           outside it on the card. */
-        ga-heating-actions-card .rooms { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:.9em;
-          background: var(--secondary-background-color, #eceff1);
-          border: 1px solid var(--divider-color, #e0e0e0);
-          border-radius: 14px; padding: 10px 12px; }
-        /* Filled = this room will be touched. The fill carries the state, so
-           there is no checkbox beside it: two things saying the same thing is
-           how the old row became unreadable. */
-        ga-heating-actions-card .rooms .chip { font: inherit; font-size: .9em;
-          padding: 6px 13px; border-radius: 999px; cursor: pointer;
-          border: 1px solid var(--divider-color, #e0e0e0); background: transparent;
-          color: var(--primary-text-color, #212121); }
-        ga-heating-actions-card .rooms .chip.on { background: var(--primary-color, #4A7D59);
-          border-color: var(--primary-color, #4A7D59);
-          color: var(--text-primary-color, #fff); font-weight: 600; }
-        ga-heating-actions-card .rooms .btn { padding: 6px 11px; font-size: .88em; }
-      </style>`;
+              </style>`;
 
     this.querySelector(".boost").addEventListener("click", () => this._boostAll());
     this.querySelector(".offall").addEventListener("click", () => this._offAll());
@@ -958,9 +980,24 @@ class GaHeatingActionsCard extends HTMLElement {
     this.querySelector(".end-boost").addEventListener("click", () => this._endBoost());
     this.querySelector(".ichb-start").addEventListener("click", () => this._startIchb());
     this.querySelector(".ichb-cancel").addEventListener("click", () => this._cancelIchb());
-    this.querySelector(".toggle-form").addEventListener("click", () => {
-      this._openForm = !this._openForm;
-      this._render();
+    const tfBtn = this.querySelector(".toggle-form");
+    if (tfBtn) {
+      tfBtn.addEventListener("click", () => {
+        this._openForm = !this._openForm;
+        this._render();
+      });
+    }
+    // Explanations live behind the "i", so the page carries controls and not
+    // paragraphs. Click toggles the matching .tip next to the heading.
+    this.querySelectorAll(".infobtn").forEach((el) => {
+      el.addEventListener("click", () => {
+        const tip = this.querySelector(`.${el.dataset.tip}tip`);
+        if (!tip) return;
+        const open = tip.hasAttribute("hidden");
+        if (open) tip.removeAttribute("hidden");
+        else tip.setAttribute("hidden", "");
+        el.setAttribute("aria-expanded", String(open));
+      });
     });
     this.querySelectorAll(".kind").forEach((el) => {
       el.addEventListener("click", () => { this._form.kind = el.dataset.kind; this._render(); });
@@ -995,7 +1032,6 @@ class GaHeatingActionsCard extends HTMLElement {
     }
 
     this._renderFields();
-    this._renderRooms();
     this._syncTicker();
   }
 
@@ -1034,8 +1070,8 @@ class GaHeatingActionsCard extends HTMLElement {
       // heading that already says it, and "BOOST (2 Räume im Boost …)" says it
       // twice.
       bh.textContent = live.length
-        ? `(läuft in ${nRooms(live.length, true)} · Ventile ganz offen)`
-        : "(Ventile kurzzeitig ganz öffnen)";
+        ? `Läuft in ${nRooms(live.length, true)} · Ventile ganz offen.`
+        : "Öffnet die Ventile kurzzeitig ganz.";
     }
 
     // The heading says what the hour is for; while a run is going it says how
@@ -1047,7 +1083,11 @@ class GaHeatingActionsCard extends HTMLElement {
     // call a service Home Assistant does not have and fail, every time.
     const isec = this.querySelector(".ichb-section");
     if (isec) {
-      const offered = Boolean(((this._hass.services || {}).ga_heating || {}).ichb);
+      // Internal feature: residents must not be able to start a balancing run,
+      // so the service merely EXISTING no longer shows the section. It appears
+      // only when we put `show_ichb: true` in the card config.
+      const offered = Boolean(((this._hass.services || {}).ga_heating || {}).ichb)
+        && Boolean(this._config && this._config.show_ichb);
       if (offered) isec.removeAttribute("hidden");
       else isec.setAttribute("hidden", "");
     }
@@ -1110,124 +1150,105 @@ class GaHeatingActionsCard extends HTMLElement {
   }
 
   /**
-   * The Sonderplan fields. REBUILT ONLY WHEN THEIR MARKUP CHANGES: Home
-   * Assistant pushes state changes all the time, and replacing an input a
-   * resident is typing into drops what they typed and the focus with it.
+   * The Urlaub fields.
+   *
+   * THE MARKUP CARRIES NO VALUES, and that is the whole point.
+   *
+   * It used to interpolate every current value into the HTML. So the markup
+   * changed whenever a value did, the guard below let it through, and
+   * `innerHTML` replaced the entire block — including the field the resident
+   * was in the middle of. A date is typed day → month → year, and the input
+   * fires `change` the moment the first two make something it can parse; that
+   * re-render handed back a brand-new element, so the year had nowhere to land
+   * ("i can enter day and month but year isnt working", 2026-10-20).
+   *
+   * Now the values go on the ELEMENTS (`_syncFieldValues`) and the markup is
+   * fixed for a given kind, so the block is built once and the inputs survive.
    */
   _renderFields() {
     const f = this._form;
     const fields = this.querySelector(".fields");
     if (!fields) return;
-    // The off-switch is a HOLIDAY field only — see absenceBody.
-    const offField = f.kind === "holiday"
-      ? `<label class="chk"><input type="checkbox" class="off" ${f.off ? "checked" : ""}>`
-        + ` Aus · Frostschutz</label>`
-      : "";
-    const showTemp = !(f.off && f.kind === "holiday");
-    const tempField = offField +
-      (showTemp
-        ? `<label>🌡️ Zieltemp.<span class="in"><input type="number" class="temp" min="${TMIN}" `
-          + `max="${TMAX}" step="0.5" value="${esc(f.temperature)}"><em>°C</em></span></label>`
-        : "");
+    const tempField =
+      `<label>\u{1F321}\uFE0F Zieltemp.<span class="in"><input type="number" class="temp" min="${TMIN}" `
+      + `max="${TMAX}" step="0.5"><em>\u00B0C</em></span></label>`;
     const fieldsHtml = f.kind === "sick"
-      ? `<label>⏱️ Dauer ab jetzt<span class="in">`
-        + `<input type="number" class="hours" min="1" max="${SICK_MAX_HOURS}" value="${esc(f.hours)}">`
+      ? `<label>\u23F1\uFE0F Dauer ab jetzt<span class="in">`
+        + `<input type="number" class="hours" min="1" max="${SICK_MAX_HOURS}">`
         + `<em>h</em></span></label>`
         + tempField
-        + `<p class="hint wide">Beginnt sofort, höchstens ${SICK_MAX_HOURS} h. Danach gilt wieder der Wochenplan.</p>`
-      : `<label>Von<span class="in"><input type="date" class="start" value="${esc(f.start)}">`
-        + `<select class="starttime">${timeOpts(f.startTime)}</select></span></label>`
-        + `<label>Bis<span class="in"><input type="date" class="end" value="${esc(f.end)}">`
-        + `<select class="endtime">${timeOpts(f.endTime)}</select></span></label>`
-        + tempField
-        + `<p class="hint wide">Die Uhrzeit bei „Bis“ entscheidet, ab wann wieder normal geheizt `
-        + `wird — sonst ist die Wohnung am Rückreisetag noch kalt.</p>`;
-    if (fieldsHtml === this._fieldsHtml) return;
-    this._fieldsHtml = fieldsHtml;
-    fields.innerHTML = fieldsHtml;
+      : `<label>Von<span class="in"><input type="date" class="start">`
+        + `<select class="starttime">${timeOpts()}</select></span></label>`
+        + `<label>Bis<span class="in"><input type="date" class="end">`
+        + `<select class="endtime">${timeOpts()}</select></span></label>`
+        + tempField;
+    if (fieldsHtml !== this._fieldsHtml) {
+      this._fieldsHtml = fieldsHtml;
+      fields.innerHTML = fieldsHtml;
 
-    const bind = (sel, key, cast) => {
-      const el = fields.querySelector(sel);
-      if (el) el.addEventListener("change", () => { f[key] = cast(el); this._render(); });
-    };
-    bind(".hours", "hours", (el) => Number(el.value));
-    bind(".temp", "temperature", (el) => Number(el.value));
-    bind(".off", "off", (el) => el.checked);
-    bind(".start", "start", (el) => el.value);
-    bind(".end", "end", (el) => el.value);
-    bind(".starttime", "startTime", (el) => el.value);
-    bind(".endtime", "endTime", (el) => el.value);
+      const bind = (sel, key, cast) => {
+        const el = fields.querySelector(sel);
+        if (el) el.addEventListener("change", () => { f[key] = cast(el); this._render(); });
+      };
+      bind(".hours", "hours", (el) => Number(el.value));
+      bind(".temp", "temperature", (el) => Number(el.value));
+      bind(".start", "start", (el) => el.value);
+      bind(".end", "end", (el) => el.value);
+      bind(".starttime", "startTime", (el) => el.value);
+      bind(".endtime", "endTime", (el) => el.value);
+
+      // PICK IT, DO NOT TYPE IT ("i want to change it in a way that we a pick a
+      // date from the calendar"). A date input opens its calendar only from the
+      // small icon at its end, which leaves typing as the obvious path on a
+      // phone. This makes the whole field open it.
+      for (const sel of [".start", ".end"]) {
+        const el = fields.querySelector(sel);
+        if (!el) continue;
+        const open = () => {
+          // Throws without a user gesture, and is absent in older browsers. In
+          // both cases the field still types the way it always did.
+          try { if (el.showPicker) el.showPicker(); } catch (e) { /* typing still works */ }
+        };
+        el.addEventListener("click", open);
+        el.addEventListener("focus", open);
+      }
+    }
+    this._syncFieldValues();
   }
 
-  /** The room chips. Rebuilt only when what they show changes — see _renderFields. */
-  _renderRooms() {
+  /**
+   * The current values, written onto the fields rather than into their markup.
+   *
+   * NEVER ONTO THE FIELD THAT HAS FOCUS. Assigning `.value` to a date input
+   * restarts it at its first segment, which would bring back the bug the
+   * method above exists to fix, from the other direction.
+   */
+  _syncFieldValues() {
     const f = this._form;
+    const active = this.ownerDocument ? this.ownerDocument.activeElement : null;
+    const set = (sel, v) => {
+      const el = this.querySelector(sel);
+      if (!el || el === active) return;
+      if (String(el.value) !== String(v)) el.value = v;
+    };
+    set(".hours", f.hours);
+    set(".temp", f.temperature);
+    set(".start", f.start);
+    set(".end", f.end);
+    set(".starttime", f.startTime || "00:00");
+    set(".endtime", f.endTime || "12:00");
 
-    // Room scope. Nothing selected means ALL — said in words, because an empty
-    // row of checkboxes reads as "none" and would be the opposite of the truth.
-    // ROOM SCOPE: one row of toggles, `Alle` first.
-    //
-    // It was a checkbox, a summary button and a collapsed list of checkboxes —
-    // three controls for one job, and the state was unreadable: every chip the
-    // same grey, the answer in small native boxes, and with `Alle` ticked the
-    // room boxes were checked AND disabled, which looks exactly like selected.
-    //
-    // A dropdown was the other candidate and is worse on the device this is used
-    // on: `<select multiple>` is a wheel on iOS that cannot express multi-select,
-    // a modal on Android that no theme reaches, and ctrl-click on desktop. It
-    // also hides the one thing this control exists to answer — what will this
-    // touch — behind a tap.
-    //
-    // So: filled means it will be touched, outlined means it will not, and the
-    // row is the answer without a tap. Above MAX_CHIPS rooms it collapses again,
-    // because a flat with twelve of them is a wall of chips above the button
-    // somebody actually came here to press.
-    const rooms = this._rooms();
-    const box = this.querySelector(".rooms");
-    if (!box) return;
-    if (!rooms.length) {
-      const empty = '<span class="hint">Kein Raum mit Thermostat gefunden.</span>';
-      if (this._roomsHtml !== empty) box.innerHTML = empty;
-      this._roomsHtml = empty;
-    } else {
-      const open = rooms.length <= MAX_CHIPS || this._openRooms;
-      const chip = (label, on, attr) =>
-        `<button type="button" class="chip${on ? " on" : ""}" ${attr} `
-        + `aria-pressed="${on}">${esc(label)}</button>`;
-      const roomsHtml =
-        chip("Alle", f.allRooms, 'data-all="1"')
-        + (rooms.length > MAX_CHIPS
-            ? `<button class="btn ghost toggle-rooms">`
-              + `${esc(scopeLabel(this._hass.states, rooms, f, this._openRooms))}</button>`
-            : "")
-        + (open
-            ? rooms.map((id) => chip(
-                roomName(this._hass.states[id]) || id,
-                f.allRooms || f.rooms.includes(id),
-                `data-id="${esc(id)}"`)).join("")
-            : "");
-      if (roomsHtml === this._roomsHtml) return;
-      this._roomsHtml = roomsHtml;
-      box.innerHTML = roomsHtml;
-
-      const allChip = box.querySelector("[data-all]");
-      if (allChip) allChip.addEventListener("click", () => {
-        f.allRooms = true;
-        f.rooms = [];
-        this._render();
-      });
-      const tr = box.querySelector(".toggle-rooms");
-      if (tr) tr.addEventListener("click", () => {
-        this._openRooms = !this._openRooms;
-        this._render();
-      });
-      box.querySelectorAll("[data-id]").forEach((el) => {
-        el.addEventListener("click", () => {
-          Object.assign(f, toggleRoom(rooms, f, el.dataset.id));
-          this._render();
-        });
-      });
-    }
+    // THE RANGE, SAID IN THE CALENDAR. `absenceBody` still refuses a holiday
+    // that runs backwards, but a refusal after pressing Aktivieren is a
+    // lesson; days greyed out in the picker are an answer before the mistake.
+    // A holiday cannot start in the past either — that override would be
+    // stored and already over.
+    const today = localISO(new Date()).slice(0, 10);
+    const start = this.querySelector(".start");
+    const end = this.querySelector(".end");
+    if (start && start.min !== today) start.min = today;
+    const endMin = f.start || today;
+    if (end && end.min !== endMin) end.min = endMin;
   }
 }
 
@@ -1237,5 +1258,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "ga-heating-actions-card",
   name: "GA Heizung — Ganzes Zuhause",
-  description: "Boost für alle Räume und Sonderplan (Krankheit / Urlaub).",
+  description: "Boost für alle Räume und Urlaub.",
 });

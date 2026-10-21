@@ -382,8 +382,10 @@ def test_the_title_renders_inside_the_padded_body():
 # because "the room went manual by itself" is otherwise a mystery with no entity
 # to point at.
 #
-# Two signals, deliberately separate: link quality is the radio, and a late answer
-# is what that radio cost us.
+# Link quality is what remains of that here. The late answer itself stopped
+# being shown on 2026-10-20 — ga_heating still records and logs it, and the
+# tests below pin that the CARD stays quiet about it ("that not something to
+# include in the maintenance section, that a normal behavior").
 
 
 def radio_rows(entities, links=(), climate=None):
@@ -432,36 +434,31 @@ def test_a_zero_is_still_a_reading():
     assert out == ["Thermostat 1|Funkverbindung sehr schwach"], out
 
 
-def test_a_radiator_that_answers_late_is_named_with_its_lag():
+def test_a_radiator_that_answers_late_is_not_shown_at_all():
+    """THE REMOVAL. It used to render "antwortet verzögert (58 s)". Nobody can
+    act on a slow radio by visiting the flat, and Wartung is what needs a
+    person — "the time it takes for teh command to be applied is not of
+    interest to the user" (2026-10-20).
+
+    The attribute is UNCHANGED: ga_heating still records it and still logs it,
+    which is what this asserts — the card reads a room carrying a 58 s lag and
+    says nothing."""
     states = {
         "climate.wohnzimmer": {"state": "auto", "attributes": {
             "valves_late": {"climate.0xaaa": {"lag_s": 58, "count": 1}}}},
         "climate.0xaaa": {"state": "auto", "attributes": {"friendly_name": "Thermostat 1"}},
     }
-    out = radio_rows(states, climate="climate.wohnzimmer")
-    assert out == ["Thermostat 1|antwortet verzögert (58 s)"], out
+    assert radio_rows(states, climate="climate.wohnzimmer") == []
 
 
-def test_a_room_with_no_late_radiator_says_nothing():
+def test_a_room_with_no_late_radiator_says_nothing_either():
     states = {"climate.wohnzimmer": {"state": "auto", "attributes": {}}}
     assert radio_rows(states, climate="climate.wohnzimmer") == []
     assert radio_rows({}, climate=None) == []
 
 
-def test_a_barely_late_answer_is_not_worth_a_card_entry():
-    """A TRV reports on its own cycle; a few seconds behind is normal and would
-    make this section noise."""
-    states = {
-        "climate.wohnzimmer": {"state": "auto", "attributes": {
-            "valves_late": {"climate.0xaaa": {"lag_s": 4, "count": 1}}}},
-        "climate.0xaaa": {"state": "auto", "attributes": {"friendly_name": "Thermostat 1"}},
-    }
-    assert radio_rows(states, climate="climate.wohnzimmer") == []
-
-
 def test_the_worst_thing_is_first_across_every_kind():
-    """A resident reads the first line. An empty battery outranks a weak radio,
-    which outranks a slow answer."""
+    """A resident reads the first line. An empty battery outranks a weak radio."""
     states = {
         "sensor.a_battery": {"state": "12", "attributes": {"friendly_name": "Fenster Batterie"}},
         "sensor.b_linkquality": lqi(20, "Thermostat 2 Linkqualität"),
@@ -475,15 +472,19 @@ def test_the_worst_thing_is_first_across_every_kind():
         + ', ["sensor.a_battery"], '
         + json.dumps({"links": ["sensor.b_linkquality"], "climate": "climate.wohnzimmer"})
         + ").map(r => r.name + '|' + r.detail))"))
-    assert out[0] == "Fenster|Batterie fast leer", out
-    assert len(out) == 3, out
+    assert out == ["Fenster|Batterie fast leer",
+                   "Thermostat 2|Funkverbindung schwach"], out
 
 
 # -- a radiator that answered with its own setpoint (ga_heating 0.13.3) --------
 #
 # A TRVZB switched to `heat` restores the setpoint it last stored instead of
-# keeping ours. Its answer is on time, so `lag_s` is about 0 and the lag rule
-# alone would hide it; ga_heating counts these as `substituted` per valve.
+# keeping ours. ga_heating counts these as `substituted` per valve, forgives
+# them, and drives the valve back.
+#
+# THE CARD STOPPED SHOWING THEM on 2026-10-20: it is firmware habit that the
+# engine already handles, not something a person is meant to do anything about.
+# These tests pin the silence, across every shape the attribute comes in.
 
 _VALVE = {"climate.0xaaa": {"state": "heat", "attributes": {"friendly_name": "Thermostat 1"}}}
 
@@ -493,36 +494,36 @@ def _late(entry):
         "valves_late": {"climate.0xaaa": entry}}}, **_VALVE}
 
 
-def test_a_radiator_that_set_its_own_setpoint_is_named():
-    out = radio_rows(_late({"lag_s": 0, "count": 2, "substituted": 2}),
-                     climate="climate.wohnzimmer")
-    assert out == ["Thermostat 1|setzt eigenen Sollwert (2×)"], out
-
-
-def test_a_single_substitution_carries_no_count():
-    out = radio_rows(_late({"lag_s": 1, "count": 1, "substituted": 1}),
-                     climate="climate.wohnzimmer")
-    assert out == ["Thermostat 1|setzt eigenen Sollwert"], out
-
-
-def test_a_radiator_that_did_both_gets_one_line_saying_both():
-    """The row names a device; a device gets one line."""
-    out = radio_rows(_late({"lag_s": 58, "count": 3, "substituted": 1}),
-                     climate="climate.wohnzimmer")
-    assert out == ["Thermostat 1|antwortet verzögert (58 s), setzt eigenen Sollwert"], out
-
-
-def test_an_older_ga_heating_without_the_counter_changes_nothing():
-    """Must-not-flag: before 0.13.3 the key is absent, and a short lag stays quiet."""
-    assert radio_rows(_late({"lag_s": 4, "count": 1}), climate="climate.wohnzimmer") == []
-    assert radio_rows(_late({"lag_s": 4, "count": 1, "substituted": 0}),
+def test_a_radiator_that_set_its_own_setpoint_is_not_shown():
+    assert radio_rows(_late({"lag_s": 0, "count": 2, "substituted": 2}),
                       climate="climate.wohnzimmer") == []
+
+
+def test_a_radiator_that_did_both_is_not_shown_either():
+    """It used to render both halves on one line. Neither half is rendered now,
+    so a radiator that was slow AND substituted is as quiet as one that was
+    neither."""
+    assert radio_rows(_late({"lag_s": 58, "count": 3, "substituted": 1}),
+                      climate="climate.wohnzimmer") == []
+
+
+def test_no_shape_of_the_attribute_produces_a_row():
+    """Must-not-flag, exhaustively: whatever ga_heating writes there — old
+    versions without the counter, a zero count, a big lag, many substitutions —
+    none of it reaches the resident."""
+    for entry in ({"lag_s": 4, "count": 1},
+                  {"lag_s": 4, "count": 1, "substituted": 0},
+                  {"lag_s": 300, "count": 9, "substituted": 9},
+                  {"lag_s": 0, "count": 1, "substituted": 1},
+                  {}):
+        assert radio_rows(_late(entry), climate="climate.wohnzimmer") == [], entry
 
 
 def test_within_a_level_a_battery_outranks_the_radio():
     """The kinds' sort keys are different units (a percentage, a link quality),
     so within one level the kind decides first. A weak radio at 20 must not come
-    out above a low battery at 25 %."""
+    out above a low battery at 25 %. The room still carries a 58 s lag here, and
+    still must not produce a third line."""
     states = {
         "sensor.a_battery": {"state": "25", "attributes": {"friendly_name": "Fenster Batterie"}},
         "sensor.b_linkquality": lqi(20, "Thermostat 2 Linkqualität"),
@@ -535,8 +536,7 @@ def test_within_a_level_a_battery_outranks_the_radio():
         + json.dumps({"links": ["sensor.b_linkquality"], "climate": "climate.wohnzimmer"})
         + ").map(r => r.name + '|' + r.detail))"))
     assert out == ["Fenster|Batterie niedrig",
-                   "Thermostat 2|Funkverbindung schwach",
-                   "Thermostat 1|antwortet verzögert (58 s)"], out
+                   "Thermostat 2|Funkverbindung schwach"], out
 
 
 # -- the card element itself, configured the way the strategy configures it ----
@@ -564,16 +564,21 @@ def test_the_card_renders_a_weak_link_from_its_config():
     assert "Keine Auffälligkeiten" not in out
 
 
-def test_the_card_renders_a_late_radiator_from_its_config():
+def test_the_card_rendered_says_nothing_about_a_late_radiator():
+    """End to end through the element, not just `maintenanceRows`: a room whose
+    only finding is a lag renders as the empty state, so the section does not
+    appear at all rather than appearing with an untitled row."""
     out = _render_cfg(_late({"lag_s": 58, "count": 1}),
                       {"batteries": [], "climate": "climate.wohnzimmer"})
-    assert "antwortet verzögert (58 s)" in out and "Thermostat 1" in out, out
+    assert "verzögert" not in out, out
+    assert "Keine Auffälligkeiten" in out, out
 
 
-def test_the_card_renders_a_substituted_radiator_from_its_config():
+def test_the_card_rendered_says_nothing_about_a_substituted_radiator():
     out = _render_cfg(_late({"lag_s": 0, "count": 1, "substituted": 1}),
                       {"batteries": [], "climate": "climate.wohnzimmer"})
-    assert "setzt eigenen Sollwert" in out and "Thermostat 1" in out, out
+    assert "Sollwert" not in out, out
+    assert "Keine Auffälligkeiten" in out, out
 
 
 def test_the_strategy_hands_the_card_the_links_and_the_room():
@@ -684,13 +689,13 @@ def test_the_longest_silence_comes_first():
 
 
 def test_an_older_ga_heating_publishes_nothing_and_nothing_breaks():
-    """A device still on 0.13.4 has no `sensor_silent` at all. The section must
-    carry on showing batteries and radio rather than failing."""
+    """A device still on 0.13.4 has no `sensor_silent` at all. Reading the room
+    must not throw — it carries `valves_late` and nothing else, and that one is
+    no longer rendered either, so the answer is simply no rows."""
     states = {"climate.wohnzimmer": {"state": "auto", "attributes": {
         "valves_late": {"climate.0xaaa": {"lag_s": 58}}}},
         "climate.0xaaa": {"state": "auto", "attributes": {"friendly_name": "Thermostat 1"}}}
-    out = silent_rows(states)
-    assert out == ["Thermostat 1|antwortet verzögert (58 s)"], out
+    assert silent_rows(states) == []
 
 
 # ── the section title can carry an icon ─────────────────────────────────────

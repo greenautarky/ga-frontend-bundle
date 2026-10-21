@@ -23,6 +23,7 @@ These run the SHIPPED bytes in a VM (tests/js/eval.mjs).
 from __future__ import annotations
 
 import json
+import re
 
 from conftest import PKG
 from test_rendered_output import run_js
@@ -189,13 +190,19 @@ def test_holiday_starts_at_midnight_by_default():
     assert out["start"] == "2026-10-01T00:00:00"
 
 
-def test_holiday_with_heating_off_sends_switch_off_not_a_temperature():
-    """NOT `off`: YAML 1.1 reads a bare `off` key as False, which is why
-    ga_heating's schema names the field `switch_off`."""
+def test_a_holiday_never_switches_the_heating_off_any_more():
+    """THE REMOVAL ("remove the Aus - Frostschutz option and only keep the
+    option to set the temp", 2026-10-20). A holiday that switches the heating
+    off was one mis-tap away from a frozen flat, and "Alle AUS" already does it
+    deliberately, with the frost line beside it saying what it leaves behind.
+
+    Asserted on the BODY, not on the markup: removing the checkbox while
+    `absenceBody` still honoured a stale `off` would leave a flat switched off
+    with nothing on screen that could have done it."""
     out = body({"kind": "holiday", "start": "2026-10-01", "end": "2026-10-08",
                 "off": True, "temperature": 16})
-    assert out["switch_off"] is True
-    assert "temperature" not in out
+    assert "switch_off" not in out
+    assert out["temperature"] == 16
 
 
 def test_a_range_that_runs_backwards_is_refused_here():
@@ -204,7 +211,7 @@ def test_a_range_that_runs_backwards_is_refused_here():
     assert isinstance(out, str) and "Ende" in out
 
 
-def test_neither_a_temperature_nor_off_is_refused_here():
+def test_a_holiday_without_a_temperature_is_refused_here():
     """ga_heating DROPS such an override: it would be stored and never apply —
     the resident books a holiday, the UI says saved, the heating runs as usual.
     Refusing in the card means the reason appears next to the wrong field."""
@@ -357,11 +364,26 @@ def test_a_same_day_holiday_that_ends_before_it_starts_is_refused():
     assert isinstance(out, str) and "Ende" in out
 
 
-def test_the_times_are_quarter_hours_and_literal_24h():
+def test_the_times_are_whole_hours_and_literal_24h():
+    """Was every quarter hour, 96 entries — the old generator's resolution for a
+    weekday plan, carried onto a holiday where nobody leaves at 07:45. The
+    literal 24h strings stay: a native time input would render "02:00 PM" where
+    the rest of the card says 14:00."""
     opts = call("TIME_OPTIONS")
-    assert len(opts) == 96
-    assert opts[0] == "00:00" and opts[-1] == "23:45"
+    assert len(opts) == 24
+    assert opts[0] == "00:00" and opts[-1] == "23:00"
+    assert all(o.endswith(":00") for o in opts), opts
     assert not any("AM" in o or "PM" in o for o in opts)
+
+
+def test_both_default_times_are_still_on_the_list():
+    """A default that is not an option renders as a blank select, and the
+    holiday then starts at whatever the resident scrolls to by accident."""
+    opts = call("TIME_OPTIONS")
+    form = call("(() => { const c = Object.create(GaHeatingActionsCard.prototype);"
+                " c.setConfig({}); return [c._form.startTime, c._form.endTime]; })()")
+    for t in form:
+        assert t in opts, (t, opts)
 
 
 def rendered_fields(kind: str) -> str:
@@ -439,7 +461,7 @@ ROOM_IDS = ["climate.wohnzimmer", "climate.schlafzimmer", "climate.office"]
 
 def test_a_holiday_in_every_room_says_ALL_rooms():
     s = status(st_with([{"absence": ABS}] * 3), ROOM_IDS)
-    assert "Sonderplan aktiv" in s and "16 °C" in s and "alle Räume" in s
+    assert "Urlaub aktiv" in s and "16 °C" in s and "alle Räume" in s
     assert "bis 08.10. 14:30" in s
 
 
@@ -515,32 +537,85 @@ def test_all_rooms_is_an_explicit_flag_not_an_empty_list():
     assert flag == [True, 0]
 
 
-def test_the_form_starts_closed_and_the_status_does_not():
-    flags = run_js(
+def test_the_urlaub_form_starts_open_because_it_is_the_section():
+    """It used to open behind "Bearbeiten". That button is gone ("dont show
+    bearbeiten", 2026-10-20) and the box is the section, so a closed form would
+    be a section with nothing in it and no way to open it."""
+    assert run_js(
         CARD,
         "(() => { const c = Object.create(GaHeatingActionsCard.prototype);"
-        " c.setConfig({}); return [c._openForm, c._openRooms]; })()")
-    assert flags == [False, False]
+        " c.setConfig({}); return c._openForm; })()") is True
 
 
-# ── sickness has no off-switch ───────────────────────────────────────────────
-# Someone in bed wants the room WARMER. An off-switch on that form is an offer
-# nobody wants and a mis-tap with a cold night behind it. (Thomas, 2026-09-23.)
-
-def test_the_sickness_form_offers_no_off_switch():
-    assert "Aus · Frostschutz" not in rendered_fields("sick")
-    assert 'class="off"' not in rendered_fields("sick")
+# ── the fields are picked, not typed ─────────────────────────────────────────
+# "i want to change it in a way that we a pick a date from the calendar"
+# (2026-10-20). These two are the mechanism; the rendered proof that an input
+# survives being typed into lives in tests/test_actions_card_press_across_tick.py,
+# because it needs a real DOM.
 
 
-def test_the_holiday_form_still_offers_it():
-    assert "Aus · Frostschutz" in rendered_fields("holiday")
+def test_the_field_markup_carries_no_values():
+    """THE CAUSE OF THE YEAR BUG, asserted where it can be seen without a
+    browser. While the values were interpolated into the markup, the markup
+    changed whenever a value did — and the guard in `_renderFields` then let
+    `innerHTML` replace the block a resident was typing into."""
+    for kind in ("sick", "holiday"):
+        markup = rendered_fields(kind)
+        # The <option>s keep their values — those are the choices, not a state.
+        # It is the INPUTS that must come out of the template bare.
+        for tag in re.findall(r"<input[^>]*>", markup):
+            assert "value=" not in tag, (kind, tag)
+        assert "selected" not in markup, (kind, markup)
 
 
-def test_a_sickness_body_carries_a_temperature_even_if_off_was_left_set():
-    """Switching type from holiday to sickness must not smuggle `off` across."""
-    out = body({"kind": "sick", "hours": 6, "temperature": 22, "off": True})
-    assert "switch_off" not in out
-    assert out["temperature"] == 22
+def test_the_values_are_written_onto_the_elements_instead():
+    src = CARD.read_text(encoding="utf-8")
+    assert "_syncFieldValues()" in src
+    # And never onto the one with focus: assigning .value to a date input
+    # restarts it at its first segment, which is the same bug from the far side.
+    sync = src[src.index("  _syncFieldValues() {"):]
+    assert "activeElement" in sync[:900], sync[:900]
+
+
+def test_the_whole_date_field_opens_the_calendar():
+    """A date input opens its picker only from the small icon at its end, which
+    leaves typing as the obvious path on a phone — and typing is what broke."""
+    src = CARD.read_text(encoding="utf-8")
+    assert "showPicker" in src
+    i = src.index("showPicker")
+    guarded = src[max(0, i - 400):i + 200]
+    # It throws without a user gesture and is absent in older browsers; either
+    # way the field must still type normally rather than the card throwing.
+    assert "try {" in guarded and "catch" in guarded, guarded
+
+
+# ── no form has an off-switch ───────────────────────────────────────────────
+# Sickness never had one: someone in bed wants the room WARMER, so it was an
+# offer nobody wants and a mis-tap with a cold night behind it (Thomas,
+# 2026-09-23). The holiday form had one until 2026-10-20, when it went for the
+# same reason over a longer absence.
+
+def test_no_form_offers_an_off_switch():
+    for kind in ("sick", "holiday"):
+        markup = rendered_fields(kind)
+        assert "Aus · Frostschutz" not in markup, kind
+        assert 'class="off"' not in markup, kind
+
+
+def test_a_temperature_is_the_only_thing_a_holiday_can_set():
+    markup = rendered_fields("holiday")
+    assert 'class="temp"' in markup
+    assert "Zieltemp." in markup
+
+
+def test_a_body_carries_a_temperature_even_if_off_was_left_set():
+    """Must-not-flag. `off` is gone from the form, but an older card's stored
+    value could still reach `absenceBody` through a config or a replay."""
+    for kind, extra in (("sick", {"hours": 6}), ("holiday", {"start": "2026-10-01",
+                                                             "end": "2026-10-08"})):
+        out = body(dict({"kind": kind, "temperature": 22, "off": True}, **extra))
+        assert "switch_off" not in out, kind
+        assert out["temperature"] == 22, kind
 
 
 # ── the labels are Ahmad's, verbatim ────────────────────────────────────────
@@ -549,30 +624,17 @@ def test_a_sickness_body_carries_a_temperature_even_if_off_was_left_set():
 # ones would have been a second vocabulary for the same three actions.
 
 def test_the_three_buttons_carry_the_old_labels():
+    """"Boost setzen" lost its verb ("rename to just boost not boost setzen",
+    2026-10-20); the other two are untouched."""
     markup = run_js(CARD, BUILD_MARKUP)
-    for label in ("Boost setzen", "Alle → KI", "Alle AUS"):
+    for label in (">Boost<", "Alle → KI", "Alle AUS"):
         assert label in markup, label
 
 
-def test_the_form_toggle_and_actions_carry_the_old_labels():
+def test_the_form_actions_carry_the_old_labels():
     markup = run_js(CARD, BUILD_MARKUP)
     assert "Aktivieren" in markup and "Deaktivieren" in markup
-    assert "Sonderpläne (Krankheit und Urlaub)" in markup
-    toggle = run_js(
-        CARD,
-        "(() => { const c = Object.create(GaHeatingActionsCard.prototype);"
-        " c.setConfig({}); c._built = true; c._hass = { states: {} };"
-        " let t = '';"
-        " const mk = (setter) => ({ addEventListener() {}, querySelector: () => null,"
-        "   querySelectorAll: () => [], classList: { toggle() {}, add() {}, remove() {} },"
-        "   removeAttribute() {}, setAttribute() {},"
-        "   set innerHTML(v) {}, get innerHTML() { return ''; },"
-        "   set textContent(v) { setter(v); }, get textContent() { return ''; } });"
-        " c.querySelector = (sel) =>"
-        "   sel === '.toggle-form' ? mk(v => { t = v; }) : mk(() => {});"
-        " c.querySelectorAll = () => [];"
-        " c._render(); return t; })()")
-    assert toggle == "Bearbeiten"
+    assert ">Urlaub " in markup
 
 
 def test_the_field_labels_are_his_too():
@@ -725,13 +787,13 @@ def test_end_absence_deletes_over_the_absence_route_for_each_running_room():
         {"method": "delete", "path": "ga_heating/absence",
          "data": {"entity_id": "climate.schlaf"}},
     ]
-    assert got["said"] == [{"kind": "ok", "text": "Sonderplan in 2 von 2 Räumen beendet."}]
+    assert got["said"] == [{"kind": "ok", "text": "Urlaub in 2 von 2 Räumen beendet."}]
 
 
 def test_end_absence_with_nothing_running_sends_nothing():
     got = json.loads(run_js(CARD, END_ABSENCE % json.dumps(_absent())))
     assert got["sent"] == []
-    assert got["said"] == [{"kind": "ok", "text": "Kein Sonderplan aktiv."}]
+    assert got["said"] == [{"kind": "ok", "text": "Kein Urlaub aktiv."}]
 
 
 def test_no_mode_is_sent_with_it():
@@ -749,49 +811,6 @@ def test_the_button_is_hidden_until_a_boost_is_running():
     assert "Boost beenden" in markup
     i = markup.index("Boost beenden")
     assert "hidden" in markup[max(0, i - 120):i], markup[max(0, i - 120):i]
-
-
-# ── which rooms an action will touch, in words ───────────────────────────────
-# "maybe a dropdown list?" (2026-10-05). The list stays a disclosure; what was
-# missing is WHICH rooms are in scope while it is closed — see scopeLabel.
-
-def scope(selected, all_rooms=False, open_=False):
-    f = {"allRooms": all_rooms, "rooms": selected}
-    rooms = ["climate.wohnzimmer", "climate.bad", "climate.schlaf"]
-    return run_js(CARD, f"scopeLabel({json.dumps(_boosting())}, {json.dumps(rooms)}, "
-                        f"{json.dumps(f)}, {json.dumps(open_)})")
-
-
-def test_the_closed_row_names_the_rooms_it_will_act_on():
-    """A count is the one thing a resident already knows — they just ticked them.
-    What they cannot see with the list closed is WHICH."""
-    assert scope(["climate.bad"]) == "▸ Räume: Badezimmer"
-
-
-def test_two_names_then_a_number():
-    """The row sits beside a checkbox on a phone."""
-    got = scope(["climate.wohnzimmer", "climate.bad", "climate.schlaf"])
-    assert got == "▸ Räume: Wohnzimmer, Badezimmer +1"
-
-
-def test_all_rooms_says_so_rather_than_listing_the_flat():
-    assert scope([], all_rooms=True) == "▸ Räume: alle"
-
-
-def test_an_empty_selection_says_so():
-    """Must-not-flag: "0 gewählt" and "Räume: " both read as a loading state.
-    This is the one case where a resident presses Boost and nothing happens."""
-    assert scope([]) == "▸ Kein Raum gewählt"
-
-
-def test_the_caret_follows_the_disclosure():
-    assert scope(["climate.bad"], open_=True).startswith("▾")
-
-
-def test_a_room_is_named_never_identified():
-    """The old profile view listed entity ids when an area had no name. A radio
-    address in a room picker is the bug `roomName` exists to prevent."""
-    assert "climate." not in scope(["climate.bad"])
 
 
 def test_german_declines_and_so_does_the_card():
@@ -812,90 +831,6 @@ def test_the_plural_after_in_takes_the_dative():
     two = _boosting("climate.bad", "climate.schlaf")
     line = run_js(CARD, f"boostStatus({json.dumps(two)}, {json.dumps(list(two))})")
     assert line.endswith("in 2 Räumen"), line
-
-
-# --- picking rooms -----------------------------------------------------------
-# "when choosing the rooms thats the best way to list them. maybe a dropdow
-# list?" (2026-10-05). It stayed a list of toggles and became ONE row: a
-# checkbox, a summary button and a collapsed list of checkboxes were three
-# controls for one job, and with "Alle Räume" ticked the room boxes were checked
-# AND disabled — which looks exactly like selected.
-#
-# A dropdown was the other candidate and is worse where this is used:
-# `<select multiple>` is a wheel on iOS that cannot express multi-select, a
-# modal on Android that no theme reaches, and ctrl-click on desktop.
-#
-# The rule the row promises: FILLED MEANS THIS ROOM WILL BE TOUCHED. These tests
-# are that promise — the chip state and `_selected()` are the same answer.
-
-ROOMS = ["climate.a", "climate.b", "climate.c"]
-
-
-def toggle(form, room_id, rooms=None):
-    return json.loads(run_js(
-        CARD,
-        f"JSON.stringify(toggleRoom({json.dumps(rooms or ROOMS)}, "
-        f"{json.dumps(form)}, {json.dumps(room_id)}))"))
-
-
-ALL = {"allRooms": True, "rooms": []}
-
-
-def test_tapping_a_lit_room_turns_that_one_off():
-    """It is lit, so it is in scope, so tapping it takes it out. The old row
-    could not express this at all: with "Alle" ticked the room boxes were
-    disabled."""
-    assert toggle(ALL, "climate.b") == {"allRooms": False,
-                                        "rooms": ["climate.a", "climate.c"]}
-
-
-def test_turning_one_off_leaves_the_rest_in_their_own_order():
-    """The row is read left to right; a selection that reorders itself as it is
-    edited makes the names move under the finger."""
-    out = toggle({"allRooms": False, "rooms": ["climate.c", "climate.a", "climate.b"]},
-                 "climate.a")
-    assert out["rooms"] == ["climate.b", "climate.c"]
-
-
-def test_tapping_a_dark_room_adds_it():
-    assert toggle({"allRooms": False, "rooms": ["climate.a"]}, "climate.b") == {
-        "allRooms": False, "rooms": ["climate.a", "climate.b"]}
-
-
-def test_selecting_the_last_one_becomes_alle():
-    """Otherwise the row shows every room lit beside a dark `Alle` — a difference
-    with no meaning behind it. It also matters later: an explicit list of every
-    room silently excludes a room added afterwards, and `alle` does not."""
-    assert toggle({"allRooms": False, "rooms": ["climate.a", "climate.b"]},
-                  "climate.c") == ALL
-
-
-def test_the_last_lit_room_can_be_turned_off():
-    """Nothing selected is a state a resident can reach, so the actions have to
-    answer for it — see the refusals below."""
-    assert toggle({"allRooms": False, "rooms": ["climate.c"]}, "climate.c") == {
-        "allRooms": False, "rooms": []}
-
-
-def test_a_single_room_flat_still_toggles():
-    one = ["climate.only"]
-    assert toggle(ALL, "climate.only", rooms=one) == {"allRooms": False, "rooms": []}
-    assert toggle({"allRooms": False, "rooms": []}, "climate.only", rooms=one) == {
-        "allRooms": True, "rooms": []}
-
-
-def test_the_row_collapses_only_when_it_would_not_fit():
-    """A flat with twelve rooms is a wall of chips above the button somebody came
-    here to press. Three is one line and hiding it would cost a tap to answer
-    "which rooms" — the question the row exists for."""
-    assert int(run_js(CARD, "MAX_CHIPS")) >= 3
-    src = CARD.read_text(encoding="utf-8")
-    assert "rooms.length <= MAX_CHIPS || this._openRooms" in src
-
-
-def test_a_chip_carries_its_own_state_for_a_screen_reader():
-    src = CARD.read_text(encoding="utf-8")
-    assert 'aria-pressed="${on}"' in src
 
 
 # --- and the actions use it --------------------------------------------------
@@ -925,19 +860,22 @@ def _run(form, method):
                              + " JSON.stringify({ sent, said })); })()"))
 
 
-def test_boost_acts_on_the_rooms_that_are_lit():
-    """THE RED ONE, and it predates the chips: the picker sat directly above
-    "Boost setzen" and the button ignored it — pick one room, press it, and the
-    whole flat went to 30 °C. It went unnoticed because the picker was collapsed
-    behind a disclosure and defaulted to "alle", so the two agreed in the only
-    case anybody exercised."""
-    got = _run({"allRooms": False, "rooms": ["climate.b"]}, "_boostAll")
-    assert got["sent"] == ["boost:climate.b"]
+def test_boost_acts_on_every_room_with_no_picker_to_get_wrong():
+    """THE ONE THE PICKER EXISTED FOR, from the other side. The row of chips sat
+    above this button and the button ignored it — pick one room, press it, the
+    whole flat went to 30 °C. The row is gone ("whatever thez click is
+    automaticallz applied to everzthing", 2026-10-20), so the scope the card
+    ships with has to BE the flat: the defect is now impossible rather than
+    merely absent."""
+    got = _run({}, "_boostAll")
+    assert [c.split(":")[1] for c in got["sent"]] == ROOMS
+    assert got["said"] == []
 
 
-def test_boost_with_nothing_lit_refuses_rather_than_doing_the_flat():
-    """Nothing selected is one tap away now. Falling back to every room would be
-    the same defect with a friendlier face."""
+def test_boost_with_no_rooms_at_all_refuses_rather_than_reporting_success():
+    """Not reachable by tapping any more — a flat with no thermostat reaches it.
+    `_selected()` answers with an empty list there, and a success message over
+    zero requests is the lie this refusal exists to prevent."""
     got = _run({"allRooms": False, "rooms": []}, "_boostAll")
     assert got["sent"] == []
     assert got["said"] == [{"kind": "err", "text": "Kein Raum ausgewählt."}]
@@ -948,15 +886,16 @@ def test_boost_by_default_still_means_the_whole_home():
     assert [s.split(":")[1] for s in got["sent"]] == ROOMS
 
 
-def test_alle_aus_ignores_the_picker():
+def test_alle_aus_is_the_whole_flat_whatever_the_form_says():
     """Must-not-flag. The label says "Alle AUS" — Ahmad's own words from the
     previous system — and a button that says what it does is allowed to say it.
-    Scoping it to the selection would make a labelled promise false."""
+    Kept pinned after the picker went: the form still carries a scope that the
+    Urlaub box writes to, and these two buttons must stay deaf to it."""
     got = _run({"allRooms": False, "rooms": ["climate.b"]}, "_offAll")
     assert [s.split(":")[1] for s in got["sent"]] == ROOMS
 
 
-def test_alle_ki_ignores_it_too():
+def test_alle_ki_is_deaf_to_it_too():
     got = _run({"allRooms": False, "rooms": ["climate.b"]}, "_planAll")
     assert {s.split(":")[1] for s in got["sent"]} == set(ROOMS)
 
@@ -973,14 +912,14 @@ def test_ending_a_sonderplan_on_nothing_does_not_report_zero_of_zero():
 # (2026-10-05).
 #
 # One heading said "Boost" over three actions, two of which are not a boost —
-# and the room picker under it governs the first and deliberately not the other
-# two. A reader had to KNOW that. It is why "Boost setzen ignores the picker"
-# went unnoticed for so long: nothing on screen claimed otherwise, and nothing
-# claimed it either.
+# and the room picker under it governed the first and deliberately not the other
+# two. A reader had to KNOW that, so the layout was split: picker + Boost in one
+# block, the two whole-home buttons under a heading of their own.
 #
-# So the layout carries it: the picker and Boost in one block, the two whole-home
-# buttons in another under a heading that states their scope. These tests are the
-# ORDER, because order is the whole mechanism — every label here is unchanged.
+# THE SPLIT IS GONE because what it was explaining is gone. With no picker all
+# three buttons have the same scope, so they are one row ("place all 3 buttons
+# next to each other", 2026-10-20) and the "Ganze Wohnung" heading would be a
+# label on nothing. These tests are the row.
 
 
 def _markup():
@@ -1000,89 +939,137 @@ def _at(markup, needle):
     return i
 
 
-def test_boost_and_the_room_picker_are_one_block():
-    """The picker must come after the Boost heading and before Boost setzen, or
-    it is a control floating between two scopes again."""
-    m = _markup()
-    # Anchored on the heading's OPENING tag: its text now carries the bracketed
-    # explanation, so ">Boost</h4>" stopped existing the day that moved onto the
-    # same line and this test failed on correct markup (CI, 2026-10-06).
-    assert _at(m, "<h4>Boost ") < _at(m, 'class="rooms"') < _at(m, ">Boost setzen<")
+#: The row the three actions live in, markup only.
+def _quick_row(markup):
+    a = markup.index('<div class="quick">')
+    return markup[a:markup.index("</div>", a)]
 
 
-def test_the_whole_home_buttons_sit_under_their_own_heading():
-    """THE RED ONE: they were under "Boost", which is not what they do."""
-    m = _markup()
-    head = _at(m, ">Ganze Wohnung<")
-    assert _at(m, ">Boost setzen<") < head, "Boost belongs above the split"
-    assert head < _at(m, ">Alle → KI<") < _at(m, ">Alle AUS<")
+def test_the_three_actions_are_one_row():
+    """THE ASK. They were a row of one and a row of two under separate headings;
+    with one scope between them that split says something untrue."""
+    row = _quick_row(_markup())
+    assert _at(row, ">Boost<") < _at(row, ">Alle → KI<") < _at(row, ">Alle AUS<")
 
 
-def test_the_room_picker_is_not_inside_the_whole_home_block():
-    """It does not govern those two buttons, so it must not look as though it
-    does — that mismatch is the defect this layout exists to make impossible."""
-    m = _markup()
-    assert _at(m, 'class="rooms"') < _at(m, ">Ganze Wohnung<")
+def test_the_three_actions_stay_a_row_on_a_phone():
+    """THE ONE THAT ALMOST SHIPPED WRONG. The row was a grid with a 460px
+    breakpoint that gave it one column — which is every phone this runs on, so
+    "next to each other" was true in the markup and false on the device.
+
+    Asserted on the CSS because the stacking was never in the markup: the
+    browser harness mounts the card at 375px and checks the rendered row."""
+    src = CARD.read_text(encoding="utf-8")
+    style = src[src.index("<style>"):src.index("</style>")]
+    quick = style[style.index(".quick {"):]
+    quick = quick[:quick.index("}") + 1]
+    assert "display: flex" in quick, quick
+    # And no media query puts it back: that is exactly how it stacked before.
+    for block in style.split("@media")[1:]:
+        rule = block[:block.index("}") + 1] if "}" in block else block
+        assert ".quick {" not in rule, rule
 
 
 def test_ending_a_boost_stays_with_the_boost():
-    m = _markup()
-    assert _at(m, ">Boost beenden<") < _at(m, ">Ganze Wohnung<")
+    """A way out of something running belongs beside the thing that started it,
+    not under a heading of its own."""
+    assert ">Boost beenden<" in _quick_row(_markup())
 
 
-def test_the_frost_line_sits_under_the_button_it_explains():
-    """It is about what AUS leaves behind, and it sat under a row where two of
-    three buttons were not AUS."""
+def test_there_is_no_heading_left_over_from_the_split():
+    """"Ganze Wohnung" named the scope the other two had and Boost did not. All
+    three have it now, so the heading would be a label on nothing — and a
+    heading over a single row reads as a claim that the row is special."""
+    assert "Ganze Wohnung" not in _markup()
+
+
+def test_the_frost_line_sits_in_the_boost_explanation():
+    """It is about what AUS leaves behind. It was a line under the button row;
+    the page carries no loose prose any more, so it moved into the panel the
+    "i" opens — the one place a resident goes to ask what these buttons do."""
     m = _markup()
-    assert _at(m, ">Alle AUS<") < _at(m, "frosthint")
+    tip = m[m.index('class="tip boosttip"'):]
+    tip = tip[:tip.index("</div>")]
+    assert "frosthint" in tip, tip
 
 
 def test_every_block_after_the_first_is_ruled_off():
     """The blocks are what says which buttons share a scope, so they have to look
     separate. A heading alone reads as a label on the row above it."""
     m = _markup()
-    for head in ("Ganze Wohnung", "Sonderpläne (Krankheit und Urlaub)"):
-        before = m[max(0, _at(m, ">" + head + "<") - 120):_at(m, ">" + head + "<")]
-        assert "rule" in before, head
+    before = m[max(0, _at(m, ">Urlaub ") - 120):_at(m, ">Urlaub ")]
+    assert "rule" in before, before
 
 
 def test_the_labels_are_untouched_by_the_regrouping():
     """Must-not-flag. Moving buttons is not licence to rename them — these are
-    Ahmad's words from the previous system and residents read them there."""
+    Ahmad's words from the previous system and residents read them there. Only
+    "Boost setzen" changed, and he asked for that one by name."""
     m = _markup()
-    for label in ("Boost setzen", "Alle → KI", "Alle AUS"):
+    for label in (">Boost<", "Alle → KI", "Alle AUS"):
         assert label in m, label
 
 
-# --- the section says what it is, on one line --------------------------------
-# "the explanation of boost put in parentheses same line as boost not below,
-# and add a small sentence before the rooms area to choose the room to boost"
-# (2026-10-05).
+# --- the explanations live behind an "i" ------------------------------------
+# "keep all explanation in a tooltip or i icon that shows the text, we dont want
+# extra text in the page" (2026-10-20).
+#
+# They were on the heading line, in brackets, which was the previous ask
+# ("explanation of boost put in parentheses same line as boost not below",
+# 2026-10-05). On a phone that line wrapped under the heading anyway, so the
+# page still read as prose with controls in it. Now each heading carries one
+# round button and the sentence is in a panel it opens.
 
 
-def test_the_explanation_rides_on_the_boost_heading():
-    """THE ASK. It was a line of its own under the heading; now the heading and
-    what it means are one line."""
+def test_each_section_heading_carries_an_i_button():
+    m = _markup()
+    for tip in ("boost", "urlaub"):
+        assert 'data-tip="%s"' % tip in m, tip
+
+
+def test_the_explanation_starts_hidden_because_that_is_the_point():
+    """A panel that is open on arrival is the extra text he asked us to remove,
+    with a button added."""
+    m = _markup()
+    for cls in ("tip boosttip", "tip urlaubtip"):
+        i = m.index('class="%s"' % cls)
+        assert "hidden" in m[i:m.index(">", i)], cls
+
+
+def test_the_i_button_says_whether_it_is_open():
+    """It is the only thing on screen that says a panel exists, so a screen
+    reader has to get the state from it."""
+    src = CARD.read_text(encoding="utf-8")
+    assert 'aria-expanded="false"' in src
+    assert 'el.setAttribute("aria-expanded", String(open))' in src
+
+
+def test_the_boost_explanation_moved_into_its_panel():
+    """THE ASK, structurally: the sentence is no longer a child of the heading."""
     m = _markup()
     h4 = m[m.index(">Boost "):m.index("</h4>")]
-    assert 'class="sub boosthint"' in h4, h4
-    assert "<div class=\"hint boosthint\"" not in m, "the old standalone line is gone"
+    assert "boosthint" not in h4, h4
+    tip = m[m.index('class="tip boosttip"'):]
+    assert "boosthint" in tip[:tip.index("</div>")]
+
+
+def test_the_page_carries_no_loose_paragraph_of_prose():
+    """"we dont want extra text in the page". A `<p class="hint wide">` under a
+    form is exactly that, and the Urlaub form had one."""
+    src = CARD.read_text(encoding="utf-8")
+    holiday = src[src.index("const fieldsHtml"):src.index("if (fieldsHtml ===")]
+    tail = holiday[holiday.index(": `<label>Von"):]
+    assert "hint wide" not in tail, tail
 
 
 def test_the_explanation_escapes_the_headings_shouting():
-    """The heading is uppercased by CSS. A parenthetical inherited that and read
-    as BOOST (VENTILE KURZZEITIG GANZ OEFFNEN)."""
+    """Headings are uppercased by CSS, and the hints inside the panel were
+    styled as part of a heading line before this moved. Uninherited, they read
+    as VENTILE KURZZEITIG GANZ OEFFNEN."""
     src = CARD.read_text(encoding="utf-8")
     style = src[src.index("<style>"):src.index("</style>")]
-    sub = style[style.index("h4 .sub"):]
-    assert "text-transform: none" in sub.split("}")[0]
-
-
-def test_the_room_label_comes_before_the_panel():
-    """"a small sentence before the rooms area to choose the room to boost"."""
-    m = _markup()
-    assert "Räume wählen" in m
-    assert m.index("Räume wählen") < m.index('class="rooms"')
+    rule = style[style.index(".tip .sub"):]
+    assert "text-transform: none" in rule.split("}")[0]
 
 
 def _hint(states):
@@ -1106,18 +1093,19 @@ def _hint(states):
     """.replace("__STATES__", json.dumps(states)))
 
 
-def test_the_idle_explanation_is_bracketed():
-    assert _hint({}) == "(Ventile kurzzeitig ganz öffnen)"
+def test_the_idle_explanation_is_a_sentence_now_that_it_has_a_panel():
+    """The brackets were there because it rode on the heading line. In a panel
+    of its own a bracketed fragment reads like a footnote to nothing."""
+    assert _hint({}) == "Öffnet die Ventile kurzzeitig ganz."
 
 
 def test_the_running_explanation_does_not_say_boost_twice():
-    """It sits directly after a heading that already says BOOST, so
-    "BOOST (2 Räume im Boost ...)" says it twice. And after "in" the plural
-    takes the dative."""
+    """The panel opens from a heading that already says BOOST, so "Boost läuft
+    in 2 Räumen" says it twice. And after "in" the plural takes the dative."""
     live = _boosting("climate.bad", "climate.schlaf")
     got = _hint(live)
-    assert got.startswith("(") and got.endswith(")"), got
     assert "im Boost" not in got, got
+    assert "2 Räumen" in got, got
     assert "2 Räumen" in got, got
 
 
@@ -1125,3 +1113,225 @@ def test_one_boosted_room_still_declines():
     got = _hint(_boosting("climate.bad"))
     assert "1 Raum " in got or got.count("1 Raum") == 1, got
     assert "Räumen" not in got, got
+
+
+# --- what the resident no longer sees ---------------------------------------
+# A batch of removals, 2026-10-20. Each one is here because the markup is the
+# only thing that decides it: the code behind every one of these still exists
+# and still works, so nothing else would notice if a block came back.
+
+
+def test_there_is_no_room_picker_anywhere_in_the_markup():
+    """"remove room choice section, whatever thez click is automaticallz applied
+    to everzthing". The scope machinery stays — `_selected()`, `allRooms`, the
+    Urlaub box's own reach — so a row of chips is one template line away."""
+    m = _markup()
+    for gone in ('class="rooms"', "Räume wählen", 'class="chip', "data-all="):
+        assert gone not in m, gone
+
+
+def test_the_card_offers_no_sickness_plan():
+    """"remove krankheit". `absenceBody` still accepts `kind: "sick"` — it is
+    how the hours form is specified and tested — but nothing on screen asks for
+    one, so the only kind a resident can set is a holiday."""
+    m = _markup()
+    assert "Krankheit" not in m
+    assert 'data-kind="sick"' not in m
+    assert run_js(
+        CARD,
+        "(() => { const c = Object.create(GaHeatingActionsCard.prototype);"
+        " c.setConfig({}); return c._form.kind; })()") == "holiday"
+
+
+def test_there_is_no_bearbeiten_button():
+    """"dont show bearbeiten". It was the only way into the Urlaub form, which
+    is why the form now starts open."""
+    m = _markup()
+    assert "Bearbeiten" not in m
+    assert "toggle-form" not in m
+
+
+def test_removing_that_button_did_not_leave_a_listener_on_it():
+    """THE RED ONE this batch could have shipped: the listener was unguarded, so
+    with the button gone the card threw on its first render and the whole
+    section rendered as nothing."""
+    src = CARD.read_text(encoding="utf-8")
+    i = src.index('querySelector(".toggle-form")')
+    head = src[max(0, i - 200):i]
+    assert "const tfBtn" in head or "if (" in head, src[max(0, i - 200):i + 80]
+    assert 'this.querySelector(".toggle-form").addEventListener' not in src
+
+
+def test_hydraulic_balancing_is_not_offered_to_residents():
+    """"remove hydraulic balancing section, keep as an internal feature that only
+    we can trigger but not the user". The service existing was the whole gate
+    before, and every device that runs ga_heating 0.13+ has it."""
+    src = CARD.read_text(encoding="utf-8")
+    i = src.index("const offered =")
+    gate = src[i:src.index(";", i)]
+    assert "show_ichb" in gate, gate
+
+
+# ── ending a holiday hands the rooms back to KI (2026-10-21) ────────────────
+# "what happens when we deactivate the urlaub schedue? it should set all
+# thermostat back to KI".
+#
+# Deleting the override alone does not do it. An absence is a LAYER on top of
+# the room's mode, never a change to it — ga_heating writes the stored mode in
+# exactly three places (a press on the room, a hand on the radiator, a takeover
+# into manual) and ending a holiday is none of them. So the delete only reveals
+# what was underneath: KI comes back by itself, MANUELL and AUS do not.
+
+_ABS = {"active": True, "temp": 16, "end": "2026-11-01T12:00:00"}
+
+END_ABSENCE = """
+(() => {
+  const c = Object.create(GaHeatingActionsCard.prototype);
+  c.setConfig({});
+  const calls = [], said = [];
+  c._hass = { states: %s,
+    callApi: (m, path, data) => { calls.push(m + " " + path + " " + data.entity_id);
+      return %s ? Promise.reject(new Error("held")) : Promise.resolve({}); },
+    callService: (d, s, data) => { calls.push(d + "." + s + " " + data.entity_id
+      + " " + (data.hvac_mode || "")); return Promise.resolve(); } };
+  c._say = (k, t) => said.push({ kind: k, text: t });
+  return c._endAbsence().then(() => JSON.stringify({ calls, said }));
+})()
+"""
+
+
+def _on_holiday(*room_ids):
+    out = {
+        "climate.bad": {"attributes": {"friendly_name": "Badezimmer",
+                                       "valves": [], "max_temp": 30}},
+        "climate.schlaf": {"attributes": {"friendly_name": "Schlafzimmer",
+                                          "valves": [], "max_temp": 30}},
+    }
+    for rid in room_ids:
+        out[rid]["attributes"]["override"] = {"absence": dict(_ABS)}
+    return out
+
+
+def end_absence(states_obj, reject="false"):
+    return json.loads(run_js(CARD, END_ABSENCE % (json.dumps(states_obj), reject)))
+
+
+def test_ending_a_holiday_also_puts_the_room_back_on_the_plan():
+    """THE ASK. Without the second call a room that was MANUELL or AUS when the
+    holiday was booked comes back heating to a dial setting from a fortnight
+    ago — or not heating at all — with nothing on screen to explain why."""
+    got = end_absence(_on_holiday("climate.bad"))
+    assert got["calls"] == [
+        "delete ga_heating/absence climate.bad",
+        "climate.set_hvac_mode climate.bad auto",
+    ], got
+
+
+def test_the_delete_goes_first():
+    """ORDER MATTERS: while the override is still stored it outranks the room's
+    own mode, so an `auto` sent before it would be overwritten by the next
+    tick."""
+    calls = end_absence(_on_holiday("climate.bad", "climate.schlaf"))["calls"]
+    for i in range(0, len(calls), 2):
+        assert calls[i].startswith("delete "), calls
+        assert calls[i + 1].startswith("climate.set_hvac_mode"), calls
+
+
+def test_every_room_on_holiday_is_handed_back():
+    got = end_absence(_on_holiday("climate.bad", "climate.schlaf"))
+    modes = [c for c in got["calls"] if c.startswith("climate.set_hvac_mode")]
+    assert sorted(modes) == ["climate.set_hvac_mode climate.bad auto",
+                             "climate.set_hvac_mode climate.schlaf auto"], got
+
+
+def test_a_room_with_no_holiday_is_left_alone():
+    """Scoped to the rooms the holiday covered. One the resident deliberately
+    left out of it is not ours to switch on because somebody came home."""
+    got = end_absence(_on_holiday("climate.bad"))
+    assert "climate.schlaf" not in " ".join(got["calls"]), got
+
+
+def test_a_room_whose_holiday_could_not_be_dropped_is_not_set_to_KI():
+    """MUST-NOT-FLAG. The override is still stored and still outranks the mode,
+    so an `auto` here would change the room's stored mode for later while
+    changing nothing now — and the toast would claim it is back on plan."""
+    got = end_absence(_on_holiday("climate.bad"), reject="true")
+    assert not any(c.startswith("climate.set_hvac_mode") for c in got["calls"]), got
+    assert got["said"][0]["kind"] == "err", got
+
+
+def test_nothing_on_holiday_says_so_instead_of_touching_anything():
+    got = end_absence(_on_holiday())
+    assert got["calls"] == []
+    assert got["said"] == [{"kind": "ok", "text": "Kein Urlaub aktiv."}]
+
+
+def test_the_toast_says_the_rooms_are_back_on_the_plan():
+    """The resident pressed one button and two things happened; a message that
+    mentions only the holiday leaves the second one invisible."""
+    got = end_absence(_on_holiday("climate.bad"))
+    assert "Wochenplan" in got["said"][0]["text"], got
+
+
+# ── activating a holiday normalises the room first (2026-10-21) ────────────
+# "i activated urlaub on all rooms, now each room shows different mode and
+# tempertaure". A holiday does NOT change the room's mode — ga_heating's
+# `_HEAT_NOW` is only a boost and the balancing run — so it layers over
+# whatever each room happens to be in. Booked while two rooms were on MANUELL
+# and one on KI, the flat read as three different things for the whole
+# holiday, with stale manual periods counting down underneath.
+#
+# The mirror of what ending one already does.
+
+APPLY_ABSENCE = """
+(() => {
+  const c = Object.create(GaHeatingActionsCard.prototype);
+  c.setConfig({});
+  const calls = [], said = [];
+  c._hass = { states: %s,
+    callApi: (m, path, data) => { calls.push(m + " " + path + " " + data.entity_id);
+      return %s ? Promise.reject(new Error("nope")) : Promise.resolve({}); },
+    callService: (d, s, data) => { calls.push(d + "." + s + " " + data.entity_id
+      + " " + (data.hvac_mode || "")); return Promise.resolve(); } };
+  c._say = (k, t) => said.push({ kind: k, text: t });
+  Object.assign(c._form, { start: "2026-12-20", end: "2026-12-27", temperature: 13 });
+  return c._applyAbsence().then(() => JSON.stringify({ calls, said }));
+})()
+"""
+
+
+def _apply_absence(reject="false"):
+    states = {
+        "climate.bad": {"attributes": {"friendly_name": "Badezimmer",
+                                       "valves": [], "max_temp": 30}},
+        "climate.schlaf": {"attributes": {"friendly_name": "Schlafzimmer",
+                                          "valves": [], "max_temp": 30}},
+    }
+    return json.loads(run_js(CARD, APPLY_ABSENCE % (json.dumps(states), reject)))
+
+
+def test_booking_a_holiday_puts_every_room_on_KI_first():
+    """THE ORDER IS THE TEST. A press on the room ends what somebody asked for
+    earlier — `_end_requested_overrides` pops an ACTIVE absence — so a KI sent
+    AFTER the POST would delete the holiday just written, in the one case that
+    matters most: a holiday starting now."""
+    calls = _apply_absence()["calls"]
+    for room in ("climate.bad", "climate.schlaf"):
+        ki = calls.index(f"climate.set_hvac_mode {room} auto")
+        post = calls.index(f"post ga_heating/absence {room}")
+        assert ki < post, (room, calls)
+
+
+def test_every_selected_room_is_normalised_not_just_the_first():
+    calls = _apply_absence()["calls"]
+    modes = [c for c in calls if c.startswith("climate.set_hvac_mode")]
+    assert sorted(modes) == ["climate.set_hvac_mode climate.bad auto",
+                             "climate.set_hvac_mode climate.schlaf auto"], calls
+
+
+def test_a_refused_holiday_still_reports_the_refusal():
+    """MUST-NOT-FLAG: normalising first must not swallow the route's 400. The
+    room is on KI either way, which is where a room without a holiday belongs."""
+    got = _apply_absence(reject="true")
+    assert got["said"][0]["kind"] == "err", got
+    assert "abgelehnt" in got["said"][0]["text"], got

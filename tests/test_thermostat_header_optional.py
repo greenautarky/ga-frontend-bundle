@@ -96,17 +96,23 @@ def _strategy_src() -> str:
     return STRATEGY.read_text(encoding="utf-8")
 
 
-def test_strategy_option_defaults_to_steuerung_and_keeps_empty_string():
+def test_strategy_option_is_an_override_not_a_default():
+    """THE MEANING CHANGED on 2026-10-21. The header used to read "Steuerung",
+    a word every room repeated, and `thermostat_header: ""` was how a device
+    turned it off — which is what K55 has. The header now carries the ROOM
+    NAME, so "" can no longer mean "show nothing": a device that switched the
+    old word off was not asking to lose the new one."""
     src = _strategy_src()
-    assert (
-        'thermostatHeader: typeof c.thermostat_header === "string" ? '
-        'c.thermostat_header : "Steuerung",' in src
-    )
+    # The empty string must fall through to the room name, so the option can
+    # only ever ADD a custom word — never take the name away.
+    flat = " ".join(src.split())
+    assert 'typeof c.thermostat_header === "string" && c.thermostat_header' in flat
+    assert "? c.thermostat_header : null," in flat
 
 
-def test_strategy_passes_the_option_to_the_card():
+def test_strategy_hands_the_card_the_room_name():
     src = _strategy_src()
-    assert "thermostatCard(entity, room.name, opt.thermostatStyle, opt.thermostatHeader)" in src
+    assert "opt.thermostatHeader || room.name || room.area_id" in src
     assert 'header: "Steuerung"' not in src, "the title is hard-coded again"
 
 

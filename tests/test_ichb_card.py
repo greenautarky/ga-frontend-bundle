@@ -259,7 +259,7 @@ RENDER = """
       addEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
   };
   const c = Object.create(GaHeatingActionsCard.prototype);
-  c.setConfig({}); c._built = true;
+  c.setConfig(__CONFIG__); c._built = true;
   c._hass = __HASS__;
   c.querySelector = (sel) => (els[sel] = els[sel] || mk());
   c.querySelectorAll = () => [];
@@ -290,10 +290,21 @@ def _hass(states, services=SERVICES_013):
     return json.dumps(hass)
 
 
-def render(states, services=SERVICES_013, then=None):
-    """Render once; with `then`, render again over a second set of states."""
-    js = RENDER.replace("__HASS__", _hass(states, services)).replace(
-        "__THEN__", f"c._hass = {_hass(then, services)}; c._render();" if then else "")
+#: The card config WE place for ourselves. A resident's card carries no such
+#: key, which is the point of the whole gate — see the two tests below.
+INTERNAL = {"show_ichb": True}
+
+
+def render(states, services=SERVICES_013, then=None, config=INTERNAL):
+    """Render once; with `then`, render again over a second set of states.
+
+    Defaults to OUR config, because almost every test here is about what the
+    balancing section does once it is on screen.
+    """
+    js = (RENDER.replace("__HASS__", _hass(states, services))
+                .replace("__CONFIG__", json.dumps(config))
+                .replace("__THEN__",
+                         f"c._hass = {_hass(then, services)}; c._render();" if then else ""))
     return json.loads(run_js(CARD, js))
 
 
@@ -304,8 +315,24 @@ def _running(states):
     return out
 
 
-def test_the_section_is_shown_where_ga_heating_offers_the_service():
+def test_the_section_is_shown_where_we_asked_for_it_and_the_service_exists():
     assert render(COOL_FLAT)[".ichb-section"]["hidden"] is False
+
+
+def test_a_resident_is_never_offered_a_balancing_run():
+    """THE ASK: "keep as an internal feature that only we can trigger but not
+    the user" (2026-10-20).
+
+    The gate used to be the service alone, and every device on ga_heating 0.13+
+    registers it — so this section was on every resident's card. An hour of
+    30 °C in every room is not something to leave one tap from a dashboard."""
+    assert render(COOL_FLAT, config={})[".ichb-section"]["hidden"] is True
+
+
+def test_the_gate_needs_BOTH_the_service_and_the_config():
+    """Must-not-flag, the other way: our own card on a device too old for the
+    service must not show a button that fails when pressed."""
+    assert render(COOL_FLAT, SERVICES_0121, config=INTERNAL)[".ichb-section"]["hidden"] is True
 
 
 def test_the_section_is_hidden_on_ga_heating_0_12():

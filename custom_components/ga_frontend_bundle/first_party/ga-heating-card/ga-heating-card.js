@@ -244,6 +244,18 @@ function curveAxisHtml(slots) {
  * as written. Every first-party card carries this same helper; a test keeps the
  * copies identical.
  */
+/**
+ * `DD.MM. HH:MM` from an ISO stamp, or "".
+ *
+ * The same four lines ga-heating-actions-card carries, and deliberately the
+ * same output: a resident reads "bis 22.10. 12:00" on the Services view and
+ * then on this card, and two spellings of one moment read as two moments.
+ */
+function whenText(iso) {
+  if (typeof iso !== "string" || iso.length < 16) return "";
+  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}. ${iso.slice(11, 16)}`;
+}
+
 function esc(v) {
   return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -266,6 +278,87 @@ class GaHeatingCard extends HTMLElement {
       this._build();
       this._load();
     }
+    this._syncUrlaub();
+  }
+
+  /**
+   * The holiday that has taken this room's plan over, if one has.
+   *
+   * `{temp, end}` or null. Read from the ROOM entity, which is where ga_heating
+   * publishes it — the card never asks a second source what is running.
+   */
+  _urlaub() {
+    const s = this._hass && this._hass.states
+      && this._hass.states[this._config.entity];
+    const a = s && ((s.attributes || {}).override || {}).absence;
+    if (!a || a.active !== true || a.off) return null;
+    return { temp: a.temp, end: a.end };
+  }
+
+  /**
+   * Say that the holiday's plan is running, and stop the week being edited.
+   *
+   * WHY IT HAS TO BE SAID. While a holiday runs, ga_heating HOLDS the room's
+   * real plan and puts its own flat week in its place, so the radiators can run
+   * it in their own `auto`. The card would otherwise show seven identical days
+   * with nothing to explain them — indistinguishable from a plan that had been
+   * wiped.
+   *
+   * WHY READ-ONLY. The week on screen is not the resident's plan, it is the
+   * holiday's. Saving an edit to it would overwrite the flat week and, when the
+   * holiday ended, the engine would find a plan it did not install and hand
+   * back the real one anyway — the edit would vanish without ever being wrong
+   * enough to report.
+   *
+   * RELOADS ON EVERY TRANSITION, because the plan under the card is swapped by
+   * the engine, not by this card: without it a holiday starting leaves the
+   * resident's week on screen, and one ending leaves the flat one.
+   */
+  _syncUrlaub() {
+    if (!this._built) return;
+    const u = this._urlaub();
+    const sig = u ? `${u.temp}|${u.end}` : "";
+    if (sig === this._urlaubSig) return;
+    const first = this._urlaubSig === undefined;
+    this._urlaubSig = sig;
+
+    const box = this.querySelector(".urlaub");
+    if (box) {
+      if (u) {
+        // ONE FACT ON THE LINE, the rest behind the "i" — the same shape the
+        // Services card already uses, and for the same reason: the page is for
+        // the plan, not for paragraphs about it ("just say urlaub plan aktiv
+        // bis.... then in an i icon when click explain", 2026-10-21).
+        //
+        // No temperature here: every row of the week below already shows it,
+        // and repeating it on the banner says the same number twice.
+        box.innerHTML = `<ha-icon icon="mdi:calendar-clock"></ha-icon>`
+          + `<span><b>Urlaubsplan aktiv</b>`
+          + `${u.end ? ` bis ${esc(whenText(u.end))}` : ""}</span>`
+          + `<button type="button" class="infobtn" aria-label="Erklärung Urlaubsplan" `
+          + `aria-expanded="false">i</button>`;
+        box.removeAttribute("hidden");
+        const tip = this.querySelector(".urlaubtip");
+        const btn = box.querySelector(".infobtn");
+        if (tip && btn) {
+          tip.setAttribute("hidden", "");   // a new holiday opens closed
+          btn.addEventListener("click", () => {
+            const open = tip.hasAttribute("hidden");
+            if (open) tip.removeAttribute("hidden");
+            else tip.setAttribute("hidden", "");
+            btn.setAttribute("aria-expanded", String(open));
+          });
+        }
+      } else {
+        box.setAttribute("hidden", "");
+        const tip = this.querySelector(".urlaubtip");
+        if (tip) tip.setAttribute("hidden", "");
+      }
+    }
+    this.classList.toggle("locked", Boolean(u));
+    // Not on the first pass: `_load` has just been called by the builder, and a
+    // second one would race it.
+    if (!first) this._load();
   }
 
   getCardSize() { return 7; }
@@ -393,6 +486,12 @@ class GaHeatingCard extends HTMLElement {
       <ha-card${this._header()}>
         <div class="card-content">
           <div class="msg"></div>
+          <div class="urlaub" hidden></div>
+          <div class="urlaubtip" hidden>
+            Der eigene Heizplan ist gespeichert und gilt wieder, sobald der Urlaub
+            vorbei ist. Wenn Sie ihn jetzt ändern möchten, beenden Sie den Urlaub
+            unter „Services“.
+          </div>
           <div class="pending"></div>
           <div class="days"></div>
           <div class="slots"></div>
@@ -403,8 +502,8 @@ class GaHeatingCard extends HTMLElement {
           </div>
           <div class="readout"></div>
           <div class="actions">
-            <button class="btn copy-week">Auf Mo–Fr übernehmen</button>
-            <button class="btn copy-all">Auf alle Tage</button>
+            <button class="btn copy-week">Für Mo–Fr</button>
+            <button class="btn copy-all">Für alle Tage</button>
             <button class="btn discard">Verwerfen</button>
             <button class="btn primary save">Speichern</button>
           </div>
@@ -415,6 +514,42 @@ class GaHeatingCard extends HTMLElement {
         ga-heating-card .msg { display:none; padding:8px 10px; border-radius:8px; margin-bottom:10px; font-size:.9em; }
         ga-heating-card .msg.ok { display:block; background: rgba(76,175,80,.15); color: var(--success-color,#1d7a3a); }
         ga-heating-card .msg.err { display:block; background: rgba(244,67,54,.15); color: var(--error-color,#c0392b); }
+        /* THE HOLIDAY'S OWN PLAN IS RUNNING, and this is the only thing that
+           says so. A resident looking at seven identical days with no
+           explanation would read it as their plan having been wiped. */
+        ga-heating-card .urlaub { display:flex; align-items:center; gap:8px;
+          padding:9px 11px; border-radius:9px; margin-bottom:10px; font-size:.9em;
+          background: var(--secondary-background-color,#eef1f0);
+          border-left: 3px solid var(--primary-color,#4A7D59); }
+        ga-heating-card .urlaub[hidden] { display:none; }
+        ga-heating-card .urlaub ha-icon { --mdc-icon-size:18px; flex:none;
+          color: var(--primary-color,#4A7D59); }
+        ga-heating-card .urlaub b { font-weight:600; }
+        /* Pushed to the end of the line, so the sentence reads to its full stop
+           before the control does. */
+        ga-heating-card .urlaub .infobtn { margin-left:auto; }
+        ga-heating-card .infobtn { font: inherit; font-size:.95em; line-height:1;
+          width:1.5em; height:1.5em; padding:0; flex:none; border-radius:50%;
+          cursor:pointer; font-weight:700;
+          border:1px solid var(--divider-color,#d8dedd);
+          background: var(--card-background-color,#fff);
+          color: var(--secondary-text-color,#5a6b68); }
+        ga-heating-card .infobtn[aria-expanded="true"] {
+          border-color: var(--primary-color,#4A7D59); color: var(--primary-color,#4A7D59); }
+        /* Reads as a note about the line above it, not as another row. */
+        ga-heating-card .urlaubtip { margin:-6px 0 10px; padding:8px 11px;
+          border-radius:9px; font-size:.84em;
+          color: var(--secondary-text-color,#5a6b68);
+          background: var(--secondary-background-color,#eef1f0);
+          border-left:3px solid var(--primary-color,#4A7D59); }
+        ga-heating-card .urlaubtip[hidden] { display:none; }
+        /* Read-only while it runs: the controls stay VISIBLE so the card does
+           not change shape, but nothing can be typed or pressed. Hiding them
+           would read as the feature having disappeared. */
+        ga-heating-card.locked .slots input,
+        ga-heating-card.locked .slots select,
+        ga-heating-card.locked .slots button,
+        ga-heating-card.locked .actions button { pointer-events:none; opacity:.45; }
         ga-heating-card .days { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
         ga-heating-card .day { flex:1; min-width:40px; padding:8px 0; text-align:center; border-radius:10px;
           cursor:pointer; font-weight:600; font-size:.9em; background: var(--secondary-background-color,#e8e8e8); }

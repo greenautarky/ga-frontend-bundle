@@ -165,11 +165,19 @@ function historyAvailable(hass) {
  *                               (resident-clean UI); set false to show it.
  *   hide_roomless     true      drop the "Ohne Raum" view. DEFAULT hidden; set
  *                               false to show devices without an area.
+ *   show_ichb         false     offer the hydraulic balancing run on the
+ *                               Services view. OFF, and it is the ONLY way to
+ *                               turn it on: an hour at 30 °C in every room is
+ *                               ours to start, not a resident's ("keep as an
+ *                               internal feature that only we can trigger but
+ *                               not the user", 2026-10-20). The card gates on
+ *                               this AND on the service existing.
  */
 function gaOptions(config) {
   const c = config || {};
   return {
     textTabs: c.text_tabs !== false,
+    showIchb: c.show_ichb === true,
     singleThermostat: c.single_thermostat !== false,
     thermostatStyle: (() => {
       // Our first-party ga-thermostat-card ships three looks (classic|dial|
@@ -188,7 +196,16 @@ function gaOptions(config) {
     // DEFAULT: hidden. Set hide_roomless:false to show the roomless view.
     hideRoomless: c.hide_roomless !== false,
     // Unset keeps the fleet look; "" is a deliberate "no title", not unset.
-    thermostatHeader: typeof c.thermostat_header === "string" ? c.thermostat_header : "Steuerung",
+    //: "" IS NO LONGER "drop the header". It used to read "Steuerung", a word
+    //: every room repeated, and `thermostat_header: ""` was how a device turned
+    //: that off — which is what K55 has. Since 2026-10-21 the header carries
+    //: the ROOM NAME instead, moved out of the heading above it, so "" now
+    //: means "use the room name" rather than "show nothing": a device that
+    //: switched the old word off was not asking to lose the new one. A
+    //: non-empty string still overrides, which is the only thing it was ever
+    //: used for besides turning it off.
+    thermostatHeader: typeof c.thermostat_header === "string" && c.thermostat_header
+      ? c.thermostat_header : null,
     // DEFAULT ON since 1.23.1 (Thomas, 2026-10-06). OFF "while new" meant it was
     // on no device at all: greenautarky_site writes the strategy without options,
     // found by a device test on BOSv1.4.0-rc6. Since ga_heating 0.12.0 the card
@@ -264,20 +281,118 @@ async function fetchHomeModel(hass) {
 //: for "what is it now" anyway.
 const GRAPH_PERIOD = "hour";
 
+//: THE OUTDOOR CURVE'S COLOUR, pinned, and the room's taken off the rotation so
+//: nothing can collide with it.
+//:
+//: Left to itself `statistics-graph` colours by POSITION, so the outdoor curve
+//: changed colour depending on how many thermometers a room happened to have,
+//: and two rooms gave the same line two different colours. Pinning it means
+//: "the orange one is outside" holds in every room and after every change.
+//:
+//: CHOSEN FOR COLOURBLIND READERS, and measured rather than picked by eye
+//: ("use colors that color blind people can differentiate", 2026-10-21). Every
+//: pair below was run through the data-viz validator against both the light and
+//: the dark card surface, on ALL pairs rather than adjacent ones.
+//:
+//:   blue #2196f3 vs deep-orange #ff6f22
+//:     CVD ΔE 27.7 (protan, the worst of protan/deutan) · tritan 33.0
+//:     normal vision ΔE 35.7
+//:
+//: against an ≥8 CVD target and a ≥15 normal-vision floor — so this is not a
+//: near miss, it is the strongest pair HA's named colours offer. Deep-orange
+//: sits at 2.71:1 on a LIGHT card, under the 3:1 bar; the relief that rule asks
+//: for is a legend naming every series, which the card draws. On dark it passes
+//: contrast outright.
+//:
+//: NOT red, which clears contrast too: red on a heating dashboard reads as a
+//: fault, and the weather outside is not one. Not green either — green against
+//: deep-orange is ΔE 7.7 deutan, which is the classic red-green collision.
+const OUTDOOR_COLOR = "deep-orange";
+//: For the room's own thermometers, in order. One is the normal case and gets
+//: blue. A second gets DEEP-PURPLE, not teal: teal is fine for protan/deutan
+//: (ΔE 11.9) but collapses to 7.0 under tritan, where deep-purple holds 24.0
+//: and 17.3 CVD. Teal stays as a third only because a room with three
+//: thermometers is not a case this product has, and a repeat would be worse.
+const ROOM_COLORS = ["blue", "deep-purple", "teal"];
+
+/** The configured entity rows for one chart, coloured. */
+function graphEntities(ids, names, outdoor, outdoorName) {
+  const out = ids.map((id, i) => {
+    const e = typeof id === "string" ? { entity: id } : { ...id };
+    if (names && names[i]) e.name = names[i];
+    e.color = ROOM_COLORS[i % ROOM_COLORS.length];
+    return e;
+  });
+  if (outdoor) {
+    out.push({ entity: outdoor, name: outdoorName, color: OUTDOOR_COLOR });
+  }
+  return out;
+}
+
+//: WHAT A `statistics-graph` CAN AND CANNOT BE TOLD, read off HA 2026.8.2.1's
+//: own editor schema rather than guessed:
+//:
+//:   per CARD    chart_type, days_to_show, period, unit, stat_types, title,
+//:               hide_legend, expand_legend, min_y_axis, max_y_axis,
+//:               fit_y_data, logarithmic_scale, energy_date_selection
+//:   per ENTITY  entity, name, COLOR
+//:
+//: There is no per-series line style, and there is no way to reach one: the
+//: card's chunk carries no `lineStyle` at all, and the chart draws to a canvas
+//: where no CSS can dash a line. A dotted outdoor curve needed a card of our
+//: own, which was built and then withdrawn on 2026-10-21 — it rendered blank on
+//: the device and the failure was not diagnosable without a browser session.
+//:
+//: So COLOUR is the whole lever, and it is enough: the editor's `color` is a
+//: per-entity key that `_computeColors` resolves and hands to the chart.
+//: THE LEGEND SWATCH, as CSS, kept out of the config below because it is used
+//: at two depths — see GRAPH_CHROME.
+//:
+//: HA draws each swatch as an `<ha-svg-icon>` whose path is a TICK INSIDE A
+//: DISC: the disc is filled with `currentColor` (set inline to the series
+//: colour) and the tick is a hole punched through it. So the tick is not drawn
+//: in white — it is the card showing through.
+//:
+//: Which is why `background: currentColor` is the whole fix: it puts the series
+//: colour behind the hole, the tick stops contrasting with the disc, and what
+//: is left is a plain dot of the series colour. Nothing is overridden that HA
+//: might rename, and the icon's own shadow root is never opened.
+//:
+//: `border-radius: 50%` because the disc is round; a square background would
+//: show its corners around the glyph.
+//:
+//: A HIDDEN SERIES IS LEFT ALONE. The swatch is the button that shows and hides
+//: its curve, and HA already draws that state as an outline. Filling it would
+//: throw away the only feedback a click has.
+const LEGEND_SWATCH_CSS = `
+  .chart-legend ha-svg-icon { background: currentColor; border-radius: 50%; }
+  .chart-legend li.hidden ha-svg-icon { background: transparent; }`;
+
 const GRAPH_CHROME = {
   card_mod: {
-    style: ".card-header { font-size: 16px; font-weight: 600; line-height: 1.4; "
-      + "padding: 12px 16px 0; } .card-header a { display: none; }",
+    //: THREE SHADOW ROOTS DEEP, which is why this is the nested object form and
+    //: not a string. The chain, read off the shipped chunks rather than
+    //: guessed: the card renders `<statistics-chart>`, which renders
+    //: `<ha-chart-base>`, which draws the legend.
+    //:
+    //: The first attempt (2026-10-21) stopped one root short at
+    //: `ha-chart-base$` and silently did nothing — card-mod drops a selector
+    //: that matches nothing, so a wrong path looks exactly like a working one
+    //: that had no effect. The flat key is KEPT below for that reason: if a
+    //: later HA drops the `statistics-chart` wrapper, one of the two still
+    //: lands, and the one that does not costs nothing.
+    style: {
+      ".": ".card-header { font-size: 16px; font-weight: 600; line-height: 1.4; "
+        + "padding: 12px 16px 0; } .card-header a { display: none; }",
+      "statistics-chart$": { "ha-chart-base$": LEGEND_SWATCH_CSS },
+      "ha-chart-base$": LEGEND_SWATCH_CSS,
+    },
   },
-  //: Both 24 h charts and the thermostat above them on ONE screen, without
-  //: scrolling — the whole room at a glance is the point of the view. `rows` is
-  //: the sections grid's own height unit, so the chart is sized by the layout
-  //: rather than by a pixel height that a different screen would get wrong.
   grid_options: { columns: 12, rows: 4 },
 };
 
 /** The heating control card for one climate entity, per the chosen style. */
-function thermostatCard(entity, roomName, style, header = "Steuerung") {
+function thermostatCard(entity, roomName, style, header = "") {
   if (["classic", "dial", "setpoint"].includes(style)) {
     // FIRST-PARTY ga-thermostat-card (Odoo #518): one card, three looks
     // (classic = big value + setpoint + AUS/MANUEL/KI chips [default];
@@ -301,7 +416,7 @@ function thermostatCard(entity, roomName, style, header = "Steuerung") {
       layout: { mode: { icons: true, names: true, headings: false } },
       control: { hvac: {
         auto: { name: "KI", icon: "mdi:brain" },
-        heat: { name: "MANUEL", icon: "mdi:hand-back-left" },
+        heat: { name: "MANUELL", icon: "mdi:hand-back-left" },
         off: { name: "AUS" },
       } },
       card_mod: { style: "h3.current--value { font-size: 35px; }" },
@@ -398,6 +513,47 @@ function roomSections(room, opt, hass) {
 
   // Named badges — the raw entities carry IEEE-address names on fleet devices.
   const badges = [];
+  // OUTSIDE, ON THE LEFT, AND LABELLED LIKE THE ROOM'S OWN READINGS ARE.
+  // "i need to show the current outdoor temperature as well" (2026-10-21) —
+  // the question a room's own number cannot answer is whether it is cold in
+  // here because the heating is failing or because it is cold out there — then
+  // "add aussen like we have aktuell before it. also add outdoor humidity".
+  //
+  // So the row is TWO GROUPS OF THE SAME SHAPE, a word then its numbers:
+  //
+  //     Außen 12,3 °C 79 %            Aktuell 21,5 °C 49 %
+  //
+  // The label badge is the `state_content: "name"` trick the Aktuell badge
+  // already uses: an entity badge whose content is its own name renders as
+  // icon + word instead of a value. Its icon is the sun against Aktuell's
+  // house, which is the only place the two groups differ — the readings
+  // themselves take the same thermometer and droplet, because they ARE the
+  // same two measurements.
+  //
+  // Both entities are checked against `states`, like the chart's outdoor series
+  // is: a name in a config that no longer resolves must leave the row with the
+  // room's own readings rather than a badge reading "unknown".
+  const outdoorT = opt.outdoorTemperature && hass && hass.states
+    && hass.states[opt.outdoorTemperature] ? opt.outdoorTemperature : null;
+  const outdoorH = opt.outdoorHumidity && hass && hass.states
+    && hass.states[opt.outdoorHumidity] ? opt.outdoorHumidity : null;
+  if (outdoorT || outdoorH) {
+    badges.push({ type: "entity", entity: outdoorT || outdoorH, name: "Außen",
+      icon: "mdi:sun-thermometer-outline", state_content: "name" });
+  }
+  if (outdoorT) {
+    badges.push({ type: "entity", entity: outdoorT, name: "Temperatur",
+      icon: "mdi:thermometer" });
+  }
+  if (outdoorH) {
+    badges.push({ type: "entity", entity: outdoorH, name: "Luftfeuchtigkeit",
+      icon: "mdi:water-percent" });
+  }
+  //: How many badges belong to the left-hand group — the split point the CSS
+  //: below needs. Counted rather than assumed, because the humidity is
+  //: optional and a hard-coded index would strand the room's own readings on
+  //: the left the day a device configures only one of the two.
+  const outdoorBadgeCount = badges.length;
   // THE LABEL GOES WITH THE READINGS, not above the target. It was a row inside
   // the thermostat card at first, which printed the same two numbers a second
   // time under the ones already in this heading (2026-10-08). A badge whose
@@ -490,10 +646,35 @@ function roomSections(room, opt, hass) {
     // the one room named after a person could not be given a true one at all.
     // The headings BELOW this one keep theirs: "Heizplan" and "Verlauf" are the
     // same words in every room, so there the picture does the distinguishing.
-    const cards = [{ type: "heading", heading: room.name || room.area_id,
-      heading_style: "title", badges }];
+    // NO TITLE. The room name moved into the thermostat card below, and the
+    // tab already names the room — a heading repeating it would be the third
+    // telling of the same word on one screen.
+    //
+    // THE OUTDOOR GROUP SITS ON THE LEFT, the room's own readings stay right.
+    // HA lays this row out as `justify-content: space-between` with an empty
+    // `.content` on the left and `.badges` on the right, so every badge is
+    // pinned right by default; giving `.badges` the width and the LAST badge of
+    // the outdoor group `margin-right: auto` pushes everything after it to the
+    // right, without touching the badges themselves.
+    //
+    // Only applied when there IS an outdoor group — otherwise the rule would
+    // strand "Aktuell" on the left, away from the numbers it labels.
+    const cards = [{
+      type: "heading", heading: "", heading_style: "title", badges,
+      ...(outdoorBadgeCount ? { card_mod: { style: `
+        .badges { flex: 1 1 auto; }
+        .badges > *:nth-child(${outdoorBadgeCount}) { margin-right: auto; }` } } : {}),
+    }];
     for (const entity of climate) {
-      cards.push(thermostatCard(entity, room.name, opt.thermostatStyle, opt.thermostatHeader));
+      // THE ROOM NAME GOES IN THE CARD ("thee room name goes inside teh
+      // thermostat card in place of the running state (leerlauf)", 2026-10-21).
+      // The card already lays this line out: with a header it renders the text
+      // and floats the running state right; without one the state sits alone on
+      // the left, which is what K55 showed. So this needs no card change —
+      // only a header to hand it.
+      cards.push(thermostatCard(
+        entity, room.name, opt.thermostatStyle,
+        opt.thermostatHeader || room.name || room.area_id));
       // Under the control, the last few things that happened to this room
       // (2026-09-30). Directly under it on purpose: "was heating on last night"
       // is a question about the thing you are looking at, and a log on a tab of
@@ -517,10 +698,13 @@ function roomSections(room, opt, hass) {
         icon: "mdi:wrench-outline",
         batteries: roomBatteries(room, clim, hass),
         links: roomLinkQuality(room, clim, hass),
-        // The room itself, for `valves_late`: ga_heating publishes there which of
-        // this room's radiators answered our own write late enough to look like a
-        // hand on the dial. That is the cause behind "the room went to MANUEL by
-        // itself", and it has no sensor of its own to read.
+        // The room itself, for `sensor_silent`: ga_heating publishes there when
+        // it has stopped trusting the room's temperature reading, which changes
+        // what the heating does and has no sensor of its own to read.
+        //
+        // It also publishes `valves_late` on the same entity. The card no longer
+        // renders those (2026-10-20) — see the note beside KIND_RANK there — but
+        // they are still on this attribute for diagnosis.
         climate: (room.climate || [])[0] || null,
       });
     }
@@ -604,10 +788,10 @@ function roomSections(room, opt, hass) {
     //: one honest curve rather than an empty legend entry.
     const outdoor = opt.outdoorTemperature && hass && hass.states
       && hass.states[opt.outdoorTemperature] ? opt.outdoorTemperature : null;
-    const entities = (graphTemps.length === 1 && roomTemps.length)
-      ? [{ entity: graphTemps[0], name: "Raum Temperatur" }]
-      : graphTemps;
-    if (outdoor) entities.push({ entity: outdoor, name: "Außentemperatur" });
+    const entities = graphEntities(
+      graphTemps,
+      (graphTemps.length === 1 && roomTemps.length) ? ["Raum Temperatur"] : null,
+      outdoor, "Außentemperatur");
     history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
       stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD, ...GRAPH_CHROME });
   }
@@ -618,10 +802,9 @@ function roomSections(room, opt, hass) {
     // question nobody asked and reads like part of the sensor's name.
     const outdoorH = opt.outdoorHumidity && hass && hass.states
       && hass.states[opt.outdoorHumidity] ? opt.outdoorHumidity : null;
-    const entities = hums.length === 1
-      ? [{ entity: hums[0], name: "Raum Luftfeuchtigkeit" }]
-      : hums;
-    if (outdoorH) entities.push({ entity: outdoorH, name: "Außenluftfeuchtigkeit" });
+    const entities = graphEntities(
+      hums, hums.length === 1 ? ["Raum Luftfeuchtigkeit"] : null,
+      outdoorH, "Außenluftfeuchtigkeit");
     history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h",
       entities, stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD,
       ...GRAPH_CHROME });
@@ -827,7 +1010,11 @@ function heatingProfileView(opt) {
     title: "Services",
     path: "profil",
     ...(opt.textTabs ? {} : { icon: "mdi:thermostat" }),
-    cards: [{ type: "custom:ga-heating-actions-card" }],
+    cards: [{
+      type: "custom:ga-heating-actions-card",
+      // Passed through, never defaulted on: see `show_ichb` above.
+      ...(opt.showIchb ? { show_ichb: true } : {}),
+    }],
   };
 }
 
