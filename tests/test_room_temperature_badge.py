@@ -15,6 +15,8 @@ These run the SHIPPED bytes in a VM (tests/js/eval.mjs).
 
 from __future__ import annotations
 
+import json
+
 from test_rendered_output import STRATEGY, run_js
 
 

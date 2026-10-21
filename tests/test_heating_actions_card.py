@@ -833,7 +833,14 @@ def test_the_plural_after_in_takes_the_dative():
     assert line.endswith("in 2 Räumen"), line
 
 
-# --- and the actions use it --------------------------------------------------
+# --- the actions, over a flat whose every room is in scope --------------------
+#
+# `ROOMS` is all three of them. It used to be the picker's cast — the list the
+# chips were drawn from — and when the picker went it went with it, leaving the
+# tests below reading an undefined name. It belongs here anyway: these tests are
+# about the buttons acting on the WHOLE FLAT, so the flat is what they need.
+
+ROOMS = ["climate.a", "climate.b", "climate.c"]
 
 
 def _card_with(form):
@@ -1024,7 +1031,7 @@ def test_the_labels_are_untouched_by_the_regrouping():
 def test_each_section_heading_carries_an_i_button():
     m = _markup()
     for tip in ("boost", "urlaub"):
-        assert 'data-tip="%s"' % tip in m, tip
+        assert f'data-tip="{tip}"' in m, tip
 
 
 def test_the_explanation_starts_hidden_because_that_is_the_point():
@@ -1032,7 +1039,7 @@ def test_the_explanation_starts_hidden_because_that_is_the_point():
     with a button added."""
     m = _markup()
     for cls in ("tip boosttip", "tip urlaubtip"):
-        i = m.index('class="%s"' % cls)
+        i = m.index(f'class="{cls}"')
         assert "hidden" in m[i:m.index(">", i)], cls
 
 
