@@ -808,7 +808,10 @@ def test_end_absence_deletes_over_the_absence_route_for_each_running_room():
         {"service": "climate.set_hvac_mode",
          "data": {"entity_id": "climate.schlaf", "hvac_mode": "auto"}},
     ]
-    assert got["said"] == [{"kind": "ok", "text": "Urlaub in 2 von 2 Räumen beendet."}]
+    # The line says where the rooms went, not just that something stopped: the
+    # `auto` above is the half a resident cannot see.
+    assert got["said"] == [{"kind": "ok", "text": "Urlaub in 2 von 2 Räumen "
+                            "beendet — sie folgen wieder dem Wochenplan."}]
 
 
 def test_end_absence_with_nothing_running_sends_nothing():
