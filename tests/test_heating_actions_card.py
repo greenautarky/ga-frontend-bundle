@@ -788,12 +788,25 @@ def _absent(*room_ids):
 
 
 def test_end_absence_deletes_over_the_absence_route_for_each_running_room():
+    """Kept for the SHAPE of the request — method, path, body — which the
+    handback tests further down stringify away.
+
+    A `set_hvac_mode auto` now follows each delete ("it should set all
+    thermostat back to KI", 2026-10-21): the delete only reveals the mode that
+    was underneath, so a room that was MANUELL when the holiday was booked came
+    back heating to a dial setting from a fortnight ago. Why that is safe, and
+    why the delete has to go first, is on the handback tests.
+    """
     got = json.loads(run_js(CARD, END_ABSENCE % json.dumps(_absent("climate.bad",
                                                                    "climate.schlaf"))))
     assert got["sent"] == [
         {"method": "delete", "path": "ga_heating/absence", "data": {"entity_id": "climate.bad"}},
+        {"service": "climate.set_hvac_mode",
+         "data": {"entity_id": "climate.bad", "hvac_mode": "auto"}},
         {"method": "delete", "path": "ga_heating/absence",
          "data": {"entity_id": "climate.schlaf"}},
+        {"service": "climate.set_hvac_mode",
+         "data": {"entity_id": "climate.schlaf", "hvac_mode": "auto"}},
     ]
     assert got["said"] == [{"kind": "ok", "text": "Urlaub in 2 von 2 Räumen beendet."}]
 
