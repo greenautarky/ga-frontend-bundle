@@ -300,3 +300,57 @@ def test_the_last_two_tabs_are_profil_then_einstellungen():
     # and neither is unshifted any more
     assert "views.unshift(householdOverview(" not in src
     assert "views.unshift(heatingProfileView(" not in src
+
+
+# ─── the outdoor sensors are DEFAULTED, not guessed (2026-10-27) ──────────────
+# greenautarky/ga_manager#371. Converge writes `ga_packages/ga_outdoor.yaml`
+# with two template sensors whose ids it calls stable, for the stated purpose of
+# being the ones the dashboard names (ga_manager 0.263.0). Defaulting to them
+# reads a contract; matching `sensor.aussen*` would be a guess, and still would.
+#
+# Run in the VM rather than read out of the source: the question is what
+# `gaOptions` ANSWERS, and a string assertion would pass on a line that never
+# executes.
+
+import json  # noqa: E402
+
+from test_rendered_output import run_js as _run_js  # noqa: E402
+
+
+def _opt(cfg: str) -> dict:
+    return json.loads(_run_js(
+        STRATEGY,
+        "(() => { const o = gaOptions(" + cfg + ");"
+        " return JSON.stringify({ t: o.outdoorTemperature, h: o.outdoorHumidity }); })()"))
+
+
+def test_a_dashboard_with_no_options_gets_the_provisioned_sensors():
+    """THE ASK. Nothing writes the ga-home dashboard on the fleet, so an option
+    that has to be set per device is a feature that reaches no device at all."""
+    assert _opt("{}") == {"t": "sensor.aussentemperatur",
+                          "h": "sensor.aussenluftfeuchtigkeit"}
+
+
+def test_a_named_entity_still_wins():
+    got = _opt('{ outdoor_temperature: "sensor.mine" }')
+    assert got["t"] == "sensor.mine"
+    assert got["h"] == "sensor.aussenluftfeuchtigkeit", "the other keeps its default"
+
+
+def test_false_turns_it_off_rather_than_falling_back():
+    """A hand-written dashboard has to be able to say no. Without this, `false`
+    would read as "absent" and hand it the default it was refusing."""
+    assert _opt("{ outdoor_temperature: false, outdoor_humidity: false }") == {
+        "t": None, "h": None}
+    assert _opt("{ outdoor_temperature: null }")["t"] is None
+    assert _opt('{ outdoor_temperature: "" }')["t"] is None
+
+
+def test_the_ids_are_the_ones_ga_manager_writes():
+    """MUST-NOT-FLAG, and the only thing holding the two repos together: these
+    fall out of the German names converge renders (`Außentemperatur` ->
+    `aussentemperatur`, ß slugified to ss). Changing either side alone silently
+    blanks the outdoor curve on every device."""
+    src = _src()
+    assert 'const DEFAULT_OUTDOOR_TEMPERATURE = "sensor.aussentemperatur";' in src
+    assert 'const DEFAULT_OUTDOOR_HUMIDITY = "sensor.aussenluftfeuchtigkeit";' in src
