@@ -719,10 +719,20 @@ _NO_HUMIDITY_STATES = """{
 }"""
 
 
-def _head(cfg: str, states: str = _OUT_STATES2):
+#: A room with NO humidity anywhere — no hygrometer of its own, and a climate
+#: entity that reports none either. SPELLED OUT rather than reusing `_ROOM`:
+#: that name is bound TWICE in this file, and the later binding — a room that
+#: DOES have a hygrometer — is the one every helper down here actually gets.
+#: A fixture built by deleting `current_humidity` from the states therefore
+#: changed nothing at all, because the badge was coming from `hums[0]`.
+_ROOM_NO_HUM = ('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+                ' hums: [], batts: [], lights: [], switches: [] }')
+
+
+def _head(cfg: str, states: str = _OUT_STATES2, room: str | None = None):
     return json.loads(run_js(STRATEGY, f"""(() => {{
       const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
-      const h = roomSections({_ROOM}, gaOptions({cfg}), hass)
+      const h = roomSections({room or _ROOM}, gaOptions({cfg}), hass)
         .flatMap(s => s.cards || []).find(c => c.type === "heading");
       return JSON.stringify({{ names: h.badges.map(b => b.name),
         labels: h.badges.filter(b => b.show_state === false).map(b => b.name),
@@ -760,7 +770,10 @@ def test_the_split_follows_the_size_of_the_rooms_own_group():
     assert "nth-child(3)" in _head(_OUT_CFG)["style"]
     # Aktuell + temperature: this room reports no humidity anywhere, so the
     # group is one badge shorter and the split has to move with it.
-    assert "nth-child(2)" in _head(_OUT_CFG, _NO_HUMIDITY_STATES)["style"]
+    shorter = _head(_OUT_CFG, _NO_HUMIDITY_STATES, _ROOM_NO_HUM)
+    assert shorter["names"] == ["Aktuell", "Temperatur",
+                                "Außen", "Temperatur", "Luftfeuchtigkeit"], shorter
+    assert "nth-child(2)" in shorter["style"], shorter
 
 
 def test_the_split_does_not_follow_the_outdoor_group_any_more():
