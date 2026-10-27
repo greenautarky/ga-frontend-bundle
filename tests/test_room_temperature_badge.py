@@ -425,17 +425,45 @@ def test_a_named_outdoor_entity_is_drawn_beside_the_rooms_own():
     assert got[1] == ["Raum Luftfeuchtigkeit", "Außenluftfeuchtigkeit"]
 
 
-def test_without_the_option_nothing_extra_is_drawn():
-    """Most devices have no weather integration at all — a GA device has no
-    `default_config`, so nothing adds one by itself.
+def test_without_the_option_the_provisioned_sensors_are_drawn():
+    """REVERSED on 2026-10-27, and deliberately: this used to assert that no
+    option meant no curve, which made the feature reach one device in the fleet,
+    because nothing writes the ga-home dashboard.
 
-    This is also the proof that the entity is NAMED and never sniffed for: the
-    states above DO contain `sensor.aussentemperatur`, and with no option naming
-    it the chart must still draw one curve. Guessing at `sensor.aussen*` would
-    break the day somebody renames a sensor, and on a device with several weather
-    sources it would draw a stranger's thermometer on a resident's wall.
+    ga_manager 0.263.0 provisions `sensor.aussentemperatur` /
+    `sensor.aussenluftfeuchtigkeit` (greenautarky/ga_manager#371) and the
+    strategy now defaults to them.
     """
     got = _graph_series("{}")
+    assert got[0] == ["Raum Temperatur", "Außentemperatur"]
+    assert got[1] == ["Raum Luftfeuchtigkeit", "Außenluftfeuchtigkeit"]
+
+
+def test_the_default_is_still_not_a_guess():
+    """WHAT THE REVERSED TEST ABOVE USED TO PROVE, kept, because it is the thing
+    that could quietly go wrong.
+
+    Defaulting names two ids another repo commits to writing. SNIFFING would
+    match `sensor.aussen*` — it breaks the day somebody renames a sensor, and on
+    a device with several weather sources it draws a stranger's thermometer on a
+    resident's wall. A sensor that merely LOOKS like an outdoor one must be
+    ignored."""
+    states = _OUT_STATES.replace("sensor.aussentemperatur", "sensor.aussen_garten")
+    expr = f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
+      return roomSections({_OUT_ROOM}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => c.type === "statistics-graph")
+        .map(c => c.entities.map(e => e.name || e));
+    }})()"""
+    got = run_js(STRATEGY, expr)
+    assert got[0] == ["Raum Temperatur"], got
+
+
+def test_a_dashboard_can_still_say_no():
+    """`false` turns it off, for a dashboard that does not want the sensor. The
+    point of a default is that it is overridable in both directions."""
+    got = _graph_series("{ outdoor_temperature: false, outdoor_humidity: false }")
     assert got[0] == ["Raum Temperatur"]
     assert got[1] == ["Raum Luftfeuchtigkeit"]
 
@@ -788,8 +816,14 @@ def test_the_split_does_not_follow_the_outdoor_group_any_more():
 
 def test_no_outdoor_entities_means_no_group_and_no_rule():
     """MUST-NOT-FLAG. With nothing to push right, the rule would strand the
-    room's own readings on the left, away from the edge they belong on."""
-    got = _head("{}")
+    room's own readings on the left, away from the edge they belong on.
+
+    Asked with the sensors OPTED OUT rather than merely unconfigured: since
+    2026-10-27 "unconfigured" means the provisioned pair, so the no-group case
+    has to be reached deliberately. A device whose converge has not written them
+    yet reaches it the other way, by the entities not resolving — which is the
+    test below."""
+    got = _head("{ outdoor_temperature: false, outdoor_humidity: false }")
     assert got["names"] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], got
     assert got["style"] == "", got
 
