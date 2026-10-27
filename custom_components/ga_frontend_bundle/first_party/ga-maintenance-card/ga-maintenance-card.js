@@ -267,7 +267,7 @@ function maintenanceRows(states, batteries, extra) {
   // THE ROOM'S OWN VERDICT, WHERE THERE IS ONE (ga_heating 0.13.8+, `link_weak`).
   //
   // LQI is noisy by nature — it moves with the mains, a door, a person in the
-  // hall. Measured on KIB-SON-00000055 on 2026-10-27, one climate sensor read
+  // hall. Measured on a test device on 2026-10-27, one climate sensor read
   // 108 and then 44 inside the same hour. Banding whatever arrived last does not
   // report a weak radio, it reports the last packet, and a device sitting near
   // the line makes this row appear and vanish between two refreshes of the same
