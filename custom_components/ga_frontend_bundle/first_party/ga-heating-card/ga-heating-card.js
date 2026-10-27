@@ -559,6 +559,12 @@ class GaHeatingCard extends HTMLElement {
            card that is already one of three in a column. The inputs take only
            what they need to show their own value, and the note gets the rest and
            wraps underneath rather than pushing the row out of the card. */
+        /* AIR ABOVE THE FIRST SLOT, to match what sits below the last one
+           ("add a blank space on top of the first slot similar to the space
+           after the last slot", 2026-10-27). It has to be PADDING: the first
+           slot's own margin collapses straight through .slots into the day
+           row's margin-bottom, so a margin here would change nothing at all. */
+        ga-heating-card .slots { padding-top:14px; }
         ga-heating-card .slot { display:flex; gap:6px; align-items:center; margin:6px 0;
           flex-wrap:wrap; }
         ga-heating-card .slot input[type=time] { flex:0 0 96px; }

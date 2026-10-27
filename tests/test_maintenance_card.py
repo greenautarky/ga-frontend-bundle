@@ -637,13 +637,18 @@ def test_a_silent_temperature_sensor_is_named_with_how_long():
     states = _room({"sensor.0xaaa_temperature": {"kind": "temperature", "since": _ago(14400)}})
     states["sensor.0xaaa_temperature"] = {"state": "19.5", "attributes": {
         "friendly_name": "Bad Sensor Temperatur"}}
-    assert silent_rows(states) == ["Bad Sensor Temperatur|Temperatursensor meldet nicht (seit 4 h)"]
+    # NAMED FOR THE DEVICE, not the reading: "Bad Sensor Temperatur —
+    # Temperatursensor meldet nicht" said the measurement twice.
+    assert silent_rows(states) == ["Bad Sensor|Temperatursensor meldet nicht (seit 4 h)"]
 
 
 def test_a_silent_hygrometer_says_which_kind_it_is():
     states = _room({"sensor.0xaaa_humidity": {"kind": "humidity", "since": _ago(10800)}})
     out = silent_rows(states)
-    assert out == ["Feuchtesensor|Feuchtesensor meldet nicht (seit 3 h)"], out
+    # No friendly_name anywhere, so the name falls back to the generic word and
+    # the DETAIL carries which half it was. It used to fall back to
+    # "Feuchtesensor", which stuttered against its own detail.
+    assert out == ["Sensor|Feuchtesensor meldet nicht (seit 3 h)"], out
 
 
 def test_a_healthy_room_grows_no_row():
@@ -673,7 +678,7 @@ def test_a_dead_sensor_outranks_everything_else():
         + ', ["sensor.b_battery"], '
         + json.dumps({"links": [], "climate": "climate.wohnzimmer"})
         + ").map(r => r.name + '|' + r.detail))"))
-    assert out[0].startswith("Bad Sensor Temperatur|"), out
+    assert out[0].startswith("Bad Sensor|"), out
     assert len(out) == 2, out
 
 
@@ -686,6 +691,184 @@ def test_the_longest_silence_comes_first():
     states["sensor.0xbbb_humidity"] = {"state": "44", "attributes": {"friendly_name": "Flur"}}
     out = silent_rows(states)
     assert out[0].startswith("Flur|"), out
+
+
+# ── the radio is judged by the ENGINE, over an hour (2026-10-27) ───────────
+# "only warn when the link has been weak for a while, rather than on whatever the
+# last packet said." LQI moves with the mains, a door, a person in the hall —
+# measured on K55, one sensor read 108 and then 44 inside the same hour — so
+# banding the last packet made this row appear and vanish between two refreshes.
+#
+# ga_heating publishes `link_weak` on the room: the band and when the link fell
+# into it. The card renders. The WORDS stay here, so the two cannot disagree
+# about where the line is.
+
+
+def _with_verdict(verdict, live="44"):
+    states = {"climate.wohnzimmer": {"state": "auto", "attributes": {}},
+              "sensor.0xaaa_linkquality": {
+                  "state": live, "last_changed": _ago(60),
+                  "attributes": {"friendly_name": "Klimasensor 1 Linkqualität"}}}
+    if verdict is not None:
+        states["climate.wohnzimmer"]["attributes"]["link_weak"] = verdict
+    return json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows(" + json.dumps(states) + ", [], "
+        + json.dumps({"links": ["sensor.0xaaa_linkquality"],
+                      "climate": "climate.wohnzimmer"})
+        + ").map(r => r.level + '|' + r.name + '|' + r.detail))"))
+
+
+def test_the_rooms_verdict_outranks_the_last_packet():
+    """The live sensor reads 44, which is ABOVE the band. The hour's median was
+    22, which is not. The engine's answer is the one that reaches the resident."""
+    out = _with_verdict({"sensor.0xaaa_linkquality": {
+        "level": "low", "lqi": 22, "since": _ago(3600)}})
+    assert out == ["low|Klimasensor 1|Funkverbindung schwach"], out
+
+
+def test_an_empty_verdict_silences_a_bad_packet():
+    """THE WHOLE POINT. The engine looked at the hour and found nothing wrong, so
+    a single low reading must not put a row on screen. Empty is an ANSWER, which
+    is why ga_heating publishes `{}` rather than omitting the attribute."""
+    assert _with_verdict({}, live="12") == []
+
+
+def test_an_engine_too_old_to_have_an_opinion_falls_back_to_the_packet():
+    """A device still on 0.13.7 publishes no attribute at all — absent, not empty
+    — and there the row keeps working the way it always did. It flickers, as it
+    always did; it does not disappear."""
+    out = _with_verdict(None, live="12")
+    assert out == ["critical|Klimasensor 1|Funkverbindung sehr schwach"], out
+
+
+def test_the_old_path_still_says_nothing_about_a_healthy_radio():
+    assert _with_verdict(None, live="200") == []
+
+
+def test_the_verdict_row_is_dated_from_when_the_link_went_weak():
+    """`since` from the engine, not the link sensor's `last_changed` — that moves
+    on every packet whether or not anything changed, so it would date the row to
+    "a minute ago" for a fault three days old."""
+    out = json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows("
+        + json.dumps({"climate.wohnzimmer": {"state": "auto", "attributes": {
+            "link_weak": {"sensor.0xaaa_linkquality": {
+                "level": "low", "lqi": 22, "since": "2026-10-20T08:00:00"}}}},
+            "sensor.0xaaa_linkquality": {"state": "44", "last_changed": _ago(60),
+                                         "attributes": {"friendly_name": "K1 Linkqualität"}}})
+        + ", [], " + json.dumps({"links": ["sensor.0xaaa_linkquality"],
+                                 "climate": "climate.wohnzimmer"})
+        + ").map(r => r.when))"))
+    assert out == ["2026-10-20T08:00:00"], out
+
+
+def test_a_device_whose_two_halves_both_went_quiet_says_so_once():
+    """THE ASK. A climate sensor publishes a temperature and a humidity, so a box
+    that stops talking stops talking twice — and said so twice, two critical
+    lines about one wall ("its either completely offline, then we just say
+    offline not 2 messages", 2026-10-27)."""
+    states = _room({
+        "sensor.k1_temperature": {"kind": "temperature", "since": _ago(21600)},
+        "sensor.k1_humidity": {"kind": "humidity", "since": _ago(21600)},
+    })
+    states["sensor.k1_temperature"] = {"state": "unknown", "attributes": {
+        "friendly_name": "Klimasensor 1 Temperatur"}}
+    states["sensor.k1_humidity"] = {"state": "unknown", "attributes": {
+        "friendly_name": "Klimasensor 1 Luftfeuchtigkeit"}}
+    out = silent_rows(states)
+    assert out == ["Klimasensor 1|Meldet nicht (seit 6 h)"], out
+
+
+def test_one_half_gone_still_says_which_half():
+    """Must-not-flag for the collapse above: a device that still reports its
+    temperature and not its humidity has a different fault, and "meldet nicht"
+    with no subject would be wrong about it."""
+    states = _room({"sensor.k1_humidity": {"kind": "humidity", "since": _ago(21600)}})
+    states["sensor.k1_humidity"] = {"state": "unknown", "attributes": {
+        "friendly_name": "Klimasensor 1 Luftfeuchtigkeit"}}
+    assert silent_rows(states) == ["Klimasensor 1|Feuchtesensor meldet nicht (seit 6 h)"], \
+        silent_rows(states)
+
+
+def test_a_silent_device_does_not_also_argue_that_its_radio_is_fine_or_weak():
+    """A box that is not talking has no CURRENT signal strength — its link sensor
+    holds whatever it read when the device was last heard. Reported as its own
+    row it read as a contradiction of the critical line above it ("if its still
+    connected but has low LQI then it contradicts the other message that its
+    offline", 2026-10-27).
+
+    The reading is not discarded: a weak last signal is the likeliest reason the
+    device went quiet, so it joins that line as a cause."""
+    states = _room({
+        "sensor.k1_temperature": {"kind": "temperature", "since": _ago(21600)},
+        "sensor.k1_humidity": {"kind": "humidity", "since": _ago(21600)},
+    })
+    states["sensor.k1_temperature"] = {"state": "unknown", "attributes": {
+        "friendly_name": "Klimasensor 1 Temperatur"}}
+    states["sensor.k1_humidity"] = {"state": "unknown", "attributes": {
+        "friendly_name": "Klimasensor 1 Luftfeuchtigkeit"}}
+    states["sensor.k1_linkquality"] = {"state": "22", "attributes": {
+        "friendly_name": "Klimasensor 1 Linkqualität"}}
+    out = json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows(" + json.dumps(states) + ", [], "
+        + json.dumps({"links": ["sensor.k1_linkquality"],
+                      "climate": "climate.wohnzimmer"})
+        + ").map(r => r.name + '|' + r.detail))"))
+    assert out == ["Klimasensor 1|Meldet nicht (seit 6 h) · Funk war zuletzt schwach"], out
+
+
+def test_a_device_that_is_talking_still_gets_its_weak_radio_row():
+    """MUST-NOT-FLAG. The rule above is about a device that has gone quiet. A
+    device that is reporting normally on a weak link is exactly what the link
+    row exists to catch, and folding that away would hide the warning that comes
+    BEFORE the silence."""
+    states = _room({})
+    states["sensor.k1_linkquality"] = {"state": "22", "attributes": {
+        "friendly_name": "Klimasensor 1 Linkqualität"}}
+    out = json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows(" + json.dumps(states) + ", [], "
+        + json.dumps({"links": ["sensor.k1_linkquality"],
+                      "climate": "climate.wohnzimmer"})
+        + ").map(r => r.name + '|' + r.detail))"))
+    assert out == ["Klimasensor 1|Funkverbindung schwach"], out
+
+
+def test_every_row_carries_when_it_started():
+    """"add the time when the issue was logged" (2026-10-27). A maintenance line
+    without one answers "what is wrong" and not "since when", and the second is
+    what says whether a weak radio is last night's storm or a new wall."""
+    states = _room({"sensor.k1_temperature": {"kind": "temperature", "since": _ago(3600)}})
+    states["sensor.k1_temperature"] = {"state": "unknown", "attributes": {
+        "friendly_name": "Klimasensor 1 Temperatur"}}
+    states["sensor.k1_linkquality"] = {"state": "22", "last_changed": _ago(7200),
+                                       "attributes": {"friendly_name": "Thermostat 9 Linkqualität"}}
+    states["sensor.b_battery"] = {"state": "12", "last_changed": _ago(90000),
+                                  "attributes": {"friendly_name": "Thermostat 2 Batterie"}}
+    out = json.loads(run_js(
+        CARD,
+        "JSON.stringify(maintenanceRows(" + json.dumps(states)
+        + ', ["sensor.b_battery"], '
+        + json.dumps({"links": ["sensor.k1_linkquality"],
+                      "climate": "climate.wohnzimmer"})
+        + ").map(r => r.kind + '|' + (r.when ? 'yes' : 'none')))"))
+    assert sorted(out) == ["battery|yes", "link|yes", "sensor|yes"], out
+
+
+def test_the_list_scrolls_with_the_activity_cards_own_numbers():
+    """"same layout as activities" (2026-10-27) — the two cards sit one under the
+    other in a room, so this takes ga-heating-log-card's numbers rather than a
+    second set that looks close."""
+    src = CARD.read_text(encoding="utf-8")
+    log = (CARD.parent.parent / "ga-heating-log-card"
+           / "ga-heating-log-card.js").read_text(encoding="utf-8")
+    for rule in ("max-height: 96px", "overflow-y: auto",
+                 "overscroll-behavior: contain", "min-width: 104px"):
+        assert rule in src, rule
+        assert rule in log, f"{rule} is no longer what the log card does"
 
 
 def test_an_older_ga_heating_publishes_nothing_and_nothing_breaks():

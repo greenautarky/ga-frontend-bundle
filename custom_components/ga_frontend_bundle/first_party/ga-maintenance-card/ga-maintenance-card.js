@@ -90,6 +90,38 @@ function gaLabel(text) {
 //: English integration defaults.
 const SENSOR_SUFFIX = /\s*(Batterie|Battery( level)?|Linkqualit(ä|ae)t|Link ?quality|Signal(stärke|starke)?)\s*$/i;
 
+//: What a MEASUREMENT sensor's name ends with. Stripped only where the row is
+//: about the device rather than about one reading, which is what lets
+//: "Klimasensor 1 Temperatur" and "Klimasensor 1 Luftfeuchtigkeit" be
+//: recognised as one box on one wall ("its either completely offline, then we
+//: just say offline not 2 messages", 2026-10-27).
+//:
+//: NOT added to SENSOR_SUFFIX. That one names the device for a battery or a
+//: radio row, where the reading is already implied by the row's own words; this
+//: one has to leave "Temperatursensor" available to say WHICH half went quiet
+//: when only one did.
+const MEASURE_SUFFIX = /\s*(Temperatur(e)?|Luftfeuchtigkeit|Feuchtigkeit|Feuchte|Humidity)\s*$/i;
+
+/**
+ * "Heute 14:32", "Gestern 09:15", "Mo 07:00", "28.09. 07:00".
+ *
+ * The same function, deliberately, as ga-heating-log-card's: the two cards sit
+ * one under the other in a room and a time written two ways in one column of
+ * the eye is a worse bug than the duplication is. A test keeps the copies
+ * identical, as it does for `esc`.
+ */
+function formatWhen(iso, now) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(now) - day(d)) / 86400000);
+  if (days <= 0) return `Heute ${hhmm}`;
+  if (days === 1) return `Gestern ${hhmm}`;
+  if (days < 7) return `${["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"][d.getDay()]} ${hhmm}`;
+  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}. ${hhmm}`;
+}
+
 /**
  * What to call the device a maintenance row is about.
  *
@@ -224,20 +256,62 @@ function maintenanceRows(states, batteries, extra) {
       // The percentage never reaches the screen. It stays here as the sort key
       // so two devices in the same band still come out worst-first.
       detail: band.word,
+      // WHEN this became true, as well as can be known: the percentage last
+      // changed when it fell to where it is. Not the moment it crossed the
+      // threshold, which nothing records — but on a battery that only falls,
+      // the two are the same reading.
+      when: (s.last_changed || s.last_updated) || null,
       sort: pct,
     });
   }
-  for (const id of links || []) {
-    const lqi = reading(states[id]);
-    if (lqi === null) continue;        // `unknown` is not a weak signal
-    const band = linkBand(lqi);
-    if (!band) continue;
-    rows.push({
-      kind: "link", level: band.level, icon: band.icon,
-      name: deviceName(states[id]) || "Gerät",
-      detail: band.word,
-      sort: lqi,
-    });
+  // THE ROOM'S OWN VERDICT, WHERE THERE IS ONE (ga_heating 0.13.8+, `link_weak`).
+  //
+  // LQI is noisy by nature — it moves with the mains, a door, a person in the
+  // hall. Measured on a test device on 2026-10-27, one climate sensor read
+  // 108 and then 44 inside the same hour. Banding whatever arrived last does not
+  // report a weak radio, it reports the last packet, and a device sitting near
+  // the line makes this row appear and vanish between two refreshes of the same
+  // screen ("only warn when the link has been weak for a while", 2026-10-27).
+  //
+  // The engine has the clock and the history, so it decides, exactly as it does
+  // for `sensor_silent`: it publishes the band and when the link first fell into
+  // it, and the card renders. The WORDS stay here — what crosses the wire is a
+  // level, so the two cannot disagree about where the line is.
+  //
+  // `since` from the verdict is also a truer timestamp than the link sensor's
+  // `last_changed`, which moves on every packet whether or not anything changed.
+  const verdict = ((states[climate] || {}).attributes || {}).link_weak;
+  if (verdict && typeof verdict === "object") {
+    for (const [id, info] of Object.entries(verdict)) {
+      const band = LINK_BANDS.find((b) => b.level === ((info || {}).level));
+      if (!band) continue;
+      const lqi = Number((info || {}).lqi);
+      rows.push({
+        kind: "link", level: band.level, icon: band.icon,
+        name: deviceName(states[id]) || "Gerät",
+        detail: band.word,
+        when: (info || {}).since || null,
+        sort: Number.isFinite(lqi) ? lqi : 0,
+      });
+    }
+  } else {
+    // A DEVICE STILL ON 0.13.7 OR OLDER publishes no verdict, and the attribute
+    // is absent rather than empty — which is why this branches on the attribute
+    // and not on its size. Falling back to the per-packet band keeps the row
+    // working there; it flickers, as it always did, instead of disappearing.
+    for (const id of links || []) {
+      const lqi = reading(states[id]);
+      if (lqi === null) continue;        // `unknown` is not a weak signal
+      const band = linkBand(lqi);
+      if (!band) continue;
+      rows.push({
+        kind: "link", level: band.level, icon: band.icon,
+        name: deviceName(states[id]) || "Gerät",
+        detail: band.word,
+        when: (states[id].last_changed || states[id].last_updated) || null,
+        sort: lqi,
+      });
+    }
   }
 
   // A ROOM SENSOR THAT HAS STOPPED TALKING (ga_heating 0.13.5+, `sensor_silent`).
@@ -250,23 +324,69 @@ function maintenanceRows(states, batteries, extra) {
   // VERDICT changes; a duration in the attribute would differ every tick and cost
   // a state write per room per minute. So the age is computed here, which also
   // means the line stays current between republishes instead of ageing with them.
+  //: ONE ROW PER DEVICE, not per entity. A climate sensor publishes a
+  //: temperature and a humidity, so a box that stops talking stops talking
+  //: TWICE and used to say so twice — two critical lines, same wall, same
+  //: screwdriver ("when something is wrong with T&H, its either completely
+  //: offline, then we just say offline not 2 messages", 2026-10-27).
+  //:
+  //: Grouped on the device name with its measurement suffix removed, which is
+  //: the only handle the card has: `hass.states` carries no device id.
   const silent = ((states[climate] || {}).attributes || {}).sensor_silent || {};
+  const quietDevices = new Map();
   for (const [sensor, info] of Object.entries(silent)) {
     const at = Date.parse(((info || {}).since) || "");
     if (!Number.isFinite(at)) continue;
     const quiet = (Date.now() - at) / 1000;
     if (!(quiet > 0)) continue;
-    const hours = Math.floor(quiet / 3600);
-    const since = hours >= 1 ? `${hours} h` : `${Math.round(quiet / 60)} min`;
-    const what = (info || {}).kind === "humidity" ? "Feuchtesensor" : "Temperatursensor";
+    const named = deviceName(states[sensor]) || "";
+    const device = named.replace(MEASURE_SUFFIX, "").trim() || named || "Sensor";
+    const kind = (info || {}).kind === "humidity" ? "humidity" : "temperature";
+    const seen = quietDevices.get(device)
+      || { kinds: new Set(), at, quiet, since: (info || {}).since };
+    seen.kinds.add(kind);
+    // The longest silence wins: if one half stopped an hour before the other,
+    // the box has been unreachable since the earlier one.
+    if (at < seen.at) { seen.at = at; seen.quiet = quiet; seen.since = (info || {}).since; }
+    quietDevices.set(device, seen);
+  }
+  for (const [device, seen] of quietDevices) {
+    const hours = Math.floor(seen.quiet / 3600);
+    const since = hours >= 1 ? `${hours} h` : `${Math.round(seen.quiet / 60)} min`;
+    // Both halves gone means the DEVICE is gone, and that is what the line
+    // should say. One half gone is a different fault and keeps the old words,
+    // because then "meldet nicht" without a subject would be wrong.
+    const what = seen.kinds.size > 1
+      ? "Meldet nicht"
+      : (seen.kinds.has("humidity") ? "Feuchtesensor meldet nicht"
+                                    : "Temperatursensor meldet nicht");
     rows.push({
       kind: "sensor", level: "critical", icon: "mdi:thermometer-off",
-      name: deviceName(states[sensor]) || what,
-      detail: `${what} meldet nicht (seit ${since})`,
+      name: device,
+      detail: `${what} (seit ${since})`,
+      device,
+      when: seen.since || null,
       // Longest silence first, and negative so the shared ascending sort keeps
       // the worst one at the top like every other kind.
-      sort: -quiet,
+      sort: -seen.quiet,
     });
+  }
+
+  //: A DEVICE THAT IS NOT TALKING HAS NO CURRENT SIGNAL STRENGTH. Its link
+  //: sensor holds whatever it read when the device was last heard from, so a
+  //: silent box used to collect a second, softer row saying its radio was weak
+  //: — which reads as a contradiction of the critical row right above it
+  //: ("if its still connected but has low LQI then it contradicts the other
+  //: message that its offline", 2026-10-27).
+  //:
+  //: The reading is not thrown away: a weak last signal is the likeliest REASON
+  //: the device went quiet, so it joins the silence row as a cause instead of
+  //: standing against it as a separate claim.
+  for (const row of rows) {
+    if (row.kind !== "link" || !quietDevices.has(row.name)) continue;
+    row.drop = true;
+    const silentRow = rows.find((r) => r.kind === "sensor" && r.device === row.name);
+    if (silentRow) silentRow.detail += " · Funk war zuletzt schwach";
   }
 
   // Worst first across every kind, because a resident reads the first line: a
@@ -274,9 +394,10 @@ function maintenanceRows(states, batteries, extra) {
   // each kind keeps its own sort key, so two weak radios still come out worst
   // first.
   const RANK = { critical: 0, low: 1 };
-  rows.sort((a, b) => (RANK[a.level] - RANK[b.level])
+  const kept = rows.filter((r) => !r.drop);
+  kept.sort((a, b) => (RANK[a.level] - RANK[b.level])
     || (KIND_RANK[a.kind] - KIND_RANK[b.kind]) || (a.sort - b.sort));
-  return rows;
+  return kept;
 }
 
 /**
@@ -325,11 +446,19 @@ class GaMaintenanceCard extends HTMLElement {
     // that failed to load, which is the complaint the actions card's own status
     // line exists to answer — and here it is the difference between "we checked"
     // and "nobody is checking".
+    // WHEN IT STARTED, in the column the activity card above puts it in. A
+    // maintenance line without one answers "what is wrong" and not "since
+    // when", and the second question is the one that says whether a weak radio
+    // is a storm last night or a wall somebody built ("add the time when the
+    // issue was logged", 2026-10-27).
+    const now = new Date();
     const body = rows.length
       ? `<ul>${rows.map((r) =>
-          `<li class="${r.level}"><ha-icon icon="${r.icon}"></ha-icon>` +
-          `<span class="who">${esc(r.name)}</span>` +
-          `<span class="what">${esc(r.detail)}</span></li>`).join("")}</ul>`
+          `<li class="${r.level}">` +
+          `<span class="when">${esc(r.when ? formatWhen(r.when, now) : "")}</span>` +
+          `<span class="line"><ha-icon icon="${r.icon}"></ha-icon>` +
+          `<span class="who">${esc(r.name)}</span> ` +
+          `<span class="what">${esc(r.detail)}</span></span></li>`).join("")}</ul>`
       : `<p class="quiet">Keine Auffälligkeiten.</p>`;
     this.innerHTML = `<ha-card><div class="card-content">${head}${body}</div></ha-card>
       <style>
@@ -342,13 +471,28 @@ class GaMaintenanceCard extends HTMLElement {
         ga-maintenance-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 8px;
     display: flex; align-items: center; gap: 7px; }
   ga-maintenance-card .hdr ha-icon { --mdc-icon-size: 19px; opacity: .85; }
+        /* THE ACTIVITY CARD'S OWN NUMBERS, not a second set that looks
+           close ("make the maintenance section scrollable and same layout as
+           activities", 2026-10-27). Three rows visible, the fourth clipped
+           mid-line so the list reads as scrollable rather than as if it ended;
+           overscroll-behavior keeps a flick inside the card instead of
+           scrolling the dashboard behind it. */
         ga-maintenance-card ul { list-style: none; margin: 0; padding: 0;
-          display: grid; gap: 8px; }
-        ga-maintenance-card li { display: flex; align-items: center; gap: 10px;
-          font-size: .95em; }
+          max-height: 96px; overflow-y: auto; overscroll-behavior: contain;
+          scrollbar-width: thin; }
+        ga-maintenance-card li { display: flex; align-items: baseline; gap: 10px;
+          padding: 5px 0; font-size: 14px; }
+        ga-maintenance-card li + li {
+          border-top: 1px solid var(--divider-color, #e0e0e0); }
+        /* The time is the column a reader scans, so it is fixed-width and
+           first — the same 104px the activity card uses, so the two line up. */
+        ga-maintenance-card .when { flex: 0 0 auto; min-width: 104px;
+          font-size: 13px; opacity: .6; font-variant-numeric: tabular-nums; }
+        ga-maintenance-card .line { flex: 1 1 auto; }
         /* The colour carries the same split as the word, so the two bands are
            told apart before either is read. */
-        ga-maintenance-card ha-icon { --mdc-icon-size: 20px; flex: none; }
+        ga-maintenance-card .line ha-icon { --mdc-icon-size: 16px;
+          vertical-align: -3px; margin-right: 4px; }
         ga-maintenance-card li.critical ha-icon { color: var(--error-color, #b3261e); }
         ga-maintenance-card li.low ha-icon { color: var(--warning-color, #f9a825); }
         ga-maintenance-card li.critical .what { color: var(--error-color, #b3261e); }

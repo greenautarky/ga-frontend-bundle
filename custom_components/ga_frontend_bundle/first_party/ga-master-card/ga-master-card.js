@@ -143,6 +143,15 @@ class GaMasterCard extends HTMLElement {
         ga-master-card th, ga-master-card td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--divider-color,#e0e0e0); vertical-align:top; font-size:.92em; }
         ga-master-card .muted { opacity:.6; font-size:.85em; }
         ga-master-card .area-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+        /* ALL THREE AT THE CARD'S OWN SIZE ("increase the font of these 3",
+           2026-10-27). A <select> and an <input> take the BROWSER's default font
+           rather than the page's, so they rendered a good deal smaller than
+           everything around them; the button was on .9em. Only the type is set
+           here — the colours stay with the theme, which already renders these
+           controls correctly in dark mode. */
+        ga-master-card .area-row select,
+        ga-master-card .area-row input { font-family:inherit; font-size:1em; padding:7px 9px; }
+        ga-master-card .area-row .btn { font-size:1em; }
         ga-master-card label.dash { display:block; font-weight:400; margin:2px 0; }
         ga-master-card code { font-weight:700; }
         ga-master-card .badge { font-size:.72em; font-weight:600; padding:1px 6px; border-radius:8px; background: rgba(244,67,54,.15); color: var(--error-color,#c0392b); vertical-align:middle; }
