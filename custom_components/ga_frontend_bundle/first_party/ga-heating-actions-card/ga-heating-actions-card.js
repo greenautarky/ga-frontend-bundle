@@ -27,10 +27,15 @@
  * Usage:
  *   type: custom:ga-heating-actions-card
  *   title: Heizung            # optional
- *   boost_minutes: 5          # optional, default 5, capped at 240 by ga_heating
+ *   boost_minutes: 15         # optional, default 15, capped at 240 by ga_heating
  */
 
-const BOOST_MINUTES = 5;
+//: How long the Boost button asks for. 15 since 2026-10-27, up from the 5 it
+//: shipped with: five minutes is shorter than a TRV takes to open and the
+//: radiator to make itself felt, so the run was over about when the room
+//: started to notice it. A hand-written config can still override it, and
+//: ga_heating caps whatever arrives at 240.
+const BOOST_MINUTES = 15;
 /**
  * Hourly options for the holiday's start and end time.
  *

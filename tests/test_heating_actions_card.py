@@ -902,7 +902,7 @@ def test_boost_acts_on_every_room_with_no_picker_to_get_wrong():
     assert [c.split(":")[1] for c in got["sent"]] == ROOMS
     # And it SAYS so, over the whole flat — the card's standing rule is to count
     # what happened rather than report "done", and three rooms is the count.
-    assert got["said"] == [{"kind": "ok", "text": "3 Räume für 5 Minuten voll "
+    assert got["said"] == [{"kind": "ok", "text": "3 Räume für 15 Minuten voll "
                             "aufgedreht. Danach gilt wieder der Plan."}], got["said"]
 
 
