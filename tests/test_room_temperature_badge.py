@@ -405,9 +405,18 @@ _OUT_ROOM = ('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
              ' hums: ["sensor.wz_h"], batts: [], lights: [], switches: [] }')
 
 
-def _graph_series(cfg: str):
+_OUT_STATES_NO_OUTDOOR = """{
+  "climate.wz": { state: "auto", attributes: { current_temperature: 19.5, temperature: 21,
+                  valves: [], temperature_source: "sensor.wz_t" } },
+  "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } },
+  "sensor.wz_h": { state: "48", attributes: { device_class: "humidity" } }
+}"""
+
+
+def _graph_series(cfg: str, states: str | None = None):
+    states = _OUT_STATES if states is None else states
     expr = f"""(() => {{
-      const hass = {{ config: {{ components: ["history"] }}, states: {_OUT_STATES} }};
+      const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
       return roomSections({_OUT_ROOM}, gaOptions({cfg}), hass)
         .flatMap(s => s.cards || [])
         .filter(c => c.type === "statistics-graph")
@@ -425,17 +434,26 @@ def test_a_named_outdoor_entity_is_drawn_beside_the_rooms_own():
     assert got[1] == ["Raum Luftfeuchtigkeit", "Außenluftfeuchtigkeit"]
 
 
-def test_without_the_option_nothing_extra_is_drawn():
-    """Most devices have no weather integration at all — a GA device has no
-    `default_config`, so nothing adds one by itself.
-
-    This is also the proof that the entity is NAMED and never sniffed for: the
-    states above DO contain `sensor.aussentemperatur`, and with no option naming
-    it the chart must still draw one curve. Guessing at `sensor.aussen*` would
-    break the day somebody renames a sensor, and on a device with several weather
-    sources it would draw a stranger's thermometer on a resident's wall.
-    """
+def test_without_the_option_the_provisioned_pair_is_drawn():
+    """Changed on purpose (ga_manager#371, 2026-10-27): ga_manager >= 0.263.0
+    provisions `sensor.aussentemperatur` / `sensor.aussenluftfeuchtigkeit` on every
+    device, so those ids are a contract, not a guess — and the default. The states
+    above contain both, so with no option the chart draws the outdoor series."""
     got = _graph_series("{}")
+    assert got[0] == ["Raum Temperatur", "Außentemperatur"]
+    assert got[1] == ["Raum Luftfeuchtigkeit", "Außenluftfeuchtigkeit"]
+
+
+def test_without_the_option_and_without_the_sensors_nothing_extra_is_drawn():
+    """A device without ga_manager >= 0.263.0 has no such entities: the default
+    must degrade to exactly what it drew before — one curve each."""
+    got = _graph_series("{}", states=_OUT_STATES_NO_OUTDOOR)
+    assert got[0] == ["Raum Temperatur"]
+    assert got[1] == ["Raum Luftfeuchtigkeit"]
+
+
+def test_false_turns_the_outdoor_series_off_even_when_the_sensors_exist():
+    got = _graph_series("{ outdoor_temperature: false, outdoor_humidity: false }")
     assert got[0] == ["Raum Temperatur"]
     assert got[1] == ["Raum Luftfeuchtigkeit"]
 
@@ -788,8 +806,10 @@ def test_the_split_does_not_follow_the_outdoor_group_any_more():
 
 def test_no_outdoor_entities_means_no_group_and_no_rule():
     """MUST-NOT-FLAG. With nothing to push right, the rule would strand the
-    room's own readings on the left, away from the edge they belong on."""
-    got = _head("{}")
+    room's own readings on the left, away from the edge they belong on.
+    Since the default names the provisioned outdoor pair (ga_manager#371), "no
+    outdoor" is stated explicitly here — the states below DO hold the pair."""
+    got = _head("{ outdoor_temperature: false, outdoor_humidity: false }")
     assert got["names"] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], got
     assert got["style"] == "", got
 

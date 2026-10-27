@@ -75,6 +75,17 @@ const DOMAIN_LABELS = {
   lock: "Schloss",
 };
 
+//: The outdoor pair ga_manager provisions fleet-wide (>= 0.263.0, ga_outdoor.yaml).
+const DEFAULT_OUTDOOR_TEMPERATURE = "sensor.aussentemperatur";
+const DEFAULT_OUTDOOR_HUMIDITY = "sensor.aussenluftfeuchtigkeit";
+
+//: string -> that entity; false -> off; absent/anything else -> the default.
+function outdoorOption(value, fallback) {
+  if (value === false) return null;
+  if (typeof value === "string" && value) return value;
+  return fallback;
+}
+
 function prettify(text) {
   return String(text || "")
     .replace(/[_-]+/g, " ")
@@ -151,13 +162,18 @@ function historyAvailable(hass) {
  *                               it — the "Heizung" heading directly above
  *                               already names the section. Any other string
  *                               replaces it. ("core" style has no title.)
- *   outdoor_temperature  —       an entity whose state is the outdoor temperature,
+ *   outdoor_temperature  sensor.aussentemperatur
+ *                               an entity whose state is the outdoor temperature,
  *                               drawn as a second series on every room's 24 h
- *                               chart. NAMED, never sniffed for: a strategy that
- *                               guessed at `sensor.aussen*` would break the day
- *                               somebody renamed a sensor, and would draw a
- *                               stranger's thermometer on a resident's wall.
- *   outdoor_humidity     —       the same for the humidity chart.
+ *                               chart. The DEFAULT is the id ga_manager >= 0.263.0
+ *                               provisions on every device (ga_outdoor.yaml, one
+ *                               rounded met source) — a fixed contract, not a
+ *                               guess at `sensor.aussen*`. Still verified against
+ *                               hass.states: absent on the device -> no badge, no
+ *                               second curve. Another string overrides; false
+ *                               turns it off.
+ *   outdoor_humidity     sensor.aussenluftfeuchtigkeit
+ *                               the same for the humidity chart.
  *   change_log        true      show the last changes to a room under its
  *                               thermostat (ga-heating-log-card, "Aktivität").
  *                               DEFAULT ON since 1.23.1; false hides it.
@@ -212,10 +228,11 @@ function gaOptions(config) {
     // reads the room entity first and the recorder only as a fallback, so the
     // per-view cost that justified OFF is mostly gone. change_log:false hides it.
     changeLog: c.change_log !== false,
-    //: Absent on a device with no weather integration, which is most of them —
-    //: a GA device has no `default_config`, so nothing adds one by itself.
-    outdoorTemperature: typeof c.outdoor_temperature === "string" ? c.outdoor_temperature : null,
-    outdoorHumidity: typeof c.outdoor_humidity === "string" ? c.outdoor_humidity : null,
+    //: Default = the ids ga_manager >= 0.263.0 provisions (issue ga_manager#371).
+    //: Every use site still checks hass.states, so a device without them draws
+    //: exactly what it drew before. false turns the series off on purpose.
+    outdoorTemperature: outdoorOption(c.outdoor_temperature, DEFAULT_OUTDOOR_TEMPERATURE),
+    outdoorHumidity: outdoorOption(c.outdoor_humidity, DEFAULT_OUTDOOR_HUMIDITY),
   };
 }
 
