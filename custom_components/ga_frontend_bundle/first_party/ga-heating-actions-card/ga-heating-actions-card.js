@@ -75,7 +75,7 @@ function roomEntities(states) {
  * so the protection here comes from the hardware, not from us — and a card must
  * not promise it without looking.
  *
- * Measured on KIB-SON-00000031, 2026-09-23: all four valves hold 7 °C, not the
+ * Measured on a test device, 2026-09-23: all four valves hold 7 °C, not the
  * 5 °C the vendor documents as the default. A hardcoded 5 would have told the
  * resident a number their flat does not use.
  */

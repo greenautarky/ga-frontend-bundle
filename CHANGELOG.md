@@ -2,7 +2,7 @@
 
 ## 1.23.7 — 2026-10-21
 
-Services rebuild and "Urlaub as a plan" by @ahmad-greenautarky, merged as #55. Developed card by card against KIB-SON-00000055.
+Services rebuild and "Urlaub as a plan" by @ahmad-greenautarky, merged as #55. Developed card by card against a test device.
 
 - Services: every action is the whole flat — the room picker is gone, so the scope can never disagree with the buttons. Boost / Alle → KI / Alle AUS sit in one row at every width (they used to stack on phones). Hydraulic balancing is shown only when the strategy sets `show_ichb: true`. Explanations moved behind "i" buttons.
 - Urlaub: its own section, the form is the section (no "Bearbeiten"); date fields keep what is typed (the markup no longer carries values, so a state push no longer rebuilds the field being edited). "Krankheit" and the "Aus · Frostschutz" option are removed; times are hourly.
@@ -410,7 +410,7 @@ UI polish by @ahmad-greenautarky, merged as #52.
   each valve's own `frost_protection_temperature`. On a SONOFF TRVZB
   `system_mode: off` IS the anti-freeze state, while `ga_heating`'s own OFF is
   deliberately not a low setpoint — so the protection comes from the hardware and
-  the card must not promise it without looking. Measured on KIB-SON-00000031:
+  the card must not promise it without looking. Measured on a test device:
   7 °C, not the 5 °C the vendor documents as the default.
 
 ## 1.17.0
@@ -444,7 +444,7 @@ UI polish by @ahmad-greenautarky, merged as #52.
   is left alone: trimming would be a silent loss of the resident's plan dressed
   up as tidying.
 
-  Observed on KIB-SON-00000031 on 2026-09-23: the selected day went from 4 slots
+  Observed on a test device on 2026-09-23: the selected day went from 4 slots
   to 5, and the same browser check fails on the previous cards with
   "The plan offers 4 times for the selected day".
 

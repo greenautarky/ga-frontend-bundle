@@ -93,7 +93,7 @@ every load from the rooms the server grants the logged-in user
 ### Options (1.2.0)
 
 Set in the dashboard config: `strategy: { type: "custom:ga-home", <option>: … }`.
-Defaults are the look piloted live on KIB-SON-00000050 (2026-07-21):
+Defaults are the look piloted live on a test device (2026-07-21):
 
 | option | default | effect |
 |---|---|---|
@@ -107,6 +107,6 @@ Room badges (temperature / humidity / battery) are labeled **Temperatur /
 Luftfeuchtigkeit / Batterie** — the raw entities carry IEEE-address names on
 fleet devices.
 
-Origin: piloted additively on Ramin's device (KIB-SON-00000050) next to his
+Origin: piloted additively on Ramin's device (a test device) next to his
 original dashboards — old and new design stay switchable via the sidebar; the
 device pins nothing, this bundle is the single source of the new look.
