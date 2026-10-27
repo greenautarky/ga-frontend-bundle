@@ -133,7 +133,7 @@ function historyAvailable(hass) {
  * Strategy options — set in the dashboard config:
  *   `strategy: { type: "custom:ga-home", hide_household: true, ... }`
  *
- * Defaults are the product look piloted on KIB-SON-00000050 (2026-07-21):
+ * Defaults are the product look piloted on a test device (2026-07-21):
  *   text_tabs         true      room NAMES as tab text (a row of identical door
  *                               icons distinguishes nothing)
  *   single_thermostat true      TRVs in one room are coupled — show ONE control
@@ -1031,7 +1031,7 @@ function householdOverview(name, model, rooms, opt) {
  *
  * NOT A SECTION OF THE HOUSEHOLD VIEW, which was the first attempt: that view is
  * hidden by default ("resident-clean UI", 2026-09-08), so the controls would have
- * existed on no device at all. Measured on KIB-SON-00000031 the same day — its
+ * existed on no device at all. Measured on a test device the same day — its
  * dashboard had three room tabs and nothing else.
  *
  * The weekly plan stays in each room's own view. The old design had it here

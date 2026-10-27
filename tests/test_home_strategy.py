@@ -194,7 +194,7 @@ async def test_strategy_is_registered_as_a_lovelace_resource(hass, enable_custom
     assert not any("ga-master-card" in u for u in urls)
 
 
-# ─── options + card looks (KIB-SON-00000050 pilot, 2026-07-21) ────────────
+# ─── options + card looks (a test device pilot, 2026-07-21) ────────────
 
 
 def test_options_have_safe_defaults():

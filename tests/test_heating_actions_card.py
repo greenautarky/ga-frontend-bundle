@@ -13,7 +13,7 @@ a low setpoint — "a frost setpoint keeps the valve working against an open
 window" — so when this card switches a flat off, the protection comes from the
 VALVE. On a SONOFF TRVZB `system_mode: off` is the anti-freeze state and the
 valve holds its own `frost_protection_temperature`. Measured on
-KIB-SON-00000031 on 2026-09-23: all four valves hold **7 °C**, not the 5 °C the
+a test device on 2026-09-23: all four valves hold **7 °C**, not the 5 °C the
 vendor documents as the default. A card that hardcoded 5 would have told the
 resident a number their flat does not use.
 

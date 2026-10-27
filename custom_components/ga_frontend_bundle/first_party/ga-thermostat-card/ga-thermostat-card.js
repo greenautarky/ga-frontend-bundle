@@ -639,7 +639,7 @@ class GaThermostatCard extends HTMLElement {
       `<text class="d-act" x="${DIAL.c}" y="${DIAL.c - 16}" text-anchor="middle">${this._actionLabel(s)}</text>` +
       `<text class="d-tgt" x="${DIAL.c}" y="${DIAL.c + 10}" text-anchor="middle">${heating && !Number.isNaN(target) ? Number(target).toFixed(1) : "–"}</text>` +
       // The dial is the variant the canary actually renders (measured on
-      // KIB-SON-00000031, 2026-09-23): the first version of this change fixed
+      // a test device, 2026-09-23): the first version of this change fixed
       // `classic` and `setpoint` and left the dial showing the measurement, so
       // the fix was correct and not on the path the device takes. Reachability is
       // part of correctness, and only the browser test said so.
