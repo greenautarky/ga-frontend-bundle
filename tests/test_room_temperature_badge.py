@@ -514,9 +514,17 @@ def test_a_room_with_no_name_falls_back_to_its_area_id_on_the_CARD():
 def test_aktuell_labels_the_readings_and_comes_first():
     b = _badges(_ROOM, _STATES)
     assert [x["name"] for x in b] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], b
-    assert b[0]["state_content"] == "name", "without this the badge shows a value"
-    assert b[0]["icon"] == "mdi:home-thermometer-outline"
+    # AN ICON, NO TEXT (2026-10-23). `show_state: false` is what drops the word;
+    # `show_icon` is stated beside it rather than left to its default, because a
+    # badge with neither renders as nothing at all. Without one of the two this
+    # badge would print a VALUE — the hvac mode — where the label belongs.
+    assert b[0]["show_state"] is False, "without this the badge shows a value"
+    assert b[0]["show_icon"] is True, "an icon-only badge needs its icon"
+    assert "state_content" not in b[0], "it has no text to choose the content of"
+    assert b[0]["icon"] == "mdi:home-import-outline"
     assert b[0]["entity"] == "climate.wz"
+    # The word survives as the badge's `title`: unprinted, not gone.
+    assert b[0]["name"] == "Aktuell"
 
 
 def test_the_label_is_dropped_when_there_is_no_room_entity():
@@ -609,13 +617,80 @@ def test_a_chart_without_an_outdoor_entity_still_colours_the_room():
         assert all(c for _, c in chart), chart
 
 
-# ── the outdoor group (2026-10-21) ──────────────────────────────────────────
+# ── a room with no hygrometer draws the house mean (2026-10-27) ────────────
+# "in the rooms that dont have t&h sensor add a mean of other humidity similar to
+# whats done for temperature".
+#
+# The asymmetry this fixes: a sensorless room already draws a TEMPERATURE curve,
+# because its valve measures one. A TRV does not measure humidity, so that room
+# had a blank where the second chart belongs — while its badge showed the house
+# figure, which made the gap read as a fault rather than a missing sensor.
+
+_HOUSE_HUM = "sensor.ga_luftfeuchtigkeit_haus"
+
+_WC_STATES = """{
+  "climate.wc": { state: "auto", attributes: { current_temperature: 21, valves: [],
+                  temperature_source: "sensor.wz_t", %s } },
+  "sensor.wz_t": { state: "21", attributes: { device_class: "temperature" } },
+  "%s": { state: "47.5", attributes: { device_class: "humidity" } }
+}"""
+
+_WC_ROOM = ('{ name: "WC", climate: ["climate.wc"], temps: ["sensor.wz_t"],'
+            ' hums: [], batts: [], lights: [], switches: [] }')
+
+
+def _charts(room, states):
+    return json.loads(run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
+      return JSON.stringify(roomSections({room}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => c.type === "statistics-graph")
+        .map(c => c.title + " :: " + c.entities.map(e => e.name || e.entity).join(", ")));
+    }})()"""))
+
+
+def test_a_room_with_no_hygrometer_draws_the_house_mean():
+    states = _WC_STATES % (f'house_humidity_entity: "{_HOUSE_HUM}"', _HOUSE_HUM)
+    out = _charts(_WC_ROOM, states)
+    assert "Luftfeuchtigkeit letzte 24h :: Ø Luftfeuchtigkeit (Haus)" in out, out
+
+
+def test_an_engine_that_names_no_mean_leaves_the_room_as_it_was():
+    """A device still on the older ga_heating publishes no `house_humidity_entity`,
+    and there the room keeps its blank rather than guessing an entity_id."""
+    out = _charts(_WC_ROOM, _WC_STATES % ("", _HOUSE_HUM))
+    assert not any("Luftfeuchtigkeit" in c for c in out), out
+
+
+def test_a_named_mean_that_does_not_resolve_draws_nothing():
+    """Same rule as the outdoor series: a name in a config that no longer exists
+    must leave the room with one honest chart, not an empty legend."""
+    states = _WC_STATES % ('house_humidity_entity: "sensor.gone"', _HOUSE_HUM)
+    assert not any("Luftfeuchtigkeit" in c for c in _charts(_WC_ROOM, states)), states
+
+
+def test_a_room_with_its_own_hygrometer_is_untouched():
+    """MUST-NOT-FLAG. The mean is a fallback, never a replacement — a room that
+    measures its own humidity must keep drawing its own."""
+    room = ('{ name: "WZ", climate: ["climate.wc"], temps: ["sensor.wz_t"],'
+            ' hums: ["sensor.wz_h"], batts: [], lights: [], switches: [] }')
+    states = (_WC_STATES % (f'house_humidity_entity: "{_HOUSE_HUM}"', _HOUSE_HUM)
+              ).replace('"sensor.wz_t": {', '"sensor.wz_h": { state: "48",'
+                        ' attributes: { device_class: "humidity" } },\n  "sensor.wz_t": {')
+    out = _charts(room, states)
+    assert "Luftfeuchtigkeit letzte 24h :: Raum Luftfeuchtigkeit" in out, out
+
+
+# ── the two groups (2026-10-21, reordered and un-worded 2026-10-23) ─────────
 # "i need to show the current outdoor temperature as well", then "add aussen
-# like we have aktuell before it. also add outdoor humidity".
+# like we have aktuell before it. also add outdoor humidity", then "instead
+# aussen and aktuell can we just place an icon that indicates aussen and raum or
+# indoor. then place the indoor data first in the line".
 #
-# The row is two groups of the same shape, a word then its numbers:
+# The row is two groups of the same shape, an ICON then its numbers, the room
+# first:
 #
-#     Außen 12,3 °C 79 %            Aktuell 21,5 °C 49 %
+#     [house] 21,5 °C 49 %            [sun] 12,3 °C 79 %
 #
 # split left/right by one card_mod rule, because HA pins every badge right.
 
@@ -634,43 +709,73 @@ _OUT_STATES2 = """{
 }"""
 
 
+_NO_HUMIDITY_STATES = """{
+  "climate.wz": { state: "auto", attributes: { current_temperature: 21.5,
+                  temperature: 21, valves: [],
+                  temperature_source: "sensor.wz_t" } },
+  "sensor.wz_t": { state: "21.5", attributes: { device_class: "temperature" } },
+  "sensor.aussentemperatur": { state: "12.3", attributes: { device_class: "temperature" } },
+  "sensor.aussenluftfeuchtigkeit": { state: "79", attributes: { device_class: "humidity" } }
+}"""
+
+
 def _head(cfg: str, states: str = _OUT_STATES2):
     return json.loads(run_js(STRATEGY, f"""(() => {{
       const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
       const h = roomSections({_ROOM}, gaOptions({cfg}), hass)
         .flatMap(s => s.cards || []).find(c => c.type === "heading");
       return JSON.stringify({{ names: h.badges.map(b => b.name),
-        labels: h.badges.filter(b => b.state_content === "name").map(b => b.name),
+        labels: h.badges.filter(b => b.show_state === false).map(b => b.name),
         style: (h.card_mod || {{}}).style || "" }});
     }})()"""))
 
 
-def test_the_outdoor_group_comes_first_and_is_labelled_like_the_room_is():
+def test_the_rooms_own_readings_come_first_and_outside_follows():
+    """"place the indoor data first in the line" (2026-10-23). It was the other
+    way round for two days: outside opened the row, which put the number a
+    resident came to read second."""
     got = _head(_OUT_CFG)
-    assert got["names"] == ["Außen", "Temperatur", "Luftfeuchtigkeit",
-                            "Aktuell", "Temperatur", "Luftfeuchtigkeit"], got
+    assert got["names"] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit",
+                            "Außen", "Temperatur", "Luftfeuchtigkeit"], got
 
 
-def test_both_groups_open_with_a_word_not_a_number():
-    """The label badge is an entity badge whose content is its own NAME, which
-    is what makes it render as icon + word. Without it the row would read as
-    four numbers with nothing saying which two are outside."""
-    assert _head(_OUT_CFG)["labels"] == ["Außen", "Aktuell"], _head(_OUT_CFG)
+def test_both_groups_open_with_an_icon_and_no_number():
+    """Each group is opened by a badge that prints no state at all — the icon is
+    the whole label now. Without it the row would read as four numbers with
+    nothing saying which two are outside.
+
+    The order is the groups' order: the house first, the sun after it."""
+    assert _head(_OUT_CFG)["labels"] == ["Aktuell", "Außen"], _head(_OUT_CFG)
 
 
-def test_the_split_follows_the_size_of_the_outdoor_group():
+def test_the_split_follows_the_size_of_the_rooms_own_group():
     """HA pins every badge right, so one rule pushes the row apart: the LAST
-    outdoor badge takes `margin-right: auto`. The index is counted, never
-    assumed — the humidity is optional, and a hard-coded one would strand the
-    room's own readings on the left the day a device configures only one."""
+    badge of the room's group takes `margin-right: auto`. The index is counted,
+    never assumed — a room without a hygrometer has one reading and not two, and
+    a hard-coded index would push the wrong badge.
+
+    It no longer follows the OUTDOOR group, which is what it counted while
+    outside came first."""
+    # Aktuell + temperature + humidity.
     assert "nth-child(3)" in _head(_OUT_CFG)["style"]
-    assert "nth-child(2)" in _head('{ outdoor_temperature: "sensor.aussentemperatur" }')["style"]
-    assert "nth-child(2)" in _head('{ outdoor_humidity: "sensor.aussenluftfeuchtigkeit" }')["style"]
+    # Aktuell + temperature: this room reports no humidity anywhere, so the
+    # group is one badge shorter and the split has to move with it.
+    assert "nth-child(2)" in _head(_OUT_CFG, _NO_HUMIDITY_STATES)["style"]
+
+
+def test_the_split_does_not_follow_the_outdoor_group_any_more():
+    """Must-not-flag, and the bug this would be: the outdoor group's size and
+    the room's are both 3 in the fixture above, so a rule still counting the
+    wrong one would pass it. A room configured with outdoor temperature ALONE
+    has a 2-badge outdoor group and a 3-badge room group, and only one of those
+    is the right answer."""
+    style = _head('{ outdoor_temperature: "sensor.aussentemperatur" }')["style"]
+    assert "nth-child(3)" in style, style
 
 
 def test_no_outdoor_entities_means_no_group_and_no_rule():
-    """MUST-NOT-FLAG. With no outdoor badge the rule would strand "Aktuell" on
-    the left, away from the numbers it labels."""
+    """MUST-NOT-FLAG. With nothing to push right, the rule would strand the
+    room's own readings on the left, away from the edge they belong on."""
     got = _head("{}")
     assert got["names"] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], got
     assert got["style"] == "", got
@@ -694,6 +799,9 @@ def test_the_two_groups_differ_only_by_their_label_icon():
         .flatMap(s => s.cards || []).find(c => c.type === "heading");
       return JSON.stringify(h.badges.map(b => b.icon || null));
     }})()"""))
-    assert icons[0] == "mdi:sun-thermometer-outline", icons
-    assert icons[3] == "mdi:home-thermometer-outline", icons
+    # IN AND OUT, as a pair of arrows through a wall (2026-10-27). The two
+    # thermometer glyphs they replaced each carried a second thermometer, right
+    # beside the thermometer badge they label.
+    assert icons[0] == "mdi:home-import-outline", icons
+    assert icons[3] == "mdi:home-export-outline", icons
     assert icons[1] == icons[4] == "mdi:thermometer", icons

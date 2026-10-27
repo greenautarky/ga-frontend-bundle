@@ -512,60 +512,42 @@ function roomSections(room, opt, hass) {
   const switches = room.switches || [];
 
   // Named badges — the raw entities carry IEEE-address names on fleet devices.
+  //
+  // THE ROOM'S OWN READINGS FIRST, OUTSIDE AFTER THEM, AND NEITHER GROUP WEARS
+  // ITS WORD ANY MORE ("instead aussen and aktuell can we just place an icon
+  // that indicates aussen and raum or indoor. then place the indoor data first
+  // in the line", 2026-10-23).
+  //
+  // The row is still TWO GROUPS OF THE SAME SHAPE — but an icon, not a word,
+  // opens each one, and the room comes first because its number is the one a
+  // resident came to read:
+  //
+  //     [house] 21,5 °C 49 %            [sun] 12,3 °C 79 %
+  //
+  // `show_state: false` is what drops the text. `hui-entity-heading-badge`
+  // renders the icon when `show_icon` is set and the text when `show_state` is,
+  // each independently, so a badge with one and not the other is an icon alone.
+  // It replaces `state_content: "name"`, the trick that made a badge render its
+  // own name where a value would go.
+  //
+  // BOTH FLAGS ARE STATED, though `show_icon` defaults to true: an icon-only
+  // badge that lost its icon to a changed default would render as nothing at
+  // all, leaving a group of numbers with no mark saying which side of the wall
+  // they were measured on.
+  //
+  // THE WORD IS NOT GONE, only unprinted — `name` is what the badge gives the
+  // element as its `title`, so it is still there on hover and for a screen
+  // reader.
   const badges = [];
-  // OUTSIDE, ON THE LEFT, AND LABELLED LIKE THE ROOM'S OWN READINGS ARE.
-  // "i need to show the current outdoor temperature as well" (2026-10-21) —
-  // the question a room's own number cannot answer is whether it is cold in
-  // here because the heating is failing or because it is cold out there — then
-  // "add aussen like we have aktuell before it. also add outdoor humidity".
-  //
-  // So the row is TWO GROUPS OF THE SAME SHAPE, a word then its numbers:
-  //
-  //     Außen 12,3 °C 79 %            Aktuell 21,5 °C 49 %
-  //
-  // The label badge is the `state_content: "name"` trick the Aktuell badge
-  // already uses: an entity badge whose content is its own name renders as
-  // icon + word instead of a value. Its icon is the sun against Aktuell's
-  // house, which is the only place the two groups differ — the readings
-  // themselves take the same thermometer and droplet, because they ARE the
-  // same two measurements.
-  //
-  // Both entities are checked against `states`, like the chart's outdoor series
-  // is: a name in a config that no longer resolves must leave the row with the
-  // room's own readings rather than a badge reading "unknown".
-  const outdoorT = opt.outdoorTemperature && hass && hass.states
-    && hass.states[opt.outdoorTemperature] ? opt.outdoorTemperature : null;
-  const outdoorH = opt.outdoorHumidity && hass && hass.states
-    && hass.states[opt.outdoorHumidity] ? opt.outdoorHumidity : null;
-  if (outdoorT || outdoorH) {
-    badges.push({ type: "entity", entity: outdoorT || outdoorH, name: "Außen",
-      icon: "mdi:sun-thermometer-outline", state_content: "name" });
-  }
-  if (outdoorT) {
-    badges.push({ type: "entity", entity: outdoorT, name: "Temperatur",
-      icon: "mdi:thermometer" });
-  }
-  if (outdoorH) {
-    badges.push({ type: "entity", entity: outdoorH, name: "Luftfeuchtigkeit",
-      icon: "mdi:water-percent" });
-  }
-  //: How many badges belong to the left-hand group — the split point the CSS
-  //: below needs. Counted rather than assumed, because the humidity is
-  //: optional and a hard-coded index would strand the room's own readings on
-  //: the left the day a device configures only one of the two.
-  const outdoorBadgeCount = badges.length;
   // THE LABEL GOES WITH THE READINGS, not above the target. It was a row inside
   // the thermostat card at first, which printed the same two numbers a second
-  // time under the ones already in this heading (2026-10-08). A badge whose
-  // content is its own name renders as icon + word and sits first, so the row
-  // reads "Aktuell 23,4 °C 49,4 %".
+  // time under the ones already in this heading (2026-10-08).
   //
   // Bound to the room's climate entity because that is what the two badges
-  // below report on, and `state_content: "name"` is what makes a badge show a
-  // word instead of a value.
+  // below report on.
   if (climate.length) {
     badges.push({ type: "entity", entity: climate[0], name: "Aktuell",
-      icon: "mdi:home-thermometer-outline", state_content: "name" });
+      icon: "mdi:home-import-outline", show_icon: true, show_state: false });
   }
   // Temperature badge FIRST, then humidity. The #1060 decision (2026-09-23) had
   // dropped it — "the resident acts on the target" — and was REVERSED for this
@@ -627,6 +609,42 @@ function roomSections(room, opt, hass) {
     badges.push({ type: "entity", entity: climate[0], name: "Luftfeuchtigkeit",
       icon: "mdi:water-percent", state_content: "current_humidity" });
   }
+  //: Where the left-hand group ends — the split point the CSS below needs.
+  //: Counted rather than assumed: a room without a hygrometer has one reading
+  //: and not two, and a hard-coded index would push the wrong badge.
+  const roomBadgeCount = badges.length;
+  // OUTSIDE, AFTER THE ROOM, AND PINNED TO THE OTHER END.
+  // "i need to show the current outdoor temperature as well" (2026-10-21) — the
+  // question a room's own number cannot answer is whether it is cold in here
+  // because the heating is failing or because it is cold out there.
+  //
+  // The sun against the room's house is now the ONLY thing that says which side
+  // of the wall a pair of numbers was measured on, the words having gone; the
+  // readings themselves keep the same thermometer and droplet, because they ARE
+  // the same two measurements.
+  //
+  // Both entities are checked against `states`, like the chart's outdoor series
+  // is: a name in a config that no longer resolves must leave the row with the
+  // room's own readings rather than a badge reading "unknown".
+  const outdoorT = opt.outdoorTemperature && hass && hass.states
+    && hass.states[opt.outdoorTemperature] ? opt.outdoorTemperature : null;
+  const outdoorH = opt.outdoorHumidity && hass && hass.states
+    && hass.states[opt.outdoorHumidity] ? opt.outdoorHumidity : null;
+  if (outdoorT || outdoorH) {
+    badges.push({ type: "entity", entity: outdoorT || outdoorH, name: "Außen",
+      icon: "mdi:home-export-outline", show_icon: true, show_state: false });
+  }
+  if (outdoorT) {
+    badges.push({ type: "entity", entity: outdoorT, name: "Temperatur",
+      icon: "mdi:thermometer" });
+  }
+  if (outdoorH) {
+    badges.push({ type: "entity", entity: outdoorH, name: "Luftfeuchtigkeit",
+      icon: "mdi:water-percent" });
+  }
+  //: Only a row with BOTH groups gets split. With one group the default — every
+  //: badge pinned right — is already what we want.
+  const splitAfter = badges.length > roomBadgeCount ? roomBadgeCount : 0;
   // NO BATTERY BADGE. It was `batts.slice(0, 1)` — one percentage for a room
   // that may hold three battery devices, and nothing said which one it came
   // from, so a healthy valve beside a dying thermometer showed 100 %. The
@@ -650,20 +668,20 @@ function roomSections(room, opt, hass) {
     // tab already names the room — a heading repeating it would be the third
     // telling of the same word on one screen.
     //
-    // THE OUTDOOR GROUP SITS ON THE LEFT, the room's own readings stay right.
+    // THE ROOM'S READINGS SIT ON THE LEFT, outside goes to the right.
     // HA lays this row out as `justify-content: space-between` with an empty
     // `.content` on the left and `.badges` on the right, so every badge is
     // pinned right by default; giving `.badges` the width and the LAST badge of
-    // the outdoor group `margin-right: auto` pushes everything after it to the
+    // the room's group `margin-right: auto` pushes everything after it to the
     // right, without touching the badges themselves.
     //
-    // Only applied when there IS an outdoor group — otherwise the rule would
-    // strand "Aktuell" on the left, away from the numbers it labels.
+    // Only applied when there are two groups to split — with one, every badge
+    // pinned right is already the answer.
     const cards = [{
       type: "heading", heading: "", heading_style: "title", badges,
-      ...(outdoorBadgeCount ? { card_mod: { style: `
+      ...(splitAfter ? { card_mod: { style: `
         .badges { flex: 1 1 auto; }
-        .badges > *:nth-child(${outdoorBadgeCount}) { margin-right: auto; }` } } : {}),
+        .badges > *:nth-child(${splitAfter}) { margin-right: auto; }` } } : {}),
     }];
     for (const entity of climate) {
       // THE ROOM NAME GOES IN THE CARD ("thee room name goes inside teh
@@ -794,6 +812,31 @@ function roomSections(room, opt, hass) {
       outdoor, "Außentemperatur");
     history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
       stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD, ...GRAPH_CHROME });
+  }
+  //: A ROOM WITH NO HYGROMETER GETS THE HOUSE MEAN ("in the rooms that dont have
+  //: t&h sensor add a mean of other humidity similar to whats done for
+  //: temperature", 2026-10-27).
+  //:
+  //: The asymmetry this fixes: a sensorless room already draws a TEMPERATURE
+  //: curve, because its valve measures one. A TRV does not measure humidity, so
+  //: that room had a blank where the second chart belongs — while its badge
+  //: showed the house figure, which made the gap look like a fault rather than a
+  //: missing sensor.
+  //:
+  //: ga_heating publishes the mean as a real sensor with a state class, and the
+  //: room NAMES it, so this never guesses an entity_id. An older engine names
+  //: nothing and the room keeps the blank, exactly as today.
+  const houseHum = (clim && clim.attributes && clim.attributes.house_humidity_entity) || null;
+  const meanHum = (!hums.length && houseHum && hass && hass.states
+    && hass.states[houseHum]) ? houseHum : null;
+  if (hasHistory && !hums.length && meanHum) {
+    const outdoorH = opt.outdoorHumidity && hass && hass.states
+      && hass.states[opt.outdoorHumidity] ? opt.outdoorHumidity : null;
+    const entities = graphEntities(
+      [meanHum], ["Ø Luftfeuchtigkeit (Haus)"], outdoorH, "Außenluftfeuchtigkeit");
+    history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h",
+      entities, stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD,
+      ...GRAPH_CHROME });
   }
   if (hasHistory && hums.length) {
     // Named for the same reason the temperature curve is: left to itself the card
