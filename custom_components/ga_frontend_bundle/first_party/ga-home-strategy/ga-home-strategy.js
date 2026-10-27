@@ -151,13 +151,20 @@ function historyAvailable(hass) {
  *                               it — the "Heizung" heading directly above
  *                               already names the section. Any other string
  *                               replaces it. ("core" style has no title.)
- *   outdoor_temperature  —       an entity whose state is the outdoor temperature,
+ *   outdoor_temperature  sensor.aussentemperatur
+ *                               an entity whose state is the outdoor temperature,
  *                               drawn as a second series on every room's 24 h
- *                               chart. NAMED, never sniffed for: a strategy that
- *                               guessed at `sensor.aussen*` would break the day
- *                               somebody renamed a sensor, and would draw a
- *                               stranger's thermometer on a resident's wall.
- *   outdoor_humidity     —       the same for the humidity chart.
+ *                               chart and as a badge beside the room's own.
+ *                               DEFAULTS to the sensor ga_manager provisions
+ *                               (0.263.0, ga_packages/ga_outdoor.yaml) — a
+ *                               contract between the two repos, not a guess. It
+ *                               is still never SNIFFED for: a strategy matching
+ *                               `sensor.aussen*` would break the day somebody
+ *                               renamed a sensor, and would draw a stranger's
+ *                               thermometer on a resident's wall. A string
+ *                               overrides; `false` turns it off.
+ *   outdoor_humidity     sensor.aussenluftfeuchtigkeit
+ *                               the same for the humidity chart and badge.
  *   change_log        true      show the last changes to a room under its
  *                               thermostat (ga-heating-log-card, "Aktivität").
  *                               DEFAULT ON since 1.23.1; false hides it.
@@ -212,11 +219,41 @@ function gaOptions(config) {
     // reads the room entity first and the recorder only as a fallback, so the
     // per-view cost that justified OFF is mostly gone. change_log:false hides it.
     changeLog: c.change_log !== false,
-    //: Absent on a device with no weather integration, which is most of them —
-    //: a GA device has no `default_config`, so nothing adds one by itself.
-    outdoorTemperature: typeof c.outdoor_temperature === "string" ? c.outdoor_temperature : null,
-    outdoorHumidity: typeof c.outdoor_humidity === "string" ? c.outdoor_humidity : null,
+    //: DEFAULTED, since ga_manager 0.263.0 (greenautarky/ga_manager#371).
+    //:
+    //: These are not a guess, which is the thing this strategy has always
+    //: refused: converge WRITES `ga_packages/ga_outdoor.yaml` with two template
+    //: sensors whose ids it calls stable, for the stated purpose of being the
+    //: ones the dashboard names. Defaulting to them reads a contract; sniffing
+    //: for `sensor.aussen*` would have been a guess, and still would be.
+    //:
+    //: Nothing else changes. Both are checked against `hass.states` where they
+    //: are used, so a device whose converge has not reached 0.263.0 yet has no
+    //: such entity, resolves nothing, and renders exactly what it does today —
+    //: the room's own readings and one curve. That is also why this needs no
+    //: flag day: the fleet picks it up device by device as converge runs.
+    //:
+    //: A STRING STILL OVERRIDES, and any other value present turns it OFF, so a
+    //: hand-written dashboard can opt out with `outdoor_temperature: false`
+    //: rather than being stuck with a sensor it does not want.
+    outdoorTemperature: outdoorOption(c.outdoor_temperature, DEFAULT_OUTDOOR_TEMPERATURE),
+    outdoorHumidity: outdoorOption(c.outdoor_humidity, DEFAULT_OUTDOOR_HUMIDITY),
   };
+}
+
+//: The ids `ga_manager` gives the two template sensors it writes. They fall out
+//: of the German names it renders (`Außentemperatur` -> `aussentemperatur`, with
+//: ß slugified to ss), so they are a contract between the two repos rather than
+//: anything either side can change alone.
+const DEFAULT_OUTDOOR_TEMPERATURE = "sensor.aussentemperatur";
+const DEFAULT_OUTDOOR_HUMIDITY = "sensor.aussenluftfeuchtigkeit";
+
+/** A named entity, the provisioned default, or off. */
+function outdoorOption(configured, fallback) {
+  if (typeof configured === "string") return configured || null;
+  // Present but not a string — `false`, `null`, 0 — is a deliberate "no".
+  // Absent is "you decide", which is the default.
+  return configured === undefined ? fallback : null;
 }
 
 /**
