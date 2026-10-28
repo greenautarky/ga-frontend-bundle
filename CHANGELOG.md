@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.23.8 — 2026-10-28
+
+Outdoor data without a per-device dashboard edit, plus the UI session merged as #57 and the boost change #58.
+
+- Outdoor pair by default (#61, bundle half of ga_manager #371): the room view's `outdoor_temperature` / `outdoor_humidity` default to `sensor.aussentemperatur` / `sensor.aussenluftfeuchtigkeit`, the ids ga_manager >= 0.263.0 provisions from the met.no entry. Still verified against `hass.states`: a device without the entities draws no badge and no second curve; `false` switches the pair off; a string overrides.
+- Badge row (#57, by @ahmad-greenautarky): the room's own readings open the row, each group carries one icon (house-import / house-export) instead of words, the split counts the room's group.
+- Wartung (#57): one row per device, dated, scrollable. A climate sensor that stops talking is one line, not two; the radio verdict is ga-heating's `link_weak` where the engine publishes it (ga-heating 0.13.8), the per-packet path otherwise; a silent device no longer collects a stale "radio weak" row.
+- Humidity for a room without a hygrometer (#57): the 24 h chart draws the house mean the engine names, instead of a blank; an older engine names nothing and the room keeps its blank.
+- Boost (#58): fifteen minutes instead of five, so the run outlasts the time a TRV needs to open and the radiator to make itself felt.
+- Docs (#59): comments, changelog and tests refer to test devices generically.
+
+> **Needs ga_manager >= 0.263.0** for the outdoor entities (BOSv1.5.3 target); on older ga_manager the room view degrades as before, no "unknown" badge. **ga-heating 0.13.8** for the radio verdict and the humidity mean; older engines fall back to the previous behaviour.
+
 ## 1.23.7 — 2026-10-21
 
 Services rebuild and "Urlaub as a plan" by @ahmad-greenautarky, merged as #55. Developed card by card against a test device.
