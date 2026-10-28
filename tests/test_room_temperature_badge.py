@@ -668,9 +668,14 @@ def _charts(room, states):
 
 
 def test_a_room_with_no_hygrometer_draws_the_house_mean():
+    """UNDER THE ROOM'S OWN LABEL, since 2026-10-27 ("dont name in the legend
+    haus mittel... just like any other room"). The badge above it already shows
+    the house figure with no asterisk, so a legend that said otherwise would be
+    the only thing on the view insisting on the distinction. `humidity_source`
+    still carries it for anyone who needs it."""
     states = _WC_STATES % (f'house_humidity_entity: "{_HOUSE_HUM}"', _HOUSE_HUM)
     out = _charts(_WC_ROOM, states)
-    assert "Luftfeuchtigkeit letzte 24h :: Ø Luftfeuchtigkeit (Haus)" in out, out
+    assert "Luftfeuchtigkeit letzte 24h :: Raum Luftfeuchtigkeit" in out, out
 
 
 def test_an_engine_that_names_no_mean_leaves_the_room_as_it_was():
@@ -697,6 +702,128 @@ def test_a_room_with_its_own_hygrometer_is_untouched():
                         ' attributes: { device_class: "humidity" } },\n  "sensor.wz_t": {')
     out = _charts(room, states)
     assert "Luftfeuchtigkeit letzte 24h :: Raum Luftfeuchtigkeit" in out, out
+
+
+# ── and the same for temperature (2026-10-27) ──────────────────────────────
+# "in flur in k181, why do we show thermostat 1 temp not the average of haus like
+# humidity?"
+#
+# Because the room had ONE thermometer left — the valve's, which sits on the
+# radiator. The badge above the chart and the engine below it were already on the
+# house mean (`temperature_source: house_average`, measured on `climate.flur`);
+# only the curve disagreed, and it disagreed with a reading taken off a hot pipe.
+
+_HOUSE_TEMP = "sensor.ga_temperatur_haus"
+_VALVE = "climate.0xaaa"
+_VALVE_TEMP = "sensor.0xaaa_temperature"
+_OUTDOOR = ('"sensor.aussentemperatur": { state: "12.3",'
+            ' attributes: { device_class: "temperature" } },'
+            ' "sensor.aussenluftfeuchtigkeit": { state: "79",'
+            ' attributes: { device_class: "humidity" } },')
+
+_FLUR_NAMED = (f'house_temperature_entity: "{_HOUSE_TEMP}", '
+               f'house_humidity_entity: "{_HOUSE_HUM}"')
+
+_FLUR_ROOM = (f'{{ name: "Flur", climate: ["climate.flur"], temps: ["{_VALVE_TEMP}"],'
+              ' hums: [], batts: [], lights: [], switches: [] }')
+
+
+def _flur_states(named=_FLUR_NAMED, extra="", own_thermometer=False, house_mean=True):
+    """A room exactly like K181's Flur: no sensors of its own, one valve, and an
+    engine that names both house means. Each flag turns off one of the things the
+    room is missing, which is how the must-not-flags below are built."""
+    own = ('"sensor.flur_t": { state: "19.2",'
+           ' attributes: { device_class: "temperature" } },' if own_thermometer else "")
+    mean = (f'"{_HOUSE_TEMP}": {{ state: "19.9",'
+            ' attributes: { device_class: "temperature" } },' if house_mean else "")
+    return f"""{{
+  "climate.flur": {{ state: "auto", attributes: {{ current_temperature: 19.9,
+                    valves: ["{_VALVE}"], temperature_source: "house_average",
+                    {named} }} }},
+  {extra}
+  {own}
+  {mean}
+  "{_VALVE_TEMP}": {{ state: "20.1", attributes: {{ device_class: "temperature" }} }},
+  "{_HOUSE_HUM}": {{ state: "62", attributes: {{ device_class: "humidity" }} }}
+}}"""
+
+
+def test_a_room_with_no_thermometer_draws_the_house_mean_not_its_valve():
+    """THE RED ONE. Before this the curve was the valve's own thermometer, under
+    a badge showing the house figure the room is actually heated to."""
+    out = _charts(_FLUR_ROOM, _flur_states())
+    assert "Temperatur letzte 24h :: Raum Temperatur" in out, out
+    assert not any(_VALVE_TEMP in c for c in out), out
+
+
+def test_an_engine_that_names_no_temperature_mean_keeps_the_valve():
+    """A device still on the older ga_heating publishes no
+    `house_temperature_entity`. There the valve's curve is all there is, and one
+    honest line under its own name beats an empty card — which is exactly why
+    this case keeps the ENTITY_ID as its label rather than "Raum Temperatur"."""
+    out = _charts(_FLUR_ROOM, _flur_states(named=""))
+    assert any(f"Temperatur letzte 24h :: {_VALVE_TEMP}" in c for c in out), out
+
+
+def test_a_house_where_nothing_has_a_thermometer_keeps_the_valve():
+    """MUST-NOT-FLAG, and it is a real house rather than a degenerate one: a flat
+    nobody has retrofitted yet. `house_average_temperature` is None there, so the
+    sensor reads unavailable and the engine itself falls back to the valve."""
+    out = _charts(_FLUR_ROOM, _flur_states(house_mean=False))
+    assert any(f"Temperatur letzte 24h :: {_VALVE_TEMP}" in c for c in out), out
+
+
+def test_a_room_with_its_own_thermometer_is_untouched():
+    """MUST-NOT-FLAG. The mean is a fallback, never a replacement."""
+    room = (f'{{ name: "Flur", climate: ["climate.flur"],'
+            f' temps: ["sensor.flur_t", "{_VALVE_TEMP}"],'
+            ' hums: [], batts: [], lights: [], switches: [] }')
+    out = _charts(room, _flur_states(own_thermometer=True))
+    assert "Temperatur letzte 24h :: Raum Temperatur" in out, out
+    assert not any(_HOUSE_TEMP in c or _VALVE_TEMP in c for c in out), out
+
+
+# ── one curve wears no legend (2026-10-27) ─────────────────────────────────
+# "can we remove the (Mittel) from all the legends?"
+#
+# "(Mittel)" is Home Assistant's: `statistics-chart` names every series
+# `${name} (${statistic type})` unconditionally, and there is no card option that
+# turns it off. The card does build a suffix-free legend — and uses it only when
+# it has more than one entry (`_legendData = legendData.length > 1 ? … : void 0`,
+# read off HA 2026.8.2's own chunk). So the suffix reaches a reader in exactly one
+# case, and that case needs no legend: the card header already names the series.
+
+
+def _legends(room, states, cfg="{}"):
+    return json.loads(run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
+      return JSON.stringify(roomSections({room}, gaOptions({cfg}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => c.type === "statistics-graph")
+        .map(c => [c.entities.length, c.hide_legend]));
+    }})()"""))
+
+
+def test_a_single_curve_has_no_legend_to_leak_the_arithmetic_into():
+    out = _legends(_FLUR_ROOM, _flur_states())
+    assert out, out
+    for count, hidden in out:
+        assert count == 1 and hidden is True, (count, hidden)
+
+
+def test_two_curves_keep_the_legend_because_it_is_the_only_thing_naming_them():
+    """MUST-NOT-FLAG, and the reason this is not simply `hide_legend: true`
+    everywhere: with two series the legend is suffix-free AND load-bearing — it is
+    all that says which line is outside.
+
+    The outdoor entities are NAMED here rather than left to a default, so the test
+    says what it is about — two series — and not what some other option resolves
+    to."""
+    out = _legends(_FLUR_ROOM, _flur_states(extra=_OUTDOOR),
+                   '{ outdoor_temperature: "sensor.aussentemperatur",'
+                   ' outdoor_humidity: "sensor.aussenluftfeuchtigkeit" }')
+    assert out and all(count == 2 and hidden is False for count, hidden in out), out
+
 
 
 # ── the two groups (2026-10-21, reordered and un-worded 2026-10-23) ─────────
