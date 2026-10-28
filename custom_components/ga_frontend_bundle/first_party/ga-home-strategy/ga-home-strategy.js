@@ -385,6 +385,30 @@ const LEGEND_SWATCH_CSS = `
   .chart-legend ha-svg-icon { background: currentColor; border-radius: 50%; }
   .chart-legend li.hidden ha-svg-icon { background: transparent; }`;
 
+//: NO LEGEND ON A ONE-CURVE CHART (`hide_legend` at each call site).
+//:
+//: "(Mittel)" IS HOME ASSISTANT'S, not ours, and there is no card option that
+//: drops it: `statistics-chart` names every series
+//: `${name} (${localize(statistic_types.<type>)})`, with no condition on how
+//: many types were asked for — so a curve we called "Raum Temperatur" reached
+//: the legend as "Raum Temperatur (Mittel)". Read off the device's own chunk
+//: (HA 2026.8.2, frontend_latest/31015.*.js, 2026-10-27), not from the docs.
+//:
+//: The card does build a second, SUFFIX-FREE legend dataset — and then uses it
+//: only when there is more than one entry: `_legendData = legendData.length > 1
+//: ? … : void 0`. With one series `_legendData` is undefined and the chart falls
+//: back to printing series names, suffix and all. So the arithmetic leaks into
+//: exactly one case, and it is the case that needs no legend in the first
+//: place: one curve under a card whose header already says "Temperatur letzte
+//: 24h" is named twice. A legend naming a single series tells a reader nothing
+//: they cannot read in the title above it.
+//:
+//: Two or more curves keep theirs, suffix-free, which is where a legend is
+//: load-bearing — it is the only thing saying which line is outside.
+//:
+//: Asked for on 2026-10-27 ("can we remove the (Mittel) from all the legends?")
+//: and worth knowing that it is self-limiting: once converge provisions the
+//: outdoor sensors, most of these charts draw two curves anyway.
 const GRAPH_CHROME = {
   card_mod: {
     //: THREE SHADOW ROOTS DEEP, which is why this is the nested object form and
@@ -811,11 +835,38 @@ function roomSections(room, opt, hass) {
   const valveIds = ((clim && clim.attributes && clim.attributes.valves) || [])
     .map((v) => String(v).split(".").pop());
   const roomTemps = temps.filter((id) => !valveIds.some((ieee) => id.includes(ieee)));
-  const graphTemps = roomTemps.length ? roomTemps : temps;
+  //: AND WHEN THE ROOM HAS NO THERMOMETER, THE HOUSE MEAN — not the valve.
+  //:
+  //: The badge above this chart and the engine below it already agree: a room
+  //: with no sensor of its own reads `house_average_temperature` on its badge
+  //: and is HEATED to it (`temperature_source: house_average`). Only the curve
+  //: disagreed, because the one thermometer left in the room belongs to the
+  //: valve — and a valve reads the radiator, which is the whole reason
+  //: `calibration.py` exists. Measured on a resident test device 2026-10-27:
+  //: `climate.flur`, badge 19,9 °C from five other rooms, curve from the valve.
+  //:
+  //: ga_heating publishes the mean as a real sensor (0.13.8) and the room NAMES
+  //: it, the way it already names the humidity one — never guessed from an
+  //: entity_id, so a renamed sensor blanks nothing.
+  //:
+  //: THE VALVE REMAINS THE LAST RESORT, for the house where no room has a
+  //: sensor at all: there the mean does not exist, `house_average_temperature`
+  //: is None, and the engine itself falls back to the valve. One honest curve
+  //: under the valve's own name beats an empty card.
+  const houseTemp = (clim && clim.attributes
+    && clim.attributes.house_temperature_entity) || null;
+  const meanTemp = (!roomTemps.length && houseTemp && hass && hass.states
+    && hass.states[houseTemp]) ? houseTemp : null;
+  const graphTemps = roomTemps.length ? roomTemps : (meanTemp ? [meanTemp] : temps);
   if (hasHistory && graphTemps.length) {
-    // Named only when it is the single curve AND it is not a valve's own
-    // thermometer: "Raum Temperatur" on a sensor screwed to the radiator would
-    // be a label that contradicts the reading it sits under.
+    // Named when it is the single curve and it is NOT a valve's own thermometer
+    // — the room's own sensor or the house mean it is actually heated to. The
+    // house mean wears the room's label on purpose ("just like any other room",
+    // 2026-10-27): it is the number the badge shows and the number the engine
+    // steers by, so the chart calling it something else would be the odd one
+    // out. `temperature_source` still says which case the room is in, for
+    // anyone who needs to know. "Raum Temperatur" on a sensor screwed to the
+    // radiator, though, would be a label that contradicts its own reading.
     //: The room's curve, and — where a device names one — the outdoor one beside
     //: it. Two series answer "is it cold outside or is the heating failing",
     //: which one series cannot. The outdoor entity is checked against `states`
@@ -825,10 +876,12 @@ function roomSections(room, opt, hass) {
       && hass.states[opt.outdoorTemperature] ? opt.outdoorTemperature : null;
     const entities = graphEntities(
       graphTemps,
-      (graphTemps.length === 1 && roomTemps.length) ? ["Raum Temperatur"] : null,
+      (graphTemps.length === 1 && (roomTemps.length || meanTemp))
+        ? ["Raum Temperatur"] : null,
       outdoor, "Außentemperatur");
     history.push({ type: "statistics-graph", title: "Temperatur letzte 24h", entities,
-      stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD, ...GRAPH_CHROME });
+      stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD,
+      hide_legend: entities.length < 2, ...GRAPH_CHROME });
   }
   //: A ROOM WITH NO HYGROMETER GETS THE HOUSE MEAN ("in the rooms that dont have
   //: t&h sensor add a mean of other humidity similar to whats done for
@@ -850,10 +903,10 @@ function roomSections(room, opt, hass) {
     const outdoorH = opt.outdoorHumidity && hass && hass.states
       && hass.states[opt.outdoorHumidity] ? opt.outdoorHumidity : null;
     const entities = graphEntities(
-      [meanHum], ["Ø Luftfeuchtigkeit (Haus)"], outdoorH, "Außenluftfeuchtigkeit");
+      [meanHum], ["Raum Luftfeuchtigkeit"], outdoorH, "Außenluftfeuchtigkeit");
     history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h",
       entities, stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD,
-      ...GRAPH_CHROME });
+      hide_legend: entities.length < 2, ...GRAPH_CHROME });
   }
   if (hasHistory && hums.length) {
     // Named for the same reason the temperature curve is: left to itself the card
@@ -867,7 +920,7 @@ function roomSections(room, opt, hass) {
       outdoorH, "Außenluftfeuchtigkeit");
     history.push({ type: "statistics-graph", title: "Luftfeuchtigkeit letzte 24h",
       entities, stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD,
-      ...GRAPH_CHROME });
+      hide_legend: entities.length < 2, ...GRAPH_CHROME });
   }
   if (history.length) {
     sections.push({ type: "grid", cards: [
