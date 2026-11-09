@@ -855,9 +855,20 @@ function roomSections(room, opt, hass) {
   //: under the valve's own name beats an empty card.
   const houseTemp = (clim && clim.attributes
     && clim.attributes.house_temperature_entity) || null;
-  const meanTemp = (!roomTemps.length && houseTemp && hass && hass.states
+  //: AND WHEN THE ROOM'S OWN THERMOMETER STOPS ANSWERING, THE SAME (2026-11-09).
+  //:
+  //: "No thermometer" was read here as "no sensor ENTITY", which is a different
+  //: question from the one the badge and the engine ask. A sensor whose battery
+  //: has died still HAS an entity, so the curve stayed on it long after
+  //: `room_sensor_temperature` had dropped it — it returns None for unavailable,
+  //: unknown AND silent — and the room was already being heated to the mean.
+  //: The badge reads `temperature_source` for exactly this reason. The curve now
+  //: reads it too, so all three change over at the same instant instead of
+  //: agreeing only when a room has no sensor fitted at all.
+  const onHouseTemp = source === "house_average";
+  const meanTemp = ((onHouseTemp || !roomTemps.length) && houseTemp && hass && hass.states
     && hass.states[houseTemp]) ? houseTemp : null;
-  const graphTemps = roomTemps.length ? roomTemps : (meanTemp ? [meanTemp] : temps);
+  const graphTemps = meanTemp ? [meanTemp] : (roomTemps.length ? roomTemps : temps);
   if (hasHistory && graphTemps.length) {
     // Named when it is the single curve and it is NOT a valve's own thermometer
     // — the room's own sensor or the house mean it is actually heated to. The
@@ -897,9 +908,13 @@ function roomSections(room, opt, hass) {
   //: room NAMES it, so this never guesses an entity_id. An older engine names
   //: nothing and the room keeps the blank, exactly as today.
   const houseHum = (clim && clim.attributes && clim.attributes.house_humidity_entity) || null;
-  const meanHum = (!hums.length && houseHum && hass && hass.states
+  //: `humidity_source` is the hygrometer's twin of `temperature_source`, read
+  //: here for the same reason: a hygrometer that has stopped answering still has
+  //: an entity, and the badge already moved to the house figure without it.
+  const onHouseHum = (clim && (clim.attributes || {}).humidity_source) === "house_average";
+  const meanHum = ((onHouseHum || !hums.length) && houseHum && hass && hass.states
     && hass.states[houseHum]) ? houseHum : null;
-  if (hasHistory && !hums.length && meanHum) {
+  if (hasHistory && meanHum) {
     const outdoorH = opt.outdoorHumidity && hass && hass.states
       && hass.states[opt.outdoorHumidity] ? opt.outdoorHumidity : null;
     const entities = graphEntities(
@@ -908,7 +923,7 @@ function roomSections(room, opt, hass) {
       entities, stat_types: ["mean"], days_to_show: 1, period: GRAPH_PERIOD,
       hide_legend: entities.length < 2, ...GRAPH_CHROME });
   }
-  if (hasHistory && hums.length) {
+  if (hasHistory && hums.length && !meanHum) {
     // Named for the same reason the temperature curve is: left to itself the card
     // labelled the single series "… Luftfeuchtigkeit (mean)", and "(mean)" is the
     // card's own arithmetic leaking into a resident's legend — it answers a

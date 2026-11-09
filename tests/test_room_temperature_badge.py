@@ -773,6 +773,102 @@ def test_a_house_where_nothing_has_a_thermometer_keeps_the_valve():
     assert any(f"Temperatur letzte 24h :: {_VALVE_TEMP}" in c for c in out), out
 
 
+# ── and when the room's own sensor stops answering (2026-11-09) ───────────
+# "using the average of other rooms when room T&H is not available"
+#
+# The badge and the curve were asking two different questions one screen apart.
+# The badge asks ga_heating ("temperature_source"), which drops a sensor that is
+# unavailable, unknown OR silent. The curve asked Home Assistant ("is there a
+# sensor entity"), and a dead battery leaves the entity exactly where it was —
+# so the room was heated to the house mean, showed the house mean on its badge,
+# and drew a curve from a thermometer nobody trusted any more.
+
+_FLUR_FITTED = (f'{{ name: "Flur", climate: ["climate.flur"],'
+                f' temps: ["sensor.flur_t", "{_VALVE_TEMP}"],'
+                ' hums: ["sensor.flur_h"], batts: [], lights: [], switches: [] }')
+
+
+def _chart_entities(room, states):
+    """The ENTITIES behind each curve rather than their labels.
+
+    `_charts` above reads `e.name || e.entity`, and a single curve is named
+    "Raum Temperatur" whichever sensor it came from — on purpose, since 2026-10-27.
+    So a label cannot tell the house mean apart from the sensor it just replaced:
+    every assertion below would read the same string before and after this change
+    and prove nothing. Checked against the shipped file in a browser, 2026-11-09.
+    """
+    return json.loads(run_js(STRATEGY, f"""(() => {{
+      const hass = {{ config: {{ components: ["history"] }}, states: {states} }};
+      return JSON.stringify(roomSections({room}, gaOptions({{}}), hass)
+        .flatMap(s => s.cards || [])
+        .filter(c => c.type === "statistics-graph")
+        .map(c => c.title + " :: " + c.entities.map(e => e.entity).join(", ")));
+    }})()"""))
+
+
+def _fitted_states(reading="unavailable", source="house_average", house_mean=True):
+    """A room that HAS both sensors fitted — they are simply not answering, which
+    is the case `temperature_source` / `humidity_source` already report. Pass a
+    real `reading` with `source="sensor"` to get the healthy room back."""
+    t_src = "sensor.flur_t" if source == "sensor" else source
+    h_src = "sensor.flur_h" if source == "sensor" else source
+    mean = (f'"{_HOUSE_TEMP}": {{ state: "19.9",'
+            ' attributes: { device_class: "temperature" } },' if house_mean else "")
+    return f"""{{
+  "climate.flur": {{ state: "auto", attributes: {{ current_temperature: 19.9,
+                    valves: ["{_VALVE}"], temperature_source: "{t_src}",
+                    humidity_source: "{h_src}", {_FLUR_NAMED} }} }},
+  "sensor.flur_t": {{ state: "{reading}", attributes: {{ device_class: "temperature" }} }},
+  "sensor.flur_h": {{ state: "{reading}", attributes: {{ device_class: "humidity" }} }},
+  {mean}
+  "{_VALVE_TEMP}": {{ state: "20.1", attributes: {{ device_class: "temperature" }} }},
+  "{_HOUSE_HUM}": {{ state: "62", attributes: {{ device_class: "humidity" }} }}
+}}"""
+
+
+def test_a_thermometer_that_stopped_answering_hands_its_curve_to_the_house_mean():
+    """THE RED ONE for this change. The sensor entity is still there — that was
+    the whole problem — so this pins that the curve follows the ENGINE'S verdict
+    and not the entity's existence."""
+    out = _chart_entities(_FLUR_FITTED, _fitted_states())
+    assert any(_HOUSE_TEMP in c for c in out), out
+    assert not any("sensor.flur_t" in c for c in out), out
+    assert not any(_VALVE_TEMP in c for c in out), out
+
+
+def test_a_hygrometer_that_stopped_answering_does_the_same():
+    out = _chart_entities(_FLUR_FITTED, _fitted_states())
+    assert any(_HOUSE_HUM in c for c in out), out
+    assert not any("sensor.flur_h" in c for c in out), out
+
+
+def test_a_silent_sensor_counts_even_while_it_still_reads_a_number():
+    """`room_sensor_temperature` also drops a sensor that has gone SILENT — one
+    still showing its last reading, which looks perfectly healthy from here. The
+    card must not second-guess that by reading the state itself: the sensor says
+    a plausible 19.2 and the engine has moved the room to the mean regardless."""
+    out = _chart_entities(_FLUR_FITTED, _fitted_states(reading="19.2"))
+    assert any(_HOUSE_TEMP in c for c in out), out
+    assert not any("sensor.flur_t" in c for c in out), out
+
+
+def test_a_sensor_that_is_answering_keeps_its_own_curve():
+    """MUST-NOT-FLAG, and the one that proves this reads the engine rather than
+    simply preferring the mean: same room, same entities, only the source differs."""
+    out = _chart_entities(_FLUR_FITTED, _fitted_states(reading="19.2", source="sensor"))
+    assert any("sensor.flur_t" in c for c in out), out
+    assert any("sensor.flur_h" in c for c in out), out
+    assert not any(_HOUSE_TEMP in c or _HOUSE_HUM in c for c in out), out
+
+
+def test_a_room_on_the_valve_is_left_alone():
+    """MUST-NOT-FLAG. `temperature_source: valve` is the house where nothing has
+    a thermometer at all; the mean does not exist there, and this must not invent
+    one from a named entity that is not in `states`."""
+    out = _chart_entities(_FLUR_FITTED, _fitted_states(source="valve", house_mean=False))
+    assert not any(_HOUSE_TEMP in c for c in out), out
+
+
 def test_a_room_with_its_own_thermometer_is_untouched():
     """MUST-NOT-FLAG. The mean is a fallback, never a replacement."""
     room = (f'{{ name: "Flur", climate: ["climate.flur"],'
