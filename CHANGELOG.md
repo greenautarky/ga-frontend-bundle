@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.23.9 — 2026-11-10
+
+A room with no usable thermometer charts what actually drives it.
+
+- Temperature for a room without a usable sensor (#62, by @ahmad-greenautarky): the 24 h chart draws the house mean the engine names in `house_temperature_entity` instead of the radiator valve's own reading; a thermometer that has stopped answering hands its curve to the mean as well. The valve stays the last resort: in a house where no room has a sensor there is no mean, and the room keeps the valve. **Needs ga-heating >= 0.14.1**; an older engine names no mean and the room keeps its valve.
+- One curve, no legend (#62): a chart with a single curve drops its legend; two curves keep it, labelled "Raum Temperatur" / "Raum Luftfeuchtigkeit" next to the outdoor curve.
+
 ## 1.23.8 — 2026-10-28
 
 Outdoor data without a per-device dashboard edit, plus the UI session merged as #57 and the boost change #58.
