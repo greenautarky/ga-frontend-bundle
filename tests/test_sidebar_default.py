@@ -41,11 +41,19 @@ globalThis.localStorage = {
   removeItem: (k) => store.delete(k),
 };
 let handled = 0;
+let uncaught = 0;
 const root = {
   _listener: null,
+  hass: undefined,
   addEventListener(type, fn) { if (type === "hass-dock-sidebar") this._listener = fn; },
+  // A real dispatchEvent does NOT propagate a listener's exception to the
+  // caller: the browser reports it as an uncaught error (console "Uncaught
+  // TypeError"). The asset's own try/catch therefore cannot hide it.
   dispatchEvent(ev) {
-    if (this._listener) { handled++; this._listener(ev); }
+    if (this._listener) {
+      handled++;
+      try { this._listener(ev); } catch (e) { uncaught++; }
+    }
     return true;
   },
 };
@@ -58,26 +66,37 @@ globalThis.document = { querySelector: (sel) => (sel === "home-assistant" ? root
 // HA persist the preference it was asked for.
 setTimeout(() => {
   root.addEventListener("hass-dock-sidebar", (ev) => {
+    // Home Assistant's handler runs _updateHass -> the `hass` setter, which reads
+    // hass.entities (frontend `registries`). While the app has only a PARTIAL
+    // hass (connected, registries not subscribed yet) that is a TypeError.
+    // Odoo #1743: seen on Core 2026.10.4.4, ga-sidebar-default.js nudge.
+    if (!root.hass || root.hass.entities === undefined) {
+      if (root.hass) { void root.hass.entities.x; }
+    }
     globalThis.localStorage.setItem("dockedSidebar", JSON.stringify(ev.detail.dock));
   });
 }, %(attach_after_ms)d);
+// `hass` is a partial object from the listener on, complete after hass_ready_ms.
+setTimeout(() => { root.hass = {}; }, %(attach_after_ms)d);
+setTimeout(() => { root.hass = { entities: {}, states: {} }; }, %(hass_ready_ms)d);
 
 %(asset)s
 
 setTimeout(() => {
   const docked = globalThis.localStorage.getItem("dockedSidebar");
-  console.log(JSON.stringify({ docked, handled }));
+  console.log(JSON.stringify({ docked, handled, uncaught }));
   process.exit(0);
 }, %(observe_ms)d);
 """
 
 
-def _run(attach_after_ms=1500, observe_ms=4000, seed="[]"):
+def _run(attach_after_ms=1500, observe_ms=4000, seed="[]", hass_ready_ms=None):
     script = HARNESS % {
         "asset": ASSET.read_text(encoding="utf-8"),
         "attach_after_ms": attach_after_ms,
         "observe_ms": observe_ms,
         "seed": seed,
+        "hass_ready_ms": attach_after_ms if hass_ready_ms is None else hass_ready_ms,
     }
     proc = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr[:400]
@@ -112,3 +131,14 @@ def test_it_stops_instead_of_nudging_for_ever():
     out = _run(attach_after_ms=10**6, observe_ms=16500)
     assert out["docked"] is None
     assert out["handled"] == 0
+
+
+def test_it_does_not_fire_into_a_partial_hass_which_throws_uncaught():
+    """THE RED ONE for Odoo #1743 (Core 2026.10.4.4, K31 rc8): the app's listener
+    is attached but `hass` is still partial (no `entities`), and HA's handler throws
+    "Cannot read properties of undefined (reading 'entities')". dispatchEvent does
+    not hand that to our try/catch, so it shows as an uncaught console error. The
+    nudge must wait for a complete hass and still end with the sidebar collapsed."""
+    out = _run(attach_after_ms=500, hass_ready_ms=2000, observe_ms=4500)
+    assert out["uncaught"] == 0, out
+    assert out["docked"] == '"always_hidden"', out
