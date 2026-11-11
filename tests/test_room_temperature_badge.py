@@ -1008,13 +1008,16 @@ def test_the_split_follows_the_size_of_the_rooms_own_group():
     It no longer follows the OUTDOOR group, which is what it counted while
     outside came first."""
     # Aktuell + temperature + humidity.
-    assert "nth-child(3)" in _head(_OUT_CFG)["style"]
+    # The SPLIT rule specifically, not a bare "nth-child(3)": since
+    # 2026-11-11 the tap-label block names every badge by index, so a
+    # substring test for the index alone can no longer fail.
+    assert "nth-child(3) { margin-right: auto; }" in _head(_OUT_CFG)["style"]
     # Aktuell + temperature: this room reports no humidity anywhere, so the
     # group is one badge shorter and the split has to move with it.
     shorter = _head(_OUT_CFG, _NO_HUMIDITY_STATES, _ROOM_NO_HUM)
     assert shorter["names"] == ["Aktuell", "Temperatur",
                                 "Außen", "Temperatur", "Luftfeuchtigkeit"], shorter
-    assert "nth-child(2)" in shorter["style"], shorter
+    assert "nth-child(2) { margin-right: auto; }" in shorter["style"], shorter
 
 
 def test_the_split_does_not_follow_the_outdoor_group_any_more():
@@ -1024,7 +1027,10 @@ def test_the_split_does_not_follow_the_outdoor_group_any_more():
     has a 2-badge outdoor group and a 3-badge room group, and only one of those
     is the right answer."""
     style = _head('{ outdoor_temperature: "sensor.aussentemperatur" }')["style"]
-    assert "nth-child(3)" in style, style
+    # The SPLIT rule specifically, not a bare "nth-child(3)": since
+    # 2026-11-11 the tap-label block names every badge by index, so a
+    # substring test for the index alone can no longer fail.
+    assert "nth-child(3) { margin-right: auto; }" in style, style
 
 
 def test_no_outdoor_entities_means_no_group_and_no_rule():
@@ -1034,7 +1040,12 @@ def test_no_outdoor_entities_means_no_group_and_no_rule():
     outdoor" is stated explicitly here — the states below DO hold the pair."""
     got = _head("{ outdoor_temperature: false, outdoor_humidity: false }")
     assert got["names"] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], got
-    assert got["style"] == "", got
+    # `style == ""` until 2026-11-11, which held only while the split was the
+    # only thing in it. The room's own temperature is bold and every badge
+    # names itself on tap whether or not there is an outdoor group, so the
+    # absence of the SPLIT is what this test is actually about.
+    assert "margin-right: auto" not in got["style"], got
+    assert "div.badges { flex" not in got["style"], got
 
 
 def test_an_outdoor_entity_that_does_not_exist_is_left_out():
@@ -1042,7 +1053,11 @@ def test_an_outdoor_entity_that_does_not_exist_is_left_out():
     room's own readings rather than a badge reading "unknown"."""
     got = _head('{ outdoor_temperature: "sensor.gone", outdoor_humidity: "sensor.also_gone" }')
     assert got["names"] == ["Aktuell", "Temperatur", "Luftfeuchtigkeit"], got
-    assert got["style"] == "", got
+    # No split, for the same reason as the test above — and, since 2026-11-11,
+    # not an empty style either: the bold and the tap label do not depend on
+    # there being an outdoor group.
+    assert "margin-right: auto" not in got["style"], got
+    assert "div.badges { flex" not in got["style"], got
 
 
 def test_the_two_groups_differ_only_by_their_label_icon():
