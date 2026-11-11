@@ -298,6 +298,18 @@ async function fetchHomeModel(hass) {
 //: for "what is it now" anyway.
 const GRAPH_PERIOD = "hour";
 
+//: The weight the room's OWN temperature is printed at. It must be set as this
+//: variable and not as `font-weight`: `ha-heading-badge` prints the reading with
+//: `font-weight: var(--ha-heading-badge-font-weight, 400)`, which beats anything
+//: inherited from the badge, so a `font-weight` rule on the badge changes
+//: nothing a resident can see. Measured on K55, 2026-11-11.
+//:
+//: 700 and not 600, because Roboto ships 400/500/700 — 600 is synthesised to
+//: something indistinguishable from regular at 14 px, which is exactly how it
+//: looked on the first attempt ("the room temp is not visible more than other").
+const ROOM_TEMP_WEIGHT = "700";
+
+
 //: THE OUTDOOR CURVE'S COLOUR, pinned, and the room's taken off the rotation so
 //: nothing can collide with it.
 //:
@@ -620,6 +632,7 @@ function roomSections(room, opt, hass) {
   const clim = climate.length && hass && hass.states ? hass.states[climate[0]] : null;
   const source = clim && (clim.attributes || {}).temperature_source;
   const sourceIsEntity = typeof source === "string" && source.includes(".");
+  const beforeTemp = badges.length;
   if (sourceIsEntity) {
     badges.push({ type: "entity", entity: source, name: "Temperatur",
       icon: "mdi:thermometer" });
@@ -634,6 +647,13 @@ function roomSections(room, opt, hass) {
     badges.push({ type: "entity", entity: temps[0], name: "Temperatur",
       icon: "mdi:thermometer" });
   }
+  //: WHICH BADGE IS THE ROOM'S OWN TEMPERATURE, 1-based, or 0 when the room has
+  //: no reading to show. Counted rather than written down: "Aktuell" above is
+  //: pushed only for a room that HAS a climate entity, so the temperature is
+  //: the second badge in most rooms and the first in a sensor-only one. Exactly
+  //: one of the three branches above can fire, so the badge is wherever the row
+  //: now ends.
+  const roomTempBadge = badges.length > beforeTemp ? badges.length : 0;
   // HUMIDITY, the same shape as the temperature above it. A room with its own
   // hygrometer binds to that sensor; a room without one binds to the climate
   // entity, which carries ga_heating's `current_humidity` — the house average of
@@ -718,11 +738,92 @@ function roomSections(room, opt, hass) {
     //
     // Only applied when there are two groups to split — with one, every badge
     // pinned right is already the answer.
+    //: THE ROOM'S READINGS LEFT, OUTSIDE RIGHT — and three things had to be
+    //: fixed before that worked again. All measured on K55, 2026-11-11.
+    //:
+    //: 1. `.badges-row`, NOT `.badges`. HA wraps the badges in an inner row:
+    //:
+    //:        <div class="badges draggable"><div class="badges-row"><hui-heading-badge>…
+    //:
+    //:    so `.badges > *:nth-child(3)` matches that ONE wrapper and the
+    //:    `nth-child` matches nothing. The split had been dead on the fleet
+    //:    since that wrapper appeared — silently, because a selector matching
+    //:    nothing looks exactly like one with no work to do. Every badge read
+    //:    `margin-right: 0px` with the old rule live.
+    //:
+    //: 2. `div.badges`, not `.badges`. HA's own rule sets `flex: 0 1 auto` on
+    //:    the same class, and a bare `.badges` ties with it and loses. The
+    //:    element+class selector outranks it, and without the grow there is no
+    //:    spare width for `margin-right: auto` to push into — the group simply
+    //:    shifted sideways instead of splitting.
+    //:
+    //: 3. The weight is a VARIABLE, not `font-weight` — see ROOM_TEMP_WEIGHT.
+    //: AND A LABEL A PHONE CAN SEE.
+    //:
+    //: The badge's `name` is only a `title` attribute. A laptop shows it on
+    //: hover; a touch screen has no way to show it at all, so the row was six
+    //: unexplained numbers on the device most residents use. HA also defaults a
+    //: heading badge to `tap_action: none`, so there was nothing to tap either.
+    //:
+    //: Printed as a small box under the badge, and ONLY under `(hover: none)`:
+    //: a touch browser applies `:hover` on tap and holds it until the next tap
+    //: elsewhere, which is the behaviour a tooltip wants. The media query is
+    //: what keeps a laptop on the native title it already had, rather than
+    //: showing two tooltips at once.
+    //:
+    //: The words are the chart's, not the badge's: "Raum Temperatur" rather
+    //: than "Temperatur", because the question a resident is asking when they
+    //: press a number is which side of the wall it came from.
+    const badgeLabel = (b, i) => {
+      const indoor = i < roomBadgeCount;
+      if (b.show_state === false) return indoor ? "Innen" : "Außen";
+      if (b.name === "Temperatur") return indoor ? "Raum Temperatur" : "Außentemperatur";
+      if (b.name === "Luftfeuchtigkeit") {
+        return indoor ? "Raum Luftfeuchtigkeit" : "Außenluftfeuchtigkeit";
+      }
+      return b.name || "";
+    };
+    const tipRules = badges
+      .map((b, i) => {
+        const text = badgeLabel(b, i).replace(/["\\]/g, "");
+        return text
+          ? `.badges-row > *:nth-child(${i + 1}):hover::after { content: "${text}"; }`
+          : "";
+      })
+      .filter(Boolean);
+    const tooltipCss = tipRules.length
+      ? "@media (hover: none) {\n"
+        //: `.badges` is `overflow: auto` (HA scrolls the row when it does not
+        //: fit), which CLIPS a tooltip hanging below the badge — the box was
+        //: being drawn correctly and painted into nothing. Only lifted on touch,
+        //: where the tooltip exists; a row that genuinely overflows loses its
+        //: scroll, which is the trade, and at 375 px the six badges measure
+        //: 343 px against 343 px of room, so it does not arise on a phone.
+        + "          div.badges { overflow: visible; }\n"
+        + "          .badges-row > * { position: relative; }\n"
+        + "          .badges-row > *:hover::after { position: absolute; top: 100%;"
+        + " left: 50%; transform: translateX(-50%); margin-top: 4px; padding: 2px 6px;"
+        + " border-radius: 4px; background: var(--secondary-background-color);"
+        + " color: var(--primary-text-color); font-size: 11px; line-height: 16px;"
+        + " font-weight: 400; white-space: nowrap; z-index: 3;"
+        + " box-shadow: 0 1px 4px rgba(0,0,0,.3); }\n          "
+        + tipRules.join("\n          ") + "\n        }"
+      : "";
+    const headingStyle = [
+      splitAfter ? "div.badges { flex: 1 1 auto; }" : "",
+      splitAfter ? "div.badges-row { flex: 1 1 auto; }" : "",
+      tooltipCss,
+      splitAfter
+        ? `.badges-row > *:nth-child(${splitAfter}) { margin-right: auto; }`
+        : "",
+      roomTempBadge
+        ? `.badges-row > *:nth-child(${roomTempBadge}) `
+          + `{ --ha-heading-badge-font-weight: ${ROOM_TEMP_WEIGHT}; }`
+        : "",
+    ].filter(Boolean).join("\n        ");
     const cards = [{
       type: "heading", heading: "", heading_style: "title", badges,
-      ...(splitAfter ? { card_mod: { style: `
-        .badges { flex: 1 1 auto; }
-        .badges > *:nth-child(${splitAfter}) { margin-right: auto; }` } } : {}),
+      ...(headingStyle ? { card_mod: { style: `\n        ${headingStyle}` } } : {}),
     }];
     for (const entity of climate) {
       // THE ROOM NAME GOES IN THE CARD ("thee room name goes inside teh
