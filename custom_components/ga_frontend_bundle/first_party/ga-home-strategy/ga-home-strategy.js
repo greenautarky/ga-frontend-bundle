@@ -832,9 +832,32 @@ function roomSections(room, opt, hass) {
   // sensors carry its IEEE in their entity_id — so this is read from the model,
   // not guessed from a name. A room whose ONLY thermometer is a valve keeps it:
   // one honest curve under its own name beats an empty card.
-  const valveIds = ((clim && clim.attributes && clim.attributes.valves) || [])
+  //: ABSENT IS NOT EMPTY (2026-11-02). `valves: []` is a room that HAS no
+  //: radiators. A MISSING `valves` is a room that has not said yet — which is
+  //: every room for the first moments after a restart, before `ga_heating`
+  //: republishes. Read as "none", the filter below removed nothing, and the
+  //: chart drew each radiator's own thermometer under its own name ("Thermostat
+  //: 1 Temperatur") until the next publish quietly corrected it. A chart that
+  //: is briefly WRONG is worse than one that is briefly absent: the resident
+  //: reads it, and it answers "how warm was it" with the radiator.
+  //:
+  //: Only an entity that is EXPECTED to say can be "not saying". A room with no
+  //: thermostat at all, and a card bound straight to a TRV (`climate.0x…`,
+  //: which never publishes `valves`), both mean "nothing to filter here" — they
+  //: keep the curve they always had rather than losing it for ever.
+  const valves = clim && clim.attributes ? clim.attributes.valves : undefined;
+  const expectsValves = !!clim
+    && !/^climate\.0x[0-9a-f]+$/i.test(climate[0] || "");
+  const valvesKnown = !expectsValves || Array.isArray(valves);
+  const valveIds = (Array.isArray(valves) ? valves : [])
     .map((v) => String(v).split(".").pop());
-  const roomTemps = temps.filter((id) => !valveIds.some((ieee) => id.includes(ieee)));
+  //: ...AND ONLY ONCE THE ROOM HAS SAID WHAT ITS VALVES ARE. A missing
+  //: `valves` is not an empty one — see `valvesKnown` above — so until the
+  //: room publishes, no thermometer here can be told apart from a radiator's
+  //: and none of them is the room's own.
+  const roomTemps = valvesKnown
+    ? temps.filter((id) => !valveIds.some((ieee) => id.includes(ieee)))
+    : [];
   //: AND WHEN THE ROOM HAS NO THERMOMETER, THE HOUSE MEAN — not the valve.
   //:
   //: The badge above this chart and the engine below it already agree: a room
@@ -868,7 +891,13 @@ function roomSections(room, opt, hass) {
   const onHouseTemp = source === "house_average";
   const meanTemp = ((onHouseTemp || !roomTemps.length) && houseTemp && hass && hass.states
     && hass.states[houseTemp]) ? houseTemp : null;
-  const graphTemps = meanTemp ? [meanTemp] : (roomTemps.length ? roomTemps : temps);
+  //: The house mean still wins where it applies, and it is safe during the
+  //: unknown window too: it is the mean of OTHER rooms' thermometers, never
+  //: this room's radiator. Only the last resort — `temps`, which may hold a
+  //: valve's own — waits for the room to say.
+  const graphTemps = meanTemp
+    ? [meanTemp]
+    : (roomTemps.length ? roomTemps : (valvesKnown ? temps : []));
   if (hasHistory && graphTemps.length) {
     // Named when it is the single curve and it is NOT a valve's own thermometer
     // — the room's own sensor or the house mean it is actually heated to. The
