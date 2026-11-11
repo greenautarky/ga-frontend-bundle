@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- ga-sidebar-default no longer fires `hass-dock-sidebar` into a half-hydrated app (Odoo #1743). On Core 2026.10.4.4 the app's handler threw `Cannot read properties of undefined (reading 'entities')` while `hass` was still partial; the error escapes the script's try/catch (dispatchEvent reports a listener's exception as uncaught). The nudge now waits for `hass.entities`; the existing 250 ms retry covers the wait.
+
 ## 1.23.9 — 2026-11-10
 
 A room with no usable thermometer charts what actually drives it.
