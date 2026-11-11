@@ -47,6 +47,13 @@
     try {
       const root = document.querySelector("home-assistant");
       if (!root) return;
+      // Fire only into a HYDRATED app (Odoo #1743, Core 2026.10.4.4). The app's
+      // `hass-dock-sidebar` handler runs through its `hass` setter, which reads
+      // hass.entities; while `hass` is still partial that throws inside the
+      // handler. dispatchEvent does not pass a listener's exception to this
+      // try/catch, so it surfaced as an uncaught console TypeError. Skipping the
+      // tick costs nothing: the retry below tries again every EVERY_MS.
+      if (!root.hass || !root.hass.entities) return;
       root.dispatchEvent(
         new CustomEvent("hass-dock-sidebar", {
           detail: { dock: "always_hidden" },
