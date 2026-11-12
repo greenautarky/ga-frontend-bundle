@@ -1061,3 +1061,88 @@ def test_the_two_groups_differ_only_by_their_label_icon():
     assert icons[0] == "mdi:home-import-outline", icons
     assert icons[3] == "mdi:home-export-outline", icons
     assert icons[1] == icons[4] == "mdi:thermometer", icons
+
+
+# -- absent valves are not empty valves (2026-11-02) -------------------------
+#
+# A room publishes `valves` on its own entity, and the chart uses it to drop the
+# radiators' own thermometers. Right after a restart the room has not published
+# yet, so the attribute is MISSING — and `|| []` read that as "this room has no
+# radiators", filtered nothing, and drew every valve's thermometer under its own
+# name. It corrected itself on the next publish, which is why it read as a
+# flicker rather than a bug; a resident looking in that moment is told the
+# radiator's temperature was the room's.
+
+
+_NO_VALVES_YET = """{
+  "climate.wz": { state: "heat", attributes: { current_temperature: 19.5,
+                  temperature: 21 } },
+  "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } },
+  "sensor.0xdead_local_temperature": { state: "23.6",
+                  attributes: { device_class: "temperature" } }
+}"""
+
+
+def test_a_room_that_has_not_published_its_valves_draws_nothing_yet():
+    """THE RED ONE. The room entity is there but has not said what its valves
+    are, so which of these two thermometers is screwed to a radiator is not
+    knowable. Waiting one publish beats answering "how warm was it" with the
+    radiator."""
+    assert _temp_graph(_ROOM, _NO_VALVES_YET) is None
+
+
+def test_an_empty_valves_list_still_means_nothing_to_filter():
+    """MUST-NOT-FLAG, and the distinction the fix turns on: `valves: []` is a
+    statement — this room HAS no radiators — and its own thermometer is drawn."""
+    states = """{
+      "climate.wz": { state: "heat", attributes: { current_temperature: 19.5,
+                      temperature: 21, valves: [] } },
+      "sensor.wz_t": { state: "20.1", attributes: { device_class: "temperature" } }
+    }"""
+    room = ('{ name: "WZ", climate: ["climate.wz"], temps: ["sensor.wz_t"],'
+            ' hums: [], batts: [], lights: [], switches: [] }')
+    g = _temp_graph(room, states)
+    assert g is not None, "an empty valve list must not suppress the curve"
+    assert g["entities"] == [
+        {"entity": "sensor.wz_t", "name": "Raum Temperatur", "color": "blue"}]
+
+
+def test_a_room_with_no_thermostat_at_all_keeps_its_curve():
+    """MUST-NOT-FLAG. A hallway with a thermometer and no thermostat has nothing
+    that could ever publish `valves`; "not saying" has to mean an entity that
+    was expected to say, or every such room loses its chart for ever."""
+    states = """{
+      "sensor.flur_t": { state: "19.2", attributes: { device_class: "temperature" } }
+    }"""
+    room = ('{ name: "Flur", climate: [], temps: ["sensor.flur_t"],'
+            ' hums: [], batts: [], lights: [], switches: [] }')
+    g = _temp_graph(room, states)
+    assert g is not None, "a room with no thermostat lost its curve"
+    # Named, and rightly: this one IS the room's own thermometer. Nothing here
+    # is a radiator, so there is no label that could contradict its reading.
+    assert g["entities"] == [
+        {"entity": "sensor.flur_t", "name": "Raum Temperatur", "color": "blue"}]
+
+
+def test_a_bare_trv_keeps_its_curve_because_it_never_publishes_valves():
+    """MUST-NOT-FLAG. A TRV's own climate entity has no `valves` and never will,
+    so for it absent IS empty — otherwise the dev fallback view, which lists raw
+    thermostats, would draw no temperature at all."""
+    states = """{
+      "climate.0xdead": { state: "heat", attributes: { current_temperature: 23.6,
+                          temperature: 21 } },
+      "sensor.0xdead_local_temperature": { state: "23.6",
+                          attributes: { device_class: "temperature" } }
+    }"""
+    room = ('{ name: "WZ", climate: ["climate.0xdead"],'
+            ' temps: ["sensor.0xdead_local_temperature"],'
+            ' hums: [], batts: [], lights: [], switches: [] }')
+    g = _temp_graph(room, states)
+    assert g is not None, "a bare TRV lost its curve"
+    assert [e["entity"] for e in g["entities"]] == ["sensor.0xdead_local_temperature"]
+    # The NAME is deliberately not asserted. This path labels it "Raum
+    # Temperatur" — the very thing the valve filter exists to prevent — because
+    # with no `valves` to filter by, the curve counts as a room sensor. That is
+    # unchanged by this commit (it fails identically on main) and belongs to
+    # whoever fixes the bare-TRV case; what is asserted here is only that the
+    # curve still EXISTS, which is what "absent is not empty" could have broken.
