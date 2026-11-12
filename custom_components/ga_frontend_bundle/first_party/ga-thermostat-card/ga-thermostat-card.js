@@ -75,6 +75,20 @@ const STYLE = `
     gap: 4px; font-size: 12px; font-weight: 600;
     padding: 1px 8px; border-radius: 10px; opacity: 1; }
   ga-thermostat-card .act ha-icon { --mdc-icon-size: 14px; }
+  /* A LOCK IS A STATE, NOT AN ACTION: no background, no colour of its own, and
+     it does not float right the way the running-state badge does — it belongs
+     to the room name it follows, the way a padlock follows a title. Muted,
+     because a locked thermostat is normal in a child's room and must not
+     read as a fault. NO BACKTICKS IN HERE: this block is a template literal,
+     so one ends the string and the card stops defining itself (2026-11-02). */
+  ga-thermostat-card .lk { margin-left: 6px; vertical-align: text-bottom;
+    color: var(--secondary-text-color, #7f8c8d); cursor: help; }
+  ga-thermostat-card .lk ha-icon { --mdc-icon-size: 16px; }
+  /* The count rides inside the padlock chip so the tooltip covers both and it
+     cannot drift away from the lock it counts. Same muted ink, no background:
+     still a state, not an alarm. */
+  ga-thermostat-card .lkn { font-size: 11px; font-weight: 600; margin-left: 1px;
+    vertical-align: text-bottom; }
   ga-thermostat-card .act-heating { background: rgba(230,126,34,.16); color: #b95b0b; }
   ga-thermostat-card .act-idle { background: rgba(127,140,141,.16); color: #5d6d6e; }
   ga-thermostat-card .act-off { background: rgba(127,140,141,.12); color: #7f8c8d; }
@@ -144,6 +158,66 @@ const STYLE = `
 function esc(v) {
   return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/**
+ * The GA label printed on the device, short form: TRV-SON-00000015 -> TRV-SON-15.
+ *
+ * SECOND COPY, deliberately: `gaLabel` in ga-maintenance-card.js is the same
+ * three lines, and these cards share no module (nothing in first_party/ imports
+ * anything). The two must agree, so test_thermostat_child_lock.py pins the
+ * padded form rendering short here exactly as the maintenance row renders it.
+ */
+function gaLabel(text) {
+  const m = /^([A-Z]{2,4})-([A-Z]{2,4})-0*(\d+)$/.exec(String(text || "").trim());
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/**
+ * What to call one thermostat: its GA label if anything carries one, else the
+ * name Zigbee2MQTT gives it with the switch's "child lock" suffix taken off
+ * ("Thermostat 1 Child lock" -> "Thermostat 1").
+ *
+ * THE LABEL WINS OUTRIGHT, and the z2m name is not appended to it (Ahmad,
+ * 2026-11-03: "only TRV-SON-15"). The label is on a sticker on the radiator, so
+ * it is the one name a person can check against the thing in front of them;
+ * "Thermostat 1" is only unique inside its own room, because that is how z2m
+ * numbers them. Same order of preference as a maintenance row, so one device is
+ * never called two different things on two cards.
+ *
+ * The label is read off the TRV's own climate entity first and the lock switch
+ * second, and a z2m name that IS label-shaped counts as a label - which is how
+ * the devices already named `TRV-SON-000000NN` in z2m surface today. Nothing
+ * publishes a `ga_label` attribute yet (checked across the bundle 2026-11-03:
+ * one consumer, no producer), so until the sync lands this falls through to the
+ * z2m name for every device on the fleet.
+ */
+function trvName(st, clim) {
+  const own = (st && st.attributes) || {};
+  const dev = (clim && clim.attributes) || {};
+  const fn = String(own.friendly_name || "")
+    .replace(/\s*(child\s*lock|kindersicherung)\s*$/i, "").trim();
+  return gaLabel(dev.ga_label) || gaLabel(own.ga_label) || gaLabel(fn) || fn;
+}
+
+/** "a" / "a und b" / "a, b und c" - a German list, not a joined array. */
+function joinDe(xs) {
+  if (xs.length < 2) return xs[0] || "";
+  return `${xs.slice(0, -1).join(", ")} und ${xs[xs.length - 1]}`;
+}
+
+/**
+ * The names in the order a person reads them, which is NOT the order they
+ * arrive in.
+ *
+ * `attributes.valves` is not sorted by thermostat number: on K181 the
+ * Wohnzimmer lists Thermostat 2 first, so an untouched map reads
+ * "Thermostat 2 und Thermostat 1" (live, 2026-11-03). Numeric collation, so
+ * "Thermostat 10" lands after "Thermostat 9" rather than after "Thermostat 1".
+ */
+function sortNames(xs) {
+  return xs.slice().sort((a, b) =>
+    a.localeCompare(b, "de", { numeric: true, sensitivity: "base" }));
 }
 
 class GaThermostatCard extends HTMLElement {
@@ -609,8 +683,71 @@ class GaThermostatCard extends HTMLElement {
 
   _hdr(s, header) {
     const badge = this._actionBadge(s);
-    if (header) return `<div class="hdr">${esc(header)}${badge}</div>`;
-    return badge ? `<div class="hdr notitle">${badge}</div>` : "";
+    const lock = this._childLockChip(s);
+    if (header) return `<div class="hdr">${esc(header)}${lock}${badge}</div>`;
+    return badge || lock ? `<div class="hdr notitle">${lock}${badge}</div>` : "";
+  }
+
+  /**
+   * A padlock after the room name while a thermostat in it is child-locked.
+   *
+   * WHY IT IS WORTH A MARK AT ALL: a locked TRV ignores the dial, so a resident
+   * turning it sees nothing happen and reports a broken radiator. The lock is
+   * the answer to that, and it is invisible until something says so — the
+   * buttons on this card still work, because they go over the network.
+   *
+   * READ FROM THE MODEL, NOT GUESSED. The room names its thermostats
+   * (`attributes.valves`) and Zigbee2MQTT names each one's switch after the same
+   * IEEE, so the entity is derived rather than matched on a title. A card bound
+   * straight to a TRV (`climate.0x…`) has no `valves`, so its own address is
+   * used — the same rule, one device instead of a room.
+   *
+   * ANY of them locked earns the mark: a room with two radiators where one
+   * ignores its dial has the problem this exists to explain.
+   *
+   * WHICH ONE, IN A ROOM THAT HAS MORE THAN ONE: every locked thermostat is
+   * named in the tooltip, and the chip carries locked/total. The tooltip alone
+   * was not enough - `title` has no hover on a phone, which is how residents
+   * read this card, so the one fact that has to survive without a pointer is
+   * on the chip itself.
+   */
+  _childLockChip(s) {
+    const states = (this._hass && this._hass.states) || {};
+    const own = String((this._config && this._config.entity) || "").split(".").pop();
+    const valves = (s && s.attributes && s.attributes.valves) || [];
+    const ieees = valves.length
+      ? valves.map((v) => String(v).split(".").pop())
+      : (/^0x[0-9a-f]+$/i.test(own) ? [own] : []);
+    //: The ieee rides along with the switch state because the label is looked
+    //: for on the TRV's climate entity too, and a state object does not know
+    //: its own entity_id.
+    const locked = ieees
+      .map((ieee) => {
+        const st = states[`switch.${ieee}_child_lock`];
+        return st && st.state === "on" ? Object.assign({ ga_ieee: ieee }, st) : null;
+      })
+      .filter(Boolean);
+    if (!locked.length) return "";
+    //: Name them only in a room that HAS more than one. In a one-radiator room
+    //: "Thermostat 1" is the radiator the resident is standing in front of, and
+    //: a longer sentence that adds nothing is a worse sentence.
+    const many = ieees.length > 1;
+    const names = many
+      ? sortNames(locked
+          .map((st) => trvName(st, states[`climate.${st.ga_ieee}`]))
+          .filter(Boolean))
+      : [];
+    const title = `Kindersicherung${names.length ? ` an ${joinDe(names)}` : ""} aktiv`
+      + " — zum Deaktivieren 3 Sekunden auf das Thermostat drücken";
+    //: locked/total, never a bare count: beside thermostats actually CALLED
+    //: "Thermostat 1" and "Thermostat 2", a lone "1" reads as the name of one of
+    //: them instead of as how many are locked. A ratio cannot be misread that
+    //: way. The aria-label stays the sentence, which names them outright.
+    const count = many
+      ? `<span class="lkn">${locked.length}/${ieees.length}</span>`
+      : "";
+    return `<span class="lk" title="${esc(title)}" role="img"`
+      + ` aria-label="${esc(title)}"><ha-icon icon="mdi:lock"></ha-icon>${count}</span>`;
   }
 
   /** The badge every variant shows. Empty string when there is nothing to say. */
