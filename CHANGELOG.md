@@ -1,8 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.23.10 — 2026-11-12
 
-- ga-sidebar-default no longer fires `hass-dock-sidebar` into a half-hydrated app (Odoo #1743). On Core 2026.10.4.4 the app's handler threw `Cannot read properties of undefined (reading 'entities')` while `hass` was still partial; the error escapes the script's try/catch (dispatchEvent reports a listener's exception as uncaught). The nudge now waits for `hass.entities`; the existing 250 ms retry covers the wait.
+Room view polish by @ahmad-greenautarky, plus a sidebar fix.
+
+- Radiator curve (#66): a room that has not published its valves yet draws no curve, rather than the radiator's.
+- Room readings (#65): the room's readings go left again, its temperature is bold, and a phone can ask what a number is.
+- Child lock (#67): a locked thermostat says so, with a padlock after the room name.
+- Sidebar default (#68): ga-sidebar-default no longer fires `hass-dock-sidebar` into a half-hydrated app (Odoo #1743). On Core 2026.10.4.4 the app's handler threw `Cannot read properties of undefined (reading 'entities')` while `hass` was still partial; the error escapes the script's try/catch (dispatchEvent reports a listener's exception as uncaught). The nudge now waits for `hass.entities`; the existing 250 ms retry covers the wait.
 
 ## 1.23.9 — 2026-11-10
 
