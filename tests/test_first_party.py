@@ -118,6 +118,7 @@ async def test_first_party_delivery(hass, enable_custom_integrations):
     injected_fp = {u for u in extra if u.startswith(FIRST_PARTY_URL_BASE)}
     assert injected_fp == {
         f"{FIRST_PARTY_URL_BASE}/ga-registry-guard/ga-registry-guard.js",
+        f"{FIRST_PARTY_URL_BASE}/ga-resident-chrome/ga-resident-chrome.js",
         f"{FIRST_PARTY_URL_BASE}/ga-sidebar-default/ga-sidebar-default.js",
     }, f"unexpected first-party module on the early-injection path: {injected_fp}"
     assert "ga-master-card" in data["first_party_resources"]

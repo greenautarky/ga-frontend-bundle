@@ -63,4 +63,8 @@ EARLY_INJECT_ASSET_IDS = (
     # A sidebar nudge, not an element: it must run on every page, not only on a
     # dashboard, so a Lovelace resource would be the wrong carrier.
     "ga-sidebar-default",
+    # No search and no Assist for a resident (Odoo #2146): hides two buttons and
+    # neutralises two shortcuts on whichever page the resident is on. Defines no
+    # element, and has to be on every page, not only on a dashboard.
+    "ga-resident-chrome",
 )

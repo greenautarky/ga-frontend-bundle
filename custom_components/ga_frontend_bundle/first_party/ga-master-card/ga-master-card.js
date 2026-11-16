@@ -7,6 +7,10 @@
  *   - grant/revoke ROOMS (the [sub-user x room] matrix) — the sub-user's dashboard
  *     is GENERATED from them by the ga-home strategy; no dashboard is handed out
  *   - rename rooms (areas)
+ *   - read-only facts above the danger zone (1.23.11): every Zigbee device with
+ *     its room, battery and LQI (Odoo #2144), and a software-version tile
+ *     (Odoo #2145). Both are rendered from greenautarky_site endpoints that read
+ *     the live state on every request; nothing here keeps a list or a cache.
  *   - Danger zone (KB #169): remove all sub-users. The full site reset is
  *     withdrawn from the card since 1.23.6 (it wiped rooms and heating config
  *     and one of its options left Core + z2m stopped). The card shows a note
@@ -23,6 +27,14 @@
 const API = "greenautarky_site/sub_user";
 // Danger zone (KB #169). The household reset is executed in Core.
 const API_HOUSEHOLD = "greenautarky_site/household";
+// Read-only facts for the Einstellungen page (greenautarky_site >= 2.13.0).
+const API_ZIGBEE = "greenautarky_site/zigbee_devices";
+const API_VERSIONS = "greenautarky_site/versions";
+
+// What counts as weak. zigbee2mqtt reports LQI as 0-255; a device below LQI_WEAK
+// drops frames. A battery at or below BATTERY_LOW needs new cells soon.
+const LQI_WEAK = 50;
+const BATTERY_LOW = 20;
 
 /**
  * Text for HTML. Names and texts from Home Assistant (entity names, room names,
@@ -33,6 +45,88 @@ const API_HOUSEHOLD = "greenautarky_site/household";
 function esc(v) {
   return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/** "weak" below LQI_WEAK, "ok" otherwise, "none" when the device reports no LQI. */
+function lqiLevel(lqi) {
+  if (lqi == null) return "none";
+  return lqi < LQI_WEAK ? "weak" : "ok";
+}
+
+/** "low" at or below BATTERY_LOW, "ok" otherwise, "none" for a mains device. */
+function batteryLevel(pct) {
+  if (pct == null) return "none";
+  return pct <= BATTERY_LOW ? "low" : "ok";
+}
+
+/**
+ * The Zigbee device table (Odoo #2144). `devices` arrives sorted by room from
+ * the server; a device with no room says "ohne Raum" instead of being left out.
+ * Weak values are marked with TEXT as well as colour, so they read on a
+ * monochrome screen and to a screen reader. A top-level function, so
+ * tests/js/eval.mjs can run the shipped bytes without a DOM.
+ */
+function renderZigbeeDevices(devices) {
+  if (!devices || !devices.length) {
+    return '<div class="muted">Keine Zigbee-Geräte gefunden.</div>';
+  }
+  const rows = devices
+    .map((d) => {
+      const room = d.area ? esc(d.area) : '<span class="muted">ohne Raum</span>';
+      const bl = batteryLevel(d.battery);
+      const battery =
+        bl === "none"
+          ? '<span class="muted">–</span>'
+          : `<span class="lvl ${bl === "low" ? "bad" : ""}">${esc(d.battery)} %${bl === "low" ? " niedrig" : ""}</span>`;
+      const ql = lqiLevel(d.lqi);
+      const lqi =
+        ql === "none"
+          ? '<span class="muted">–</span>'
+          : `<span class="lvl ${ql === "weak" ? "bad" : ""}">${esc(d.lqi)}${ql === "weak" ? " schwach" : ""}</span>`;
+      return `<tr class="zb-row" data-device="${esc(d.device_id)}"><td class="zb-name">${esc(d.name)}</td><td class="zb-room">${room}</td><td class="zb-batt">${battery}</td><td class="zb-lqi">${lqi}</td></tr>`;
+    })
+    .join("");
+  return (
+    '<table class="zb-table"><thead><tr><th>Gerät</th><th>Raum</th><th>Batterie</th><th>LQI</th></tr></thead>' +
+    `<tbody>${rows}</tbody></table>`
+  );
+}
+
+/**
+ * The software tile (Odoo #2145): the release bundle as the headline, every
+ * component underneath. Rendered from the server's answer, as it is — an
+ * absent release says so rather than showing a default.
+ */
+function renderVersions(v) {
+  const GROUPS = [
+    ["system", "System"],
+    ["addon", "Add-ons"],
+    ["integration", "Home-Assistant-Komponenten"],
+  ];
+  let headline;
+  if (v && v.bundle) headline = esc(v.bundle);
+  else if (v && v.status === "missing") headline = "Release nicht gemeldet";
+  else if (v && v.status === "unreadable") headline = "Release nicht lesbar";
+  else headline = "Release unbekannt";
+  const comps = (v && v.components) || [];
+  const groups = GROUPS.map(([key, label]) => {
+    const items = comps.filter((c) => c.group === key);
+    if (!items.length) return "";
+    const rows = items
+      .map((c) => `<tr class="sw-row" data-id="${esc(c.id)}"><td>${esc(c.name)}</td><td class="sw-ver">${esc(c.version)}</td></tr>`)
+      .join("");
+    return `<div class="sw-group"><b>${esc(label)}</b><table><tbody>${rows}</tbody></table></div>`;
+  }).join("");
+  const note =
+    v && v.status && v.status !== "ok"
+      ? `<div class="muted sw-note">Der Gerätebericht fehlt (${esc(v.status)}); System- und Add-on-Versionen können nicht angezeigt werden.</div>`
+      : "";
+  return (
+    `<details class="sw-tile"><summary><span class="muted">Software</span><br><b class="sw-bundle">${headline}</b></summary>` +
+    note +
+    (groups || '<div class="muted">Keine Versionen gemeldet.</div>') +
+    "</details>"
+  );
 }
 
 class GaMasterCard extends HTMLElement {
@@ -88,6 +182,13 @@ class GaMasterCard extends HTMLElement {
             <input class="area-name" type="text" placeholder="Neuer Name" />
             <button class="btn area-btn">Umbenennen</button>
           </div>
+
+          <h4>Zigbee-Geräte</h4>
+          <div class="muted">Raum, Batterie und Funkqualität (LQI) aller Zigbee-Geräte.</div>
+          <div class="zb">Lade…</div>
+
+          <h4>Software</h4>
+          <div class="sw">Lade…</div>
 
           <h4 class="danger-h">Gefahrenbereich</h4>
           <div class="danger-zone">
@@ -156,6 +257,14 @@ class GaMasterCard extends HTMLElement {
         ga-master-card code { font-weight:700; }
         ga-master-card .badge { font-size:.72em; font-weight:600; padding:1px 6px; border-radius:8px; background: rgba(244,67,54,.15); color: var(--error-color,#c0392b); vertical-align:middle; }
         ga-master-card .actions { margin-top:4px; display:flex; gap:6px; flex-wrap:wrap; }
+        ga-master-card .zb-table td, ga-master-card .zb-table th { font-size:.88em; }
+        ga-master-card .zb-table th { opacity:.6; font-weight:600; }
+        ga-master-card .lvl.bad { color: var(--error-color,#c0392b); font-weight:700; background: rgba(244,67,54,.12); padding:1px 6px; border-radius:8px; }
+        ga-master-card .sw-tile { border:1px solid var(--divider-color,#e0e0e0); border-radius:10px; padding:10px 14px; }
+        ga-master-card .sw-tile summary { cursor:pointer; }
+        ga-master-card .sw-bundle { font-size:1.25em; }
+        ga-master-card .sw-group { margin-top:12px; }
+        ga-master-card .sw-ver { font-family:monospace; text-align:right; }
         ga-master-card .btn { font-family:inherit; font-size:.9em; font-weight:600; padding:8px 14px; border:none; border-radius:20px; cursor:pointer; background: var(--secondary-background-color,#e8e8e8); color: var(--primary-text-color,#212121); }
         ga-master-card .btn:hover { filter:brightness(.97); }
         ga-master-card .btn.primary { background: var(--primary-color,#03a9f4); color:#fff; }
@@ -191,7 +300,31 @@ class GaMasterCard extends HTMLElement {
     this._buildDangerZone();
   }
 
+  // The two read-only blocks above the danger zone. Each asks the server on every
+  // call and renders the answer as it is; a failure shows in its own block and
+  // never blocks the user list or the danger zone.
+  async _loadFacts() {
+    const zb = this._root.querySelector(".zb");
+    const sw = this._root.querySelector(".sw");
+    try {
+      const d = await this._api("GET", API_ZIGBEE);
+      zb.innerHTML = renderZigbeeDevices(d.devices);
+    } catch (e) {
+      zb.innerHTML = `<div class="muted">Zigbee-Geräte nicht verfügbar: ${esc(this._errText(e))}</div>`;
+    }
+    try {
+      const v = await this._api("GET", API_VERSIONS);
+      // Keep the tile open across a refresh.
+      const open = !!sw.querySelector("details[open]");
+      sw.innerHTML = renderVersions(v);
+      if (open) sw.querySelector("details").open = true;
+    } catch (e) {
+      sw.innerHTML = `<div class="muted">Versionen nicht verfügbar: ${esc(this._errText(e))}</div>`;
+    }
+  }
+
   async _load() {
+    this._loadFacts();
     try {
       const data = await this._api("GET", API + "/list");
       this._state = data;
