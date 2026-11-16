@@ -41,7 +41,8 @@ def test_no_shipped_card_is_on_the_early_injection_path(bundle_module):
     assert cards, f"no first-party assets found under {FIRST_PARTY}"
     inject, resource = bundle_module.delivery_plan(cards, _const().EARLY_INJECT_ASSET_IDS)
     assert resource, "not one asset is delivered as a Lovelace resource"
-    assert {c["id"] for c in inject} == {"ga-registry-guard", "ga-sidebar-default"}, (
+    assert {c["id"] for c in inject} == {
+        "ga-registry-guard", "ga-resident-chrome", "ga-sidebar-default"}, (
         "only assets that define NO custom element may be injected early; "
         f"got {[c['id'] for c in inject]}"
     )
