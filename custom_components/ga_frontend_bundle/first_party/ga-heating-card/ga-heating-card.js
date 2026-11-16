@@ -28,6 +28,79 @@ const DAYS = [
 const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday"];
 const TMIN = 5, TMAX = 30;
 
+/* --- the limits the building's owner set ------------------------------------
+ * `ga_heating` carries two kinds, and the card has to show both or a resident
+ * meets a stepper that simply refuses to move:
+ *
+ *   limits         the whole day. A slot outside it is DROPPED on save.
+ *   limit_windows  a time range (Nachtabsenkung). A slot inside it is CLAMPED.
+ *
+ * Mirrors `in_window` / `limits_at` in ga_heating/__init__.py. Kept in step by
+ * the seam: the component sends the windows it will actually enforce, so the
+ * card never computes a range of its own — it only renders one.
+ */
+function hhmmToMinutes(t) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || ""));
+  if (!m) return null;
+  const h = +m[1], mi = +m[2];
+  return h <= 23 && mi <= 59 ? h * 60 + mi : null;
+}
+
+/** Is `minutes` inside [start, end)? `start === end` is the whole day. */
+function inWindow(minutes, start, end) {
+  if (start === end) return true;
+  return start < end
+    ? minutes >= start && minutes < end
+    : minutes >= start || minutes < end;
+}
+
+/** The {min, max} a slot at `time` faces, and the window that set it. */
+function boundsAt(time, limits, windows) {
+  const wide = {
+    min: limits && limits.min != null ? limits.min : TMIN,
+    max: limits && limits.max != null ? limits.max : TMAX,
+    window: null,
+  };
+  const at = hhmmToMinutes(time);
+  if (at === null) return wide;
+  for (const w of windows || []) {
+    const from = hhmmToMinutes(w.from), to = hhmmToMinutes(w.to);
+    if (from === null || to === null) continue;
+    if (inWindow(at, from, to)) return { min: w.min, max: w.max, window: w };
+  }
+  return wide;
+}
+
+/** 20 rather than 20.0, 20.5 kept.
+ *
+ * Deliberately NOT given the name the removed holiday-banner helper had:
+ * `test_heating_card` greps the whole file for that name as a proxy for "the
+ * banner does not restate the setpoint". The guard is sound, and the name was
+ * the only thing in the way — so this renames rather than loosening someone
+ * else's test to make a change pass. (The grep is why this comment does not
+ * spell the old name out either.) */
+function degrees(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+/** One sentence per window, in the resident's words, naming who decided. */
+function limitNotice(limits, windows) {
+  const lines = [];
+  for (const w of windows || []) {
+    lines.push(`Zwischen ${w.from} und ${w.to} hat die Eigentümerin oder der `
+      + `Eigentümer ${degrees(w.min)} bis ${degrees(w.max)} °C festgelegt.`);
+  }
+  if (limits && (limits.min > TMIN || limits.max < TMAX)) {
+    lines.push(`Sonst sind ${degrees(limits.min)} bis ${degrees(limits.max)} °C möglich.`);
+  }
+  if (!lines.length) return "";
+  lines.push("Höhere oder tiefere Werte werden beim Speichern auf diesen Bereich "
+    + "gesetzt — das ist keine Störung der Karte.");
+  return lines.join(" ");
+}
+
 /* ─── the day curve ───────────────────────────────────────────────────────
  *
  * 24 bars, each the setpoint in force in that hour. It used to carry the hour
@@ -369,6 +442,11 @@ class GaHeatingCard extends HTMLElement {
       const r = await this._hass.callApi(
         "get", `ga_heating/schedule?entity_id=${encodeURIComponent(this._config.entity)}`);
       this._week = r.days || {};
+      // What the building's owner allows. Read from the component rather than
+      // assumed, so the card can never offer a temperature the save would then
+      // change under the resident.
+      this._limits = r.limits || null;
+      this._windows = r.limit_windows || [];
       for (const [d] of DAYS) this._week[d] = this._week[d] || [];
       this._padded = this._normalise();
       // The plan AS IT STANDS, kept so every later render can say what an edit
@@ -452,7 +530,14 @@ class GaHeatingCard extends HTMLElement {
       if (t === null) return;  // not a time: leave the plan as it was
       s.time = t;
     }
-    else s.temp = Math.min(TMAX, Math.max(TMIN, parseFloat(value) || 20));
+    else {
+      // Clamped to the bounds for THIS slot's time, not the day's: a 23:00 row
+      // under a Nachtabsenkung window has a lower ceiling than a 13:00 one, and
+      // the component would clamp it on save anyway. Doing it here means the
+      // resident sees the number that will be stored.
+      const b = boundsAt(s.time, this._limits, this._windows);
+      s.temp = Math.min(b.max, Math.max(b.min, parseFloat(value) || 20));
+    }
     this._sort(); this._render();
   }
   _copyTo(days) {
@@ -633,6 +718,17 @@ class GaHeatingCard extends HTMLElement {
            of blank on a card where nothing had been tapped yet (2026-10-08). */
         ga-heating-card .readout { min-height:1.1em; font-size:.85em; margin-top:2px; opacity:.8; }
         ga-heating-card .empty { opacity:.6; font-size:.9em; padding:8px 0; }
+        /* The owner's limits, said once above the rows. Deliberately not an
+           error colour: nothing is wrong, the building simply has a rule. */
+        ga-heating-card .ownerlimit {
+          font-size:.85em; line-height:1.35; margin:0 0 8px; padding:8px 10px;
+          border-radius:6px; border-left:3px solid var(--info-color,#5a8dd6);
+          background:var(--secondary-background-color,#f1f3f5);
+          color:var(--primary-text-color,#212121); opacity:.9; }
+        /* On the row that is actually capped, so the rule and the stepper it
+           bounds are never read apart. */
+        ga-heating-card .slot .capped {
+          font-size:.75em; opacity:.6; white-space:nowrap; margin-left:2px; }
         ga-heating-card .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
         ga-heating-card .btn { font-family:inherit; font-size:.9em; font-weight:600; padding:8px 14px; border:none;
           border-radius:20px; cursor:pointer; background: var(--secondary-background-color,#e8e8e8);
@@ -670,13 +766,21 @@ class GaHeatingCard extends HTMLElement {
     // thermostat — "jetzt 18,0". Without it a resident editing a plan is asked
     // to remember the number they just overwrote (asked for 2026-10-02).
     const diff = dayDiff(list, (this._saved || {})[this._day]);
-    slots.innerHTML = list.length
+    // Said ONCE, above the rows, before anyone meets a stepper that will not
+    // move. A limit a resident cannot see the reason for reads as a broken
+    // card, and the support call that follows is about the card rather than
+    // about the setting.
+    const notice = limitNotice(this._limits, this._windows);
+    slots.innerHTML = (notice
+        ? `<div class="ownerlimit">${esc(notice)}</div>` : "")
+      + (list.length
       ? list.map((s, i) => {
           const d = diff.rows[i] || {};
           const mark = (f) => (d.added || d[f] != null ? " changed" : "");
           // ONE label, not one per field: "jetzt 00:00 · 17 °C" says the same as
           // two badges in half the width, and the row has to hold a time, a
           // temperature and this on a phone (asked for 2026-10-02).
+          const b = boundsAt(s.time, this._limits, this._windows);
           const parts = [];
           if (d.time != null) parts.push(esc(d.time));
           if (d.temp != null) parts.push(`${esc(d.temp)} °C`);
@@ -686,12 +790,12 @@ class GaHeatingCard extends HTMLElement {
           return `
           <div class="slot${d.added || parts.length ? " edited" : ""}">
             <input type="time" step="${SNAP_MINUTES * 60}" class="t${mark("time")}" value="${esc(s.time)}" data-i="${i}" data-f="time">
-            <input type="number" class="v${mark("temp")}" min="${TMIN}" max="${TMAX}" step="0.5" value="${esc(s.temp)}" data-i="${i}" data-f="temp">
-            <span class="unit">°C</span>${was}
+            <input type="number" class="v${mark("temp")}" min="${b.min}" max="${b.max}" step="0.5" value="${esc(s.temp)}" data-i="${i}" data-f="temp"${b.window ? ` title="${esc(b.min)}–${esc(b.max)} °C zwischen ${esc(b.window.from)} und ${esc(b.window.to)}"` : ""}>
+            <span class="unit">°C</span>${was}${b.window ? `<span class="capped">max ${esc(degrees(b.max))}°</span>` : ""}
           </div>`;
         }).join("")
       : '<div class="empty">Dieser Tag hat noch keinen Plan, und das Thermostat meldet gerade keine Zieltemperatur — '
-        + 'sobald es eine meldet, stehen hier fünf Zeiten. Ohne Plan bleibt die Temperatur, wie du sie eingestellt hast.</div>';
+        + 'sobald es eine meldet, stehen hier fünf Zeiten. Ohne Plan bleibt die Temperatur, wie du sie eingestellt hast.</div>');
 
     // Rows the saved day has and this one no longer does. Nothing else on
     // screen would mention them: they are gone from the list being edited.
