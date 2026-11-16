@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.23.11 — 2026-11-16
+
+The resident's Einstellungen page (Odoo #2144, #2145, #2146), from the K31 hand test of BOSv1.6.1-rc1. Needs greenautarky_site >= 2.13.0 (the two new blocks read its endpoints; against an older one each block says "nicht verfügbar" and nothing else changes) and ga_manager >= 0.277.6 for the release headline.
+
+- Zigbee devices (#2144): a table before the Gefahrenbereich with every Zigbee device's room, battery % and LQI, sorted by room. A weak LQI (< 50) and a low battery (<= 20 %) are marked with colour and text; a device without a room says "ohne Raum". Read-only.
+- Software tile (#2145): before the Gefahrenbereich, the GA release bundle (e.g. BOSv1.6.1-rc2) as headline, expandable to every version the device runs (OS, Supervisor, Core, plugins, every add-on, every custom integration). Re-asked on every load; a missing release says so instead of showing a default.
+- No search, no Assist for a resident (#2146): new early-injected asset `ga-resident-chrome` hides the top-bar magnifier and Assist buttons for a non-admin user and neutralises the A / E / C / D / Ctrl+K shortcuts. Typing the letter "a" in a field still works. The admin / service view is unchanged. A direct `?conversation=1` link still opens Assist.
+
 ## 1.23.10 — 2026-11-12
 
 Room view polish by @ahmad-greenautarky, plus a sidebar fix.
