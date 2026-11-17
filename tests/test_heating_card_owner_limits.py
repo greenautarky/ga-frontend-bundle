@@ -36,8 +36,9 @@ BOTH = [
 
 
 def bounds(time, limits=WIDE, windows=NIGHT):
-    return run_js(CARD, "boundsAt(%s, %s, %s)"
-                  % (json.dumps(time), json.dumps(limits), json.dumps(windows)))
+    return run_js(
+        CARD,
+        f"boundsAt({json.dumps(time)}, {json.dumps(limits)}, {json.dumps(windows)})")
 
 
 # ── the window, including the two minutes a hand-rolled check gets wrong ──
@@ -96,8 +97,8 @@ def test_without_limits_from_the_component_the_card_uses_its_own_envelope():
 
 
 def notice(limits=WIDE, windows=NIGHT):
-    return run_js(CARD, "limitNotice(%s, %s)"
-                  % (json.dumps(limits), json.dumps(windows)))
+    return run_js(
+        CARD, f"limitNotice({json.dumps(limits)}, {json.dumps(windows)})")
 
 
 def test_the_notice_names_the_hours_and_the_temperatures():
