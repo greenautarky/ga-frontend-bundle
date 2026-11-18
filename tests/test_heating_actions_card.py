@@ -255,7 +255,12 @@ def test_the_boost_hint_never_claims_a_valve_position():
     # A whole sentence, not a parenthetical: it is no longer tucked after the
     # heading but sitting alone in the panel the "i" opens, where a fragment in
     # brackets reads like a caption with nothing to caption.
-    assert hint == "Öffnet die Ventile kurzzeitig ganz.", hint
+    #
+    # AND IT NO LONGER SAYS "ganz" (2026-11-18): the press asks for 3 °C above
+    # each room rather than for its maximum, so "opens the valves fully" became
+    # the same inaccuracy the 30 °C was. See `boostTarget`.
+    assert hint == ("Heizt die Räume kurz kräftig auf — 3 °C über dem aktuellen "
+                    "Soll, danach gilt wieder der Plan."), hint
 
 
 def test_switching_everything_off_offers_a_way_back():
@@ -902,8 +907,8 @@ def test_boost_acts_on_every_room_with_no_picker_to_get_wrong():
     assert [c.split(":")[1] for c in got["sent"]] == ROOMS
     # And it SAYS so, over the whole flat — the card's standing rule is to count
     # what happened rather than report "done", and three rooms is the count.
-    assert got["said"] == [{"kind": "ok", "text": "3 Räume für 15 Minuten voll "
-                            "aufgedreht. Danach gilt wieder der Plan."}], got["said"]
+    assert got["said"] == [{"kind": "ok", "text": "3 Räume für 15 Minuten im "
+                            "Boost. Danach gilt wieder der Plan."}], got["said"]
 
 
 def test_boost_with_no_rooms_at_all_refuses_rather_than_reporting_success():
@@ -1130,7 +1135,42 @@ def _hint(states):
 def test_the_idle_explanation_is_a_sentence_now_that_it_has_a_panel():
     """The brackets were there because it rode on the heading line. In a panel
     of its own a bracketed fragment reads like a footnote to nothing."""
-    assert _hint({}) == "Öffnet die Ventile kurzzeitig ganz."
+    assert _hint({}) == ("Heizt die Räume kurz kräftig auf — 3 °C über dem "
+                         "aktuellen Soll, danach gilt wieder der Plan.")
+
+
+def test_the_press_asks_for_three_degrees_above_each_room_not_for_its_maximum():
+    """THE RED ONE for `boostTarget` on this card. It sent each room's `max_temp`
+    to emulate "open the valves 100 %", and the room cards then read `30.0` —
+    because a room reports the setpoint its RADIATORS are on ("30 is not accurate,
+    we dont want to reach 30", 2026-11-18). The two cards move together: the room
+    card's own test pins the same step."""
+    states = {
+        "climate.warm": {"attributes": {"friendly_name": "Warm", "valves": ["climate.v"],
+                                        "area_id": "w", "max_temp": 30,
+                                        "temperature": 21.0, "current_temperature": 19.5}},
+        # An AUS room: its radiators sit at the frost value, so `setpoint + 3` is
+        # 11 °C in a room at 19 and the press would heat nothing.
+        "climate.aus": {"attributes": {"friendly_name": "Aus", "valves": ["climate.v"],
+                                       "area_id": "a", "max_temp": 30,
+                                       "temperature": 8.0, "current_temperature": 19.0}},
+        # Already at its ceiling: capped, so the call is accepted and changes
+        # nothing rather than being rejected.
+        "climate.max": {"attributes": {"friendly_name": "Max", "valves": ["climate.v"],
+                                       "area_id": "m", "max_temp": 30,
+                                       "temperature": 30.0, "current_temperature": 20.0}},
+        "climate.v": {"attributes": {"local_temperature": 21}},
+    }
+    sent = json.loads(run_js(CARD, "(() => {"
+        " const c = Object.create(GaHeatingActionsCard.prototype);"
+        " c.setConfig({}); const sent = [];"
+        f" c._hass = {{ states: {json.dumps(states)},"
+        "   callService: (d, s, data) => { sent.push([data.entity_id, data.temperature]);"
+        "     return Promise.resolve(); } };"
+        " c._say = () => {};"
+        " return c._boostAll().then(() => JSON.stringify(sent)); })()"))
+    assert dict(sent) == {"climate.warm": 24.0, "climate.aus": 22.0, "climate.max": 30.0}
+
 
 
 def test_the_running_explanation_does_not_say_boost_twice():

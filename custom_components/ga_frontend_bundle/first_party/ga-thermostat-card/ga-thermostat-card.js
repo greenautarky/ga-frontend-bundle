@@ -62,6 +62,56 @@ const MODE_LABELS = [
 // Dial geometry: a 270° arc with a 90° gap at the bottom (0° = top, clockwise).
 const DIAL = { size: 200, c: 100, r: 82, start: -135, sweep: 270 };
 
+/**
+ * How long the room's own Boost asks for, in minutes.
+ *
+ * THE SAME 15 AS THE WHOLE-HOME BUTTON (`BOOST_MINUTES` in
+ * ga-heating-actions-card), and for the same reason it stopped being 5 on
+ * 2026-10-27: five minutes is shorter than a TRV takes to open and the
+ * radiator to make itself felt, so the run was over about when the room
+ * started to notice it. Two buttons that both say "Boost" must not mean two
+ * different things, so this number and that one move together.
+ *
+ * ONE TAP, NO PICKER (2026-11-17). A duration control per room is a decision
+ * asked for before the resident has any information to make it with, and the
+ * row already offers `Beenden` the moment the boost is running — so ending it
+ * early is cheaper than choosing right. `boost_minutes:` overrides it for a
+ * hand-written dashboard; ga_heating caps whatever arrives at 240.
+ */
+const BOOST_MINUTES = 15;
+
+/** Fallback when a room publishes no usable `max_temp` — see `_boostTarget`. */
+const BOOST_FALLBACK_TEMP = 30;
+
+/**
+ * How far above the room a boost asks for, and the word that stands in for the
+ * number while one runs.
+ *
+ * NOT `max_temp` ANY MORE (2026-11-18). Both boost buttons used to send the
+ * room's warmest value, 30 °C, to emulate "open the valves 100 %". It did open
+ * them — and the card then read `30.0`, because `target_temperature` reports
+ * what the RADIATORS are set to, not what the plan intends. A resident reading
+ * that as "this room is being driven to 30 degrees" is reading the number
+ * correctly; it was the number that was wrong ("30 is not accurate, we dont
+ * want to reach 30", 2026-11-18).
+ *
+ * 3 °C IS GA_HEATING'S OWN STEP (`BOOST_STEP` in its `__init__.py`), the value
+ * the service picks for itself when no temperature is sent. A TRV calls for
+ * heat on the gap between its setpoint and what it reads, and a room does not
+ * climb 3 K in fifteen minutes — so for a run this short 3 K holds the valve
+ * open just as 30 did, while asking for nothing it could overshoot into if the
+ * run is ever extended.
+ *
+ * WHAT IT DOES NOT DO is drive the valve POSITION. `valve_opening_degree` is
+ * how far the valve opens once the TRV has decided to heat, not a lever that
+ * makes it decide; on this hardware it never moves off 100 anyway (14 827
+ * samples over 30 days on KIB-SON-00000055, all 100.0 — ichb.py records it).
+ * A setpoint above the room is the one thing that makes a TRVZB open.
+ */
+const BOOST_STEP = 3;
+/** What the number slot reads while a boost runs. See `_boostTarget`. */
+const BOOST_WORD = "Boost";
+
 const STYLE = `
   ga-thermostat-card .ga-body { padding: 16px; }
   ga-thermostat-card .hdr { font-weight: 600; opacity: .8; margin-bottom: 10px; }
@@ -103,6 +153,16 @@ const STYLE = `
     font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 12px;
     border: 1px solid var(--divider-color, #e0e0e0); cursor: pointer;
     background: transparent; color: var(--primary-text-color, #212121); }
+  /* The action, on its own line under the statement rows. Right-aligned to
+     sit where "Beenden" sits, so start and stop occupy one column. */
+  ga-thermostat-card .boostrow { display: flex; justify-content: flex-end;
+    margin-top: 8px; }
+  ga-thermostat-card .boostrow .boost { display: inline-flex; align-items: center;
+    gap: 4px; font-family: inherit; font-size: 12px; font-weight: 600;
+    padding: 3px 10px; border-radius: 12px; cursor: pointer;
+    border: 1px solid var(--divider-color, #e0e0e0);
+    background: transparent; color: var(--primary-text-color, #212121); }
+  ga-thermostat-card .boostrow .boost ha-icon { --mdc-icon-size: 16px; }
   ga-thermostat-card .val { text-align: center; font-size: 35px; font-weight: 500; line-height: 1.1; }
   ga-thermostat-card .val small { font-size: 15px; opacity: .6; }
   ga-thermostat-card .set { display: flex; align-items: center; justify-content: center;
@@ -147,6 +207,13 @@ const STYLE = `
   ga-thermostat-card svg.dial .d-act { font-size: 12px; fill: var(--secondary-text-color, #888); }
   ga-thermostat-card svg.dial .d-tgt { font-size: 30px; font-weight: 600; }
   ga-thermostat-card svg.dial .d-cur { font-size: 12px; fill: var(--secondary-text-color, #888); }
+  /* The number slot while a boost runs. Same slot, same weight, a little
+     smaller: a word set in a 50px number face reads as a label that overflowed,
+     and in the dial it has to fit inside the ring. */
+  ga-thermostat-card .val.target.boosting { font-size: 26px; letter-spacing: .01em; }
+  ga-thermostat-card .set .target.boosting { font-size: 18px; }
+  ga-thermostat-card .sp .big .t.boosting { font-size: 34px; }
+  ga-thermostat-card svg.dial .d-tgt.boosting { font-size: 22px; }
 `;
 
 /**
@@ -235,6 +302,13 @@ class GaThermostatCard extends HTMLElement {
     // diagnostic view. The measurement itself is untouched — it is still on the
     // entity and still drawn by the temperature/humidity view.
     this._showCurrent = config.show_current === true;
+    // Clamped to what ga_heating will accept, so a typo in a hand-written
+    // dashboard is a short boost and not a rejected service call the resident
+    // sees as a dead button.
+    const minutes = Number(config.boost_minutes);
+    this._boostMinutes = Number.isFinite(minutes) && minutes >= 1
+      ? Math.min(Math.round(minutes), 240)
+      : BOOST_MINUTES;
     this._root = null;
   }
 
@@ -341,6 +415,11 @@ class GaThermostatCard extends HTMLElement {
    */
   _showPending() {
     if (!this._root || this._pending == null) return;
+    // NOT DURING A BOOST: the slot holds a word, not a value, and `set hass`
+    // calls this on every push — a pending value from before the boost began
+    // would be painted over the word on the next TRV report.
+    const live = this._state();
+    if (live && this._boosting(live)) return;
     const el = this._root.querySelector(".target, .sp .t");
     if (!el) return;
     // Format follows the element, not the variant: with the measurement hidden,
@@ -548,7 +627,115 @@ class GaThermostatCard extends HTMLElement {
       .map(([m, label, icon]) =>
         `<button class="m ${s.state === m ? "on" : ""} ${m === "heat" || m === "off" ? m : ""}" data-mode="${m}">` +
         `<ha-icon icon="${icon}"></ha-icon>${label}</button>`)
-      .join("") + `</div>` + this._manualRow(s);
+      .join("") + `</div>` + this._manualRow(s) + this._boostRow(s);
+  }
+
+  /**
+   * The room's own Boost button.
+   *
+   * IT STARTS HERE BECAUSE IT ALREADY ENDS HERE. A running boost has been
+   * reported in the row above since 2026-10-05, with its own `Beenden`; the
+   * start was the only half missing, and it lived on the whole-home card
+   * behind a room picker — a house control, not the thing you reach for while
+   * standing in the room (asked for 2026-11-17). Splitting one feature across
+   * two cards left a resident who had found the stop with nowhere to look for
+   * the start.
+   *
+   * NOT A FOURTH MODE BUTTON. KI / MANUEL / AUS come from `hvac_modes` and are
+   * states a room can be left in; a boost runs OVER whichever is chosen and
+   * hands the room back when the time is up. In the mode row it would read as
+   * a state, and `s.state === m` has no truth to highlight for it.
+   *
+   * A ROW OF ITS OWN, not a button inside the manual/override row. That row is
+   * a statement about the active mode and renders NOTHING for a room on its
+   * plan — deliberately, so a plan-following room grows no empty timer
+   * (`test_no_override_renders_nothing`). Hanging the button in there would
+   * have meant breaking that rule to reach the common case.
+   */
+  _boostRow(s) {
+    const ov = (s.attributes && s.attributes.override) || {};
+    const active = (k) => ov[k] && ov[k].active === true;
+    // HIDDEN WHEN A BOOST COULD NOT WIN, which is ga_heating's own precedence:
+    // window > ichb > boost > absence > slot. With a window open the valves are
+    // already shut and with a balancing run in progress the hour owns them, so
+    // the service would accept the press and the room would stay as it is. That
+    // is the same lie as a `Beenden` on an open window.
+    //
+    // DURING AN URLAUB IT STAYS: a boost outranks an absence, so "I am home
+    // early, warm this room" does what it says.
+    //
+    // And while a boost RUNS, the row above is the control — `Beenden` there,
+    // not a second press here that would only restart the clock.
+    if (active("window") || active("ichb") || active("boost")) return "";
+    return `<div class="boostrow">` +
+      `<button class="boost" data-boost="1" ` +
+      `title="${this._boostMinutes} Minuten warm, danach gilt wieder der Plan">` +
+      `<ha-icon icon="mdi:rocket-launch-outline"></ha-icon>Boost</button></div>`;
+  }
+
+  /**
+   * Is a boost the thing in force in this room right now?
+   *
+   * Read from the `override` attribute the room publishes — the same source
+   * `_overrideRow` and `_boostRow` read, so the three cannot disagree about
+   * what is running.
+   */
+  _boosting(s) {
+    const boost = ((s && s.attributes && s.attributes.override) || {}).boost;
+    return Boolean(boost && boost.active === true);
+  }
+
+  /**
+   * The setpoint a boost asks for: `BOOST_STEP` above whichever is higher, the
+   * room or the setpoint it is on, capped at what the room accepts.
+   *
+   * ABOVE THE ROOM, not merely above the setpoint. A TRV calls for heat on the
+   * gap between its setpoint and what it reads, so the only setpoint that
+   * guarantees a boost heats is one above the room. AN AUS ROOM IS THE CASE
+   * THAT PROVES IT: its radiators sit at their frost value, and `frost + 3` is
+   * 11 °C in a room at 19 — a boost that sent that would be the dead button
+   * this card keeps paying to avoid. Taking the room as well costs nothing in
+   * the ordinary case, where the setpoint is the higher of the two.
+   *
+   * CAPPED at `max_temp`, so a room already held at its maximum gets its
+   * maximum and the press is a no-op rather than a rejected service call.
+   *
+   * THE CARD COMPUTES IT rather than letting the service default to plan + 3:
+   * omitting the temperature raises a ServiceValidationError on a room with no
+   * plan, and Home Assistant's /api/services turns that into a bare 500 with no
+   * body (measured on a canary 2026-08-18, see ga-heating-actions-card), so the
+   * reason reaches the log and nobody else.
+   */
+  _boostTarget(s) {
+    const a = (s && s.attributes) || {};
+    // `> 0`, not `isFinite` alone: `Number(null)` is 0, and a room that
+    // publishes `max_temp: null` would otherwise be boosted to 0 degC — the
+    // exact opposite of the press. Caught by its own test, not on a device.
+    const max = Number(a.max_temp);
+    const ceiling = Number.isFinite(max) && max > 0 ? max : BOOST_FALLBACK_TEMP;
+    const base = [Number(a.temperature), Number(a.current_temperature)]
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (!base.length) return ceiling;
+    // ONE DECIMAL, because `current_temperature` arrives with the sensor's own:
+    // a room reading 19.37 would otherwise ask its valve for 22.37 and put that
+    // number in the service log. Adding 3 to a one-decimal value needs no
+    // rounding of its own -- checked across 5.0 to 30.0, no binary artefact.
+    return Math.round(Math.min(Math.max(...base) + BOOST_STEP, ceiling) * 10) / 10;
+  }
+
+  /**
+   * Boost THIS room, through the service ga_heating already had.
+   *
+   * THE TEMPERATURE IS ALWAYS SENT — `_boostTarget` says which one and why.
+   */
+  async _boost() {
+    const s = this._state();
+    if (!s) return;
+    await this._hass.callService("ga_heating", "boost", {
+      entity_id: this._config.entity,
+      minutes: this._boostMinutes,
+      temperature: this._boostTarget(s),
+    });
   }
 
   _render() {
@@ -582,21 +769,36 @@ class GaThermostatCard extends HTMLElement {
     // Exactly one element carries the class `target`, in both layouts, because
     // `_showPending` finds the number by that class. Two of them, or none,
     // breaks the optimistic press without breaking anything a test would see.
+    const boosting = this._boosting(s);
     const big = this._showCurrent
       ? `<div class="val">${cur != null ? `${Number(cur).toFixed(1)}<small> °C</small>` : "–"}</div>`
-      : `<div class="val target">${tTxt}</div>`;
+      : boosting
+        ? `<div class="val target boosting">${BOOST_WORD}</div>`
+        : `<div class="val target">${tTxt}</div>`;
     //: `heating` is deliberately NOT a condition here any more. An off room keeps
     //: the same body and the same −/+ (asked for 2026-09-30); pressing one is a
     //: setpoint, which ga_heating treats as a manual change — so the room leaves
     //: AUS and heats. That is the resident's intent, expressed on the one control
     //: that was already there.
-    const setRow = (target != null)
-      ? `<div class="set"><button data-delta="-1" aria-label="kälter">−</button>` +
-        (this._showCurrent ? `<div class="target">${Number(target).toFixed(1)} °C</div>` : "") +
-        `<button data-delta="1" aria-label="wärmer">+</button></div>`
-      : "";
+    //: NO − / + WHILE A BOOST RUNS, and no `Ziel` caption over a word. Those
+    //: buttons provably cannot move the number: `target_temperature` reports what
+    //: the radiators are set to, and `_apply` writes the OVERRIDE's value to them
+    //: for as long as the boost outranks the room's own decision — so a press
+    //: would land, be stored for afterwards, and show nothing meanwhile. This
+    //: card already hides a control that cannot win (`_boostRow` with a window
+    //: open); this is that rule applied to the one control a boost takes over.
+    //: `Beenden` in the row below is the way out, and the − / + come back with it.
+    const setRow = boosting
+      ? (this._showCurrent
+          ? `<div class="set"><div class="target boosting">${BOOST_WORD}</div></div>`
+          : "")
+      : (target != null)
+        ? `<div class="set"><button data-delta="-1" aria-label="kälter">−</button>` +
+          (this._showCurrent ? `<div class="target">${Number(target).toFixed(1)} °C</div>` : "") +
+          `<button data-delta="1" aria-label="wärmer">+</button></div>`
+        : "";
     this._root.innerHTML = `<div class="ga-body">${this._hdr(s, header)}` +
-      `${this._showCurrent ? "" : this._targetLabel()}${big}${setRow}${this._modeRow(s)}</div>`;
+      `${this._showCurrent || boosting ? "" : this._targetLabel()}${big}${setRow}${this._modeRow(s)}</div>`;
   }
 
   _renderSetpoint(s, header) {
@@ -604,14 +806,19 @@ class GaThermostatCard extends HTMLElement {
     const target = s.attributes.temperature;
     //: One body for every state — an off room renders exactly like a heating one.
     //: See `setRow` in _renderClassic for why its −/+ stay live.
+    //: While a boost runs: the word where the number was, no caption and no
+    //: − / +. See `setRow` in _renderClassic for why those go.
+    const boosting = this._boosting(s);
     const body =
       (this._showCurrent
         ? `<div class="cur">aktuell ${cur != null ? Number(cur).toFixed(1) : "–"} °C</div>`
         : "") +
-      this._targetLabel() +
-      `<div class="big"><button data-delta="-1">−</button>` +
-      `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
-      `<button data-delta="1">+</button></div>`;
+      (boosting ? "" : this._targetLabel()) +
+      (boosting
+        ? `<div class="big"><div class="t boosting">${BOOST_WORD}</div></div>`
+        : `<div class="big"><button data-delta="-1">−</button>` +
+          `<div class="t">${target != null ? Number(target).toFixed(1) : "–"}<small> °C</small></div>` +
+          `<button data-delta="1">+</button></div>`);
     this._root.innerHTML = `<div class="ga-body sp">${this._hdr(s, header)}${body}${this._modeRow(s)}</div>`;
   }
 
@@ -774,7 +981,11 @@ class GaThermostatCard extends HTMLElement {
       `<path class="prog" d="${this._arc(DIAL.start, ang, DIAL.r)}" fill="none" stroke="${col}" stroke-width="12" stroke-linecap="round"/>` +
       `<circle class="knob" cx="${kx.toFixed(1)}" cy="${ky.toFixed(1)}" r="9" fill="#fff" stroke="${col}" stroke-width="2"/>` +
       `<text class="d-act" x="${DIAL.c}" y="${DIAL.c - 16}" text-anchor="middle">${this._actionLabel(s)}</text>` +
-      `<text class="d-tgt" x="${DIAL.c}" y="${DIAL.c + 10}" text-anchor="middle">${heating && !Number.isNaN(target) ? Number(target).toFixed(1) : "–"}</text>` +
+      // The word inside the ring while a boost runs, for the reason the other
+      // two variants show it: the number there is the override's, not the room's.
+      (this._boosting(s)
+        ? `<text class="d-tgt boosting" x="${DIAL.c}" y="${DIAL.c + 8}" text-anchor="middle">${BOOST_WORD}</text>`
+        : `<text class="d-tgt" x="${DIAL.c}" y="${DIAL.c + 10}" text-anchor="middle">${heating && !Number.isNaN(target) ? Number(target).toFixed(1) : "–"}</text>`) +
       // The dial is the variant the canary actually renders (measured on
       // a test device, 2026-09-23): the first version of this change fixed
       // `classic` and `setpoint` and left the dial showing the measurement, so
@@ -787,7 +998,11 @@ class GaThermostatCard extends HTMLElement {
   }
   _wireDial(s) {
     const dial = this._root.querySelector("svg.dial");
-    if (!dial || s.state === "off") return;
+    // NO DRAG WHILE A BOOST RUNS, for the same reason classic and setpoint drop
+    // their − / + — `live()` would paint a number over the word, and the commit
+    // would not reach the valves until the boost ended. The gesture returns when
+    // it does, because this is re-wired on every render.
+    if (!dial || s.state === "off" || this._boosting(s)) return;
     const step = this._step(s);
     const min = Number(s.attributes.min_temp) || 5, max = Number(s.attributes.max_temp) || 30;
     const toTemp = (ev) => {
@@ -832,9 +1047,11 @@ class GaThermostatCard extends HTMLElement {
     this._wired = true;
     this._root.addEventListener("click", (ev) => {
       const target = ev.target && ev.target.closest && ev.target.closest(
-        ".set button, .big button, .modes .m, .manualrow .endov");
+        ".set button, .big button, .modes .m, .manualrow .endov, .boostrow .boost");
       if (!target || !this._root.contains(target)) return;
-      if (target.dataset.end) {
+      if (target.dataset.boost) {
+        this._boost();
+      } else if (target.dataset.end) {
         this._endOverride(target.dataset.end);
       } else if (target.dataset.mode) {
         this._setMode(target.dataset.mode);
