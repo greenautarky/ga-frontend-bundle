@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.26.0 — 2026-11-16
+
+The schedule card shows the owner's limits, and says whose they are.
+
+A building's owner can now bound what a weekly plan may be set to — a whole-day range and, through Nachtabsenkung, a range for specific hours. `ga_heating` enforces both on save. Without this the resident simply met a stepper that would not move, or typed 22 and found 20 stored, with nothing on screen to say why; a limit with no author reads as a fault in the card, and the support call that follows is about the card rather than about the setting.
+
+- **Each row is bounded by the limits for ITS OWN time**, not the day's. A 23:00 row under a 22:00–06:00 Nachtabsenkung window has a lower ceiling than the 13:00 row beside it, and both say so in the input's tooltip; the capped row also carries a small `max 20°` beside the unit, so the rule and the stepper it bounds are never read apart.
+- **One sentence above the rows** naming the hours, the temperatures and the owner — and what happens to a value outside the range, because a number that changes on save with no explanation is the thing residents report.
+- **The card clamps on input**, so the resident sees the number that will be stored rather than discovering it afterwards. `boundsAt` mirrors `limits_at` in `ga_heating`; the test walks the midnight wrap and both boundary minutes, which is where a hand-rolled range check goes wrong.
+- Nothing is shown to a building that has set no limits: there is no rule to explain.
+- Needs ga-heating 0.16.0 for `limits` and `limit_windows` on `GET /api/ga_heating/schedule`. An older component sends neither and the card falls back to its own 5–30 envelope, exactly as before.
+
 ## 1.25.0 — 2026-11-25
 
 - Zigbee list (Odoo #1905): a device with a GA sticker reads "Thermostat (TRV-SON-12)" instead of "Thermostat 1". Only in this list; HA names are unchanged. When the device has no label file, the list says so. Needs the greenautarky_site version that sends `label`; against an older one the list looks as before.
