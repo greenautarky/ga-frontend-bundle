@@ -22,7 +22,8 @@ def _html(**kw):
 
 
 def test_fixture_is_the_contract():
-    assert hashlib.sha256(FIXTURE.read_bytes()).hexdigest() == "364ff5a60831f699f554beb03282969d42115f485e4baed985396ad5681137eb"
+    assert hashlib.sha256(FIXTURE.read_bytes()).hexdigest() == (
+        "364ff5a60831f699f554beb03282969d42115f485e4baed985396ad5681137eb")
 
 
 @pytest.mark.parametrize("ieee,name,shown", [
@@ -57,6 +58,7 @@ def test_a_labelled_name_is_still_escaped():
 
 
 def test_the_label_rule_is_the_maintenance_cards():
-    for t in ("THD-SON-00000202", "TRV-SON-00000007", "Thermostat 1", "", "TRV-SON-", "REN-GIR-00000100"):
+    for t in ("THD-SON-00000202", "TRV-SON-00000007", "Thermostat 1", "", "TRV-SON-",
+              "REN-GIR-00000100"):
         e = f"gaLabel({json.dumps(t)})"
         assert run_js(CARD, f"JSON.stringify({e})") == run_js(MAINT, f"JSON.stringify({e})"), t
