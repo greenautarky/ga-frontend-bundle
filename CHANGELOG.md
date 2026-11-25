@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.27.0 — 2026-11-25
+
+**Boost from the room's own card, in one tap** (asked for 2026-11-17).
+
+It was already possible and nobody could find it. `ga_heating.boost` has always taken an `entity_id`, and the whole-home card can boost a selection of rooms — but behind a room picker, on a card whose own header calls it "the whole-home heating controls". Meanwhile the room's own card had shown a *running* boost since 1.19.x, with a `Beenden` button beside it: a resident who found the stop had nowhere to look for the start.
+
+- **A Boost button on `ga-thermostat-card`**, on its own row directly under KI / MANUEL / AUS. One tap asks for 15 minutes — the same number the house button uses, pinned by a test so the two cannot drift. `boost_minutes:` overrides it for a hand-written dashboard, clamped to 1…240 so a typo is a short boost rather than a service call ga_heating rejects.
+- It reaches every layout, because it rides on `_modeRow` — `classic`, `setpoint` and `dial` all compose through it.
+- **Hidden exactly when a press could not win**, which is ga_heating's own precedence (window > ichb > boost > absence > slot): no button with a window open or a balancing run in progress, because the service would accept the press and the valves would not move — the same lie as a `Beenden` on an open window. During an **Urlaub** it stays, since a boost outranks an absence. While a boost runs, the row above is the control.
+- The press always sends an explicit `temperature`, and it is **3 °C above whichever is higher, the room or the setpoint it is on**, capped at the room's `max_temp`. 3 is ga_heating's own `BOOST_STEP`. Above the *room*, not merely above the setpoint, because an AUS room's radiators sit at their frost value and `frost + 3` is 11 °C in a room at 19 — a press that sent that would be a button that did nothing.
+- **While a boost runs the card shows the word `Boost` where the target number goes**, and drops the controls that cannot move it — the − / + in `classic` and `setpoint`, the drag on the `dial`, and the `ZIEL` caption. The row beneath still says *Boost noch 14 min — bis 10:05* with its `Beenden`, and the controls come back with it.
+
+### Why it no longer asks for 30 °C, and shows a word instead
+
+Both boost buttons used to send the room's `max_temp` to emulate "open the valves 100 %". It did open them — and every room card then read **30.0**, because `target_temperature` reports the setpoint the *radiators* are on, not what the plan intends. A resident reading that as "this room is being driven to 30 degrees" is reading the number correctly ("30 is not accurate, we dont want to reach 30", 2026-11-18).
+
+A TRV calls for heat on the gap between its setpoint and what it reads, and a room does not climb 3 K in fifteen minutes — so for a run this short, 3 °C holds the valve open exactly as 30 did, while asking for nothing that could be overshot into if the run is ever extended. What it deliberately does **not** touch is `valve_opening_degree`: that is how far the valve opens once the TRV has decided to heat, not the lever that makes it decide, and on this hardware it never moves off 100 anyway (14 827 samples over 30 days on one device, all 100.0).
+
+The number is honest again at 3 °C, but it is still the *override's* number rather than the room's own decision, and `24.0` on a room somebody set to 21 invites the same question `30.0` did. So for the minutes it runs, the slot says what is happening instead of to what. The − / + go with it because they provably cannot move it: `_apply` keeps writing the override's value to the valves for as long as the boost outranks the room's stored decision, so a press lands, is kept for afterwards, and shows nothing meanwhile. This card already hides a control that cannot win — the Boost button itself, with a window open.
+
+The whole-home card changed with it, including its wording: "voll aufgedreht" and "Ventile ganz offen" were describing the 30 °C emulation.
+
+**Nothing changed about where a boost hands the room back to.** It lives in ga_heating's `_overrides` and never touched the stored mode or `manual_until`, so a room boosted out of MANUELL returns to MANUELL at its own setpoint with its original clock still running, and one boosted out of KI returns to KI on the current slot. A manual period that would have ended during the boost ends there, which is right: a boost should not extend a decision the resident time-boxed.
+
+### Why it is not in the mode row, and not in the timer row
+
+`KI / MANUEL / AUS` come from `hvac_modes` and are states a room can be left in; a boost runs *over* whichever is chosen and hands the room back. In that row it would read as a fourth state, and the row's own `s.state === m` highlight has nothing true to say about it.
+
+The manual/override row was the tempting home, because `Beenden` already lives there — but that row renders **nothing** for a room following its plan, deliberately, so such a room grows no empty timer (`test_no_override_renders_nothing`). Reaching the common case from inside it would have meant breaking that rule, so the button got a row of its own.
+
+### Tests
+
+40 cases in `tests/test_thermostat_room_boost.py`, running the shipped bytes in a VM. Each guard was verified red against a mutation of the thing it guards: the row not appended to `_modeRow` (2 red), the precedence rule dropped (3 red), the button missing from the delegated click selector (2 red), the temperature omitted from the call (2 red), the duration left unclamped (2 red), and for the change below: the room ignored in favour of the setpoint alone, the cap dropped, `max_temp` sent again, the rounding removed, the number left in place in each of the three layouts, the − / + and the dial drag left live, the pending value painted over the word, an inactive boost counted as running, and the two cards' step allowed to drift (14 mutations, every one red).
+
+One of them found a defect in the first version of this change before it ever ran on a device: `Number(null)` is `0` and passes `Number.isFinite`, so a room publishing `max_temp: null` would have been boosted to **0 °C** — the exact opposite of the press. The guard is now `isFinite(max) && max > 0`.
+
 ## 1.25.0 — 2026-11-25
 
 - Zigbee list (Odoo #1905): a device with a GA sticker reads "Thermostat (TRV-SON-12)" instead of "Thermostat 1". Only in this list; HA names are unchanged. When the device has no label file, the list says so. Needs the greenautarky_site version that sends `label`; against an older one the list looks as before.

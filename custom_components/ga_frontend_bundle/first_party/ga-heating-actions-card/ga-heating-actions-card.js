@@ -199,6 +199,40 @@ function roomName(state) {
   return a.friendly_name || a.area_id || "";
 }
 
+//: How far above a room a boost asks for. 3 °C since 2026-11-18, replacing the
+//: room's `max_temp`: 30 opened the valves, and then every room card read
+//: `30.0`, because a room reports the setpoint its RADIATORS are on ("30 is not
+//: accurate, we dont want to reach 30", 2026-11-18). 3 is ga_heating's own
+//: `BOOST_STEP`, the step the service picks when no temperature is sent, and a
+//: room does not climb 3 K in fifteen minutes — so the valve stays open for the
+//: whole run either way.
+const BOOST_STEP = 3;
+
+/**
+ * The setpoint a boost asks for in one room: `BOOST_STEP` above whichever is
+ * higher, the room or the setpoint it is on, capped at what the room accepts.
+ *
+ * ABOVE THE ROOM, not merely above the setpoint: an AUS room's radiators sit at
+ * their frost value, and `frost + 3` is 11 °C in a room at 19 — a boost that
+ * sent that would be a button that did nothing.
+ *
+ * SECOND COPY, deliberately: nothing in first_party/ imports anything, and
+ * `_boostTarget` in ga-thermostat-card.js is this same rule for a single room.
+ * The two must agree, so a test pins their step exactly as one already pins the
+ * duration.
+ */
+function boostTarget(state) {
+  const a = (state && state.attributes) || {};
+  const max = Number(a.max_temp);
+  const ceiling = Number.isFinite(max) && max > 0 ? max : TMAX;
+  const base = [Number(a.temperature), Number(a.current_temperature)]
+    .filter((v) => Number.isFinite(v) && v > 0);
+  if (!base.length) return ceiling;
+  // One decimal: `current_temperature` arrives with the sensor's own, and a
+  // room reading 19.37 would otherwise ask its valve for 22.37.
+  return Math.round(Math.min(Math.max(...base) + BOOST_STEP, ceiling) * 10) / 10;
+}
+
 //: What a balancing run asks for, and the room temperature it needs to be worth
 //: running at all.
 //:
@@ -405,9 +439,10 @@ class GaHeatingActionsCard extends HTMLElement {
    * Boost the SELECTED rooms for a few minutes.
    *
    * "Open all valves 100 %" is what was asked for; what the stack can express is
-   * a SETPOINT, so this asks for each room's own max_temp — the warmest thing it
-   * will accept — and ga_heating drives the valves there. That is an emulation
-   * and the card says so rather than claiming a valve position it never sends.
+   * a SETPOINT, so this asks for one a few degrees above each room — see
+   * `boostTarget` for which, and for why it is no longer `max_temp` — and
+   * ga_heating drives the valves there. That is an emulation and the card says
+   * so rather than claiming a valve position it never sends.
    *
    * THE SELECTION, not every room. The room picker sits directly above this
    * button and this button ignored it: pick Badezimmer, press Boost setzen, and
@@ -429,10 +464,9 @@ class GaHeatingActionsCard extends HTMLElement {
     const failed = [];
     for (const id of rooms) {
       const st = this._hass.states[id];
-      const max = Number((st.attributes || {}).max_temp) || TMAX;
       try {
         await this._hass.callService("ga_heating", "boost", {
-          entity_id: id, minutes: this._minutes, temperature: max,
+          entity_id: id, minutes: this._minutes, temperature: boostTarget(st),
         });
         ok += 1;
       } catch (e) {
@@ -442,9 +476,12 @@ class GaHeatingActionsCard extends HTMLElement {
     // Count what happened, never "done". A loop that failed on two of five rooms
     // and reported success is the shape of failure this project keeps paying for.
     if (failed.length) {
-      this._say("err", `${ok} von ${rooms.length} Räumen auf voll — nicht erreicht: ${failed.join(", ")}.`);
+      // NOT "auf voll" / "voll aufgedreht" any more: the press asks for a few
+      // degrees above each room, not for the maximum, and a message that says
+      // otherwise is the same inaccuracy the 30 °C was.
+      this._say("err", `${ok} von ${rooms.length} Räumen im Boost — nicht erreicht: ${failed.join(", ")}.`);
     } else {
-      this._say("ok", `${nRooms(ok)} für ${this._minutes} Minuten voll aufgedreht. `
+      this._say("ok", `${nRooms(ok)} für ${this._minutes} Minuten im Boost. `
         + `Danach gilt wieder der Plan.`);
     }
   }
@@ -1075,9 +1112,14 @@ class GaHeatingActionsCard extends HTMLElement {
       // The running sentence still drops the word "Boost" — the heading above
       // the "i" says it, and "BOOST · Läuft in 2 Räumen im Boost" says it
       // twice.
+      //: The wording follows what the press now sends: a setpoint a few degrees
+      //: above each room for a few minutes, not the maximum. "Ventile ganz
+      //: offen" was describing the 30 °C emulation that went on 2026-11-18.
       bh.textContent = live.length
-        ? `Läuft in ${nRooms(live.length, true)} · Ventile ganz offen.`
-        : "Öffnet die Ventile kurzzeitig ganz.";
+        ? `Läuft in ${nRooms(live.length, true)} · ${BOOST_STEP} °C über Soll.`
+        : `Heizt die Räume kurz kräftig auf — ${BOOST_STEP} °C über dem aktuellen `
+          + `Soll, danach gilt wieder der Plan.`;
+
     }
 
     // The heading says what the hour is for; while a run is going it says how
