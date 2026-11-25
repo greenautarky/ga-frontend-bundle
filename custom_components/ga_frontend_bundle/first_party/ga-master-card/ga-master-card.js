@@ -60,6 +60,32 @@ function batteryLevel(pct) {
 }
 
 /**
+ * A GA asset label, tidied: THD-SON-00000202 becomes THD-SON-202, null for anything
+ * else. Same function as in ga-maintenance-card.js; a test compares the two.
+ */
+function gaLabel(text) {
+  const m = /^([A-Z]{2,4})-([A-Z]{2,4})-0*(\d+)$/.exec(String(text || "").trim());
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/** "Thermostat 1" with a sticker reads "Thermostat (TRV-SON-12)": the label replaces the
+ *  running number. Without a label the name stays as it is (Odoo #1905). */
+function zigbeeName(d) {
+  const label = gaLabel(d.label);
+  if (!label) return String(d.name == null ? "" : d.name);
+  return `${String(d.name || "").replace(/\s+\d+$/, "")} (${label})`;
+}
+
+/** Why no label is shown. "" when the device has its labels, or an older server sends none. */
+function zigbeeLabelNote(labels) {
+  if (!labels || labels.status === "ok") return "";
+  const text = labels.status === "missing"
+    ? "Die Geräte-Labels wurden noch nicht übertragen."
+    : "Die Geräte-Labels sind nicht lesbar.";
+  return `<div class="muted zb-note">${text}</div>`;
+}
+
+/**
  * The Zigbee device table (Odoo #2144). `devices` arrives sorted by room from
  * the server; a device with no room says "ohne Raum" instead of being left out.
  * Weak values are marked with TEXT as well as colour, so they read on a
@@ -83,7 +109,7 @@ function renderZigbeeDevices(devices) {
         ql === "none"
           ? '<span class="muted">–</span>'
           : `<span class="lvl ${ql === "weak" ? "bad" : ""}">${esc(d.lqi)}${ql === "weak" ? " schwach" : ""}</span>`;
-      return `<tr class="zb-row" data-device="${esc(d.device_id)}"><td class="zb-name">${esc(d.name)}</td><td class="zb-room">${room}</td><td class="zb-batt">${battery}</td><td class="zb-lqi">${lqi}</td></tr>`;
+      return `<tr class="zb-row" data-device="${esc(d.device_id)}"><td class="zb-name">${esc(zigbeeName(d))}</td><td class="zb-room">${room}</td><td class="zb-batt">${battery}</td><td class="zb-lqi">${lqi}</td></tr>`;
     })
     .join("");
   return (
@@ -308,7 +334,7 @@ class GaMasterCard extends HTMLElement {
     const sw = this._root.querySelector(".sw");
     try {
       const d = await this._api("GET", API_ZIGBEE);
-      zb.innerHTML = renderZigbeeDevices(d.devices);
+      zb.innerHTML = zigbeeLabelNote(d.labels) + renderZigbeeDevices(d.devices);
     } catch (e) {
       zb.innerHTML = `<div class="muted">Zigbee-Geräte nicht verfügbar: ${esc(this._errText(e))}</div>`;
     }

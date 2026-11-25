@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.24.0 — 2026-11-16
+## 1.26.0 — 2026-11-16
 
 The schedule card shows the owner's limits, and says whose they are.
 
@@ -11,6 +11,10 @@ A building's owner can now bound what a weekly plan may be set to — a whole-da
 - **The card clamps on input**, so the resident sees the number that will be stored rather than discovering it afterwards. `boundsAt` mirrors `limits_at` in `ga_heating`; the test walks the midnight wrap and both boundary minutes, which is where a hand-rolled range check goes wrong.
 - Nothing is shown to a building that has set no limits: there is no rule to explain.
 - Needs ga-heating 0.16.0 for `limits` and `limit_windows` on `GET /api/ga_heating/schedule`. An older component sends neither and the card falls back to its own 5–30 envelope, exactly as before.
+
+## 1.25.0 — 2026-11-25
+
+- Zigbee list (Odoo #1905): a device with a GA sticker reads "Thermostat (TRV-SON-12)" instead of "Thermostat 1". Only in this list; HA names are unchanged. When the device has no label file, the list says so. Needs the greenautarky_site version that sends `label`; against an older one the list looks as before.
 
 ## 1.23.11 — 2026-11-16
 
