@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.25.0 — 2026-11-25
+
+- Zigbee list (Odoo #1905): a device with a GA sticker reads "Thermostat (TRV-SON-12)" instead of "Thermostat 1". Only in this list; HA names are unchanged. When the device has no label file, the list says so. Needs the greenautarky_site version that sends `label`; against an older one the list looks as before.
+
 ## 1.23.11 — 2026-11-16
 
 The resident's Einstellungen page (Odoo #2144, #2145, #2146), from the K31 hand test of BOSv1.6.1-rc1. Needs greenautarky_site >= 2.13.0 (the two new blocks read its endpoints; against an older one each block says "nicht verfügbar" and nothing else changes) and ga_manager >= 0.277.6 for the release headline.
