@@ -80,6 +80,138 @@ function tempAt(slots, hhmm) {
   return passed.length ? passed[passed.length - 1].temp : sorted[sorted.length - 1].temp;
 }
 
+/* --- can this slot actually be reached? -------------------------------------
+ *
+ * A plan can ask for something the room cannot do. Six degrees by 06:00 is a
+ * wish if the previous slot ends at 05:00 and the room climbs a degree every
+ * two hours, and nothing on this screen said so — the resident found out by
+ * being cold. So every slot whose target RISES gets the two facts that decide
+ * it: when pre-heating has to start, and whether there is room for it.
+ *
+ * THE ARITHMETIC IS HMVAPP'S, deliberately copied rather than invented, so the
+ * card and the thing that actually pre-heats cannot disagree:
+ *
+ *     need  = (target - previous - 0.1) * hours_per_degree
+ *     start = slot_time - need + 10 minutes
+ *
+ * The 0.1 is its `extra_preheating_factor` and the +10 minutes is the slack it
+ * adds back in `latest_start_time`. Both are quirks; agreeing with them matters
+ * more than tidying them.
+ *
+ * FROM THE PREVIOUS SLOT'S TARGET, not from the room's temperature right now.
+ * Only the next slot could use a live reading, and a badge that meant one thing
+ * on one row and something else on the other four would be worse than a badge
+ * that means the same everywhere: "starting from where the plan says this room
+ * should be".
+ */
+const PREHEAT_FLOOR_K = 0.1;
+const PREHEAT_SLACK_MIN = 10;
+/*
+ * What to assume while a room is still learning its own rate.
+ *
+ * NOT 0.5. That is the figure the hmvapp add-on falls back to, and it is
+ * optimistic by roughly four times against a measured fleet reality nearer 2.2
+ * h/K — so a slot that cannot be reached reads as comfortable, which is the one
+ * error this whole feature exists to prevent. A provisional number has to fail
+ * towards "zu knapp": a false warning can be looked at, false comfort is found
+ * out about by being cold.
+ *
+ * SIBLING ROOMS FIRST, constant second. Rates do not generalise ACROSS flats —
+ * one Potsdam flat measured about twice as slow as everywhere else (5-flat
+ * check, 2026-11-09) — but rooms inside one home share a boiler, a flow
+ * temperature and a building, so the rooms next door are the best guess
+ * available for a room that has not spoken yet. The constant is only for a flat
+ * where nothing has learned anything.
+ */
+const FLEET_HOURS_PER_K = 2.2;
+/*
+ * EVERY TIME ON THIS CARD IS APPROXIMATE, and is shown that way: quarter hours,
+ * prefixed "ca.". The inputs do not support minutes. The rate is a median over
+ * a handful of heat-ups, the starting point is the previous slot's target
+ * rather than the room's actual temperature, and for a room still learning the
+ * number came from the radiators next door. "ab 00:22" claims a precision none
+ * of that has; "ab ca. 00:15" says the same thing honestly.
+ *
+ * THE TWO DIRECTIONS ARE NOT THE SAME. A pre-heat start rounds DOWN, because
+ * starting a quarter hour early costs a little heat and starting late misses
+ * the slot. An earliest-workable time rounds UP, because it is a minimum:
+ * rounding 12:38 down to 12:30 would name a time that still does not work.
+ *
+ * AND THE TWO GRIDS ARE NOT THE SAME EITHER. A pre-heat start is information —
+ * nobody types it — so it is shown to five minutes (asked for 2026-11-20). An
+ * earliest-workable time is a SUGGESTION, and a slot only accepts
+ * `SNAP_MINUTES`, so offering 12:45 on a 30-minute grid names a time the
+ * resident cannot enter. It rounds up onto the grid it is meant for.
+ *
+ * None of this is the dominant error. The estimate starts from the PREVIOUS
+ * SLOT'S TARGET rather than the room's real temperature, and those differ by
+ * half a degree to a degree routinely — one to two hours at a typical rate. The
+ * rounding is honesty about that, not the source of it.
+ */
+const ROUND_MIN = 5;
+//: Under a quarter hour of pre-heating the plan is comfortable and the line is
+//: noise on a phone. This is a SIGNIFICANCE floor, not a resolution: it stays at
+//: 15 while the increment above is 5, because "is it worth saying" and "how
+//: precisely" are different questions.
+const PREHEAT_MIN_NOTE_MIN = 15;
+
+const floorTo = (mins) => Math.floor(mins / ROUND_MIN) * ROUND_MIN;
+const ceilTo = (mins) => Math.ceil(mins / ROUND_MIN) * ROUND_MIN;
+
+function hhmmToMin(t) {
+  const [h, m] = String(t || "").split(":");
+  const mins = Number(h) * 60 + Number(m);
+  return Number.isFinite(mins) ? mins : null;
+}
+
+function minToHhmm(mins) {
+  const m = ((Math.round(mins) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
+/**
+ * `{kind, preheat, earliest, need}` for the slot at `i`, or null when the slot
+ * is not a heat-up and there is therefore nothing to promise.
+ *
+ * `kind` is `unknown` when the room has not measured its rate yet — which is
+ * most rooms for their first few days. Saying so is the point: the number this
+ * would otherwise fall back to is a fleet default of 0.5 h/K against a measured
+ * reality nearer 2.2, and a card that cheerfully says "reached" on that is the
+ * failure this feature exists to prevent.
+ */
+function reachability(list, i, hoursPerDegree) {
+  const slots = (list || []).filter((s) => s && s.time != null && s.temp != null);
+  if (slots.length < 2) return null;
+  const sorted = [...slots].sort((a, b) => String(a.time).localeCompare(String(b.time)));
+  const self = (list || [])[i];
+  if (!self) return null;
+  const at = sorted.findIndex((s) => s.time === self.time && s.temp === self.temp);
+  if (at < 0) return null;
+  const prev = sorted[(at - 1 + sorted.length) % sorted.length];
+
+  const rise = Number(self.temp) - Number(prev.temp) - PREHEAT_FLOOR_K;
+  if (!(rise > 0)) return null;
+  if (!(hoursPerDegree > 0)) return { kind: "unknown" };
+
+  const need = rise * hoursPerDegree * 60 - PREHEAT_SLACK_MIN;
+  if (need < PREHEAT_MIN_NOTE_MIN) return null;
+
+  const selfMin = hhmmToMin(self.time);
+  const prevMin = hhmmToMin(prev.time);
+  if (selfMin == null || prevMin == null) return null;
+  // Wrapping, because the slot before 00:00 is the last one of the day.
+  const windowMin = ((selfMin - prevMin) % 1440 + 1440) % 1440 || 1440;
+
+  if (need <= windowMin) {
+    return { kind: "ok", preheat: minToHhmm(floorTo(selfMin - need)), need };
+  }
+  // The earliest this target IS reachable: pre-heating cannot begin before the
+  // previous slot, because until then the room is being held lower still.
+  return { kind: "tight", preheat: minToHhmm(floorTo(selfMin - need)),
+           earliest: minToHhmm(Math.ceil((prevMin + need) / SNAP_MINUTES)
+             * SNAP_MINUTES), need };
+}
+
 /**
  * `slots` grown to exactly SLOTS_PER_DAY, or returned untouched when it already
  * has that many or MORE.
@@ -236,6 +368,43 @@ function curveAxisHtml(slots) {
   return curveAxisLabels()
     .map((label) => `<span>${label}</span>`)
     .join("");
+}
+
+/**
+ * The note that rides on a rising slot: when pre-heating starts, or why it
+ * cannot get there. Empty string for a slot that only holds or drops.
+ */
+function reachHtml(list, i, rate, samples) {
+  // `rate` is `{value, provisional}`: a room that has measured its own, or the
+  // stand-in a room still learning is shown against. A provisional note says so
+  // on its face — `~` and "wird noch gelernt" — because the number it rests on
+  // is a neighbour's, not this room's.
+  const value = rate ? rate.value : null;
+  const provisional = Boolean(rate && rate.provisional);
+  const r = reachability(list, i, value);
+  if (!r) return "";
+  if (r.kind === "unknown") {
+    // Only reachable with no rate at all anywhere, which means a flat where
+    // nothing has been measured AND the constant was somehow unusable.
+    return '<span class="reach unknown" title="Dieser Raum hat noch nicht genug '
+      + 'Aufheizvorgänge gemessen. Sobald er sie hat, steht hier, wann das '
+      + 'Vorheizen beginnt.">Aufheizdauer noch unbekannt</span>';
+  }
+  const hours = (r.need / 60);
+  const basis = provisional
+    ? "Noch kein eigener Messwert für diesen Raum — geschätzt aus vergleichbaren "
+      + `Räumen: rund ${hours.toFixed(1)} h ab der vorherigen Stufe. Der Wert wird `
+      + "genauer, sobald dieser Raum ein paar Mal aufgeheizt hat."
+    : `Gemessen an ${samples} Aufheizvorgang${samples === 1 ? "" : "en"}`
+      + ` dieses Raums: rund ${hours.toFixed(1)} h ab der vorherigen Stufe.`;
+  const hint = provisional ? '<em class="prov">wird noch gelernt</em>' : "";
+  if (r.kind === "ok") {
+    return `<span class="reach ok${provisional ? " prov" : ""}" title="${esc(basis)}">`
+      + `ab ca. ${esc(r.preheat)} vorheizen${hint}</span>`;
+  }
+  return `<span class="reach tight${provisional ? " prov" : ""}" title="${esc(basis)}">`
+    + '<ha-icon icon="mdi:alert-outline"></ha-icon>'
+    + `zu knapp — frühestens ca. ${esc(r.earliest)}${hint}</span>`;
 }
 
 /**
@@ -443,6 +612,57 @@ class GaHeatingCard extends HTMLElement {
   }
 
   _slots() { return this._week[this._day] || []; }
+
+  /**
+   * How many hours this room takes per degree, or null while it does not know.
+   *
+   * Measured and published by ga_heating from the room's own heat-ups (see its
+   * `heatup.py`); `hours_per_degree` stays null until the room has enough of
+   * them. Null here means every slot says "noch unbekannt" rather than
+   * borrowing a number from somewhere it does not apply.
+   */
+  _rate() {
+    const own = this._measuredRate(this._config.entity);
+    if (own != null) return { value: own, provisional: false };
+    return { value: this._siblingRate() ?? FLEET_HOURS_PER_K, provisional: true };
+  }
+
+  /** What one room has MEASURED, or null while it has not. */
+  _measuredRate(entity) {
+    const st = this._hass && this._hass.states && this._hass.states[entity];
+    const r = (st && st.attributes && st.attributes.heating_rate) || null;
+    const v = r ? Number(r.hours_per_degree) : NaN;
+    return Number.isFinite(v) && v > 0 ? v : null;
+  }
+
+  /**
+   * The median rate of the OTHER rooms in this home, or null when none of them
+   * has measured one either.
+   *
+   * A ga_heating room carries `valves`; a raw TRV climate entity does not —
+   * the same discriminator the actions card uses, read from the entity rather
+   * than guessed from a name.
+   */
+  _siblingRate() {
+    const states = (this._hass && this._hass.states) || {};
+    const rates = Object.keys(states)
+      .filter((id) => id.startsWith("climate.") && id !== this._config.entity
+        && (states[id].attributes || {}).valves)
+      .map((id) => this._measuredRate(id))
+      .filter((v) => v != null)
+      .sort((a, b) => a - b);
+    if (!rates.length) return null;
+    const mid = Math.floor(rates.length / 2);
+    return rates.length % 2 ? rates[mid] : (rates[mid - 1] + rates[mid]) / 2;
+  }
+
+  /** The samples behind `_rate()`, for the tooltip. */
+  _rateSamples() {
+    const st = this._hass && this._hass.states
+      && this._hass.states[this._config.entity];
+    const r = (st && st.attributes && st.attributes.heating_rate) || null;
+    return r ? Number(r.samples) || 0 : 0;
+  }
   _sort() { this._week[this._day].sort((a, b) => a.time.localeCompare(b.time)); }
 
   _set(i, field, value) {
@@ -574,7 +794,26 @@ class GaHeatingCard extends HTMLElement {
            the one the theme already uses for "you changed this" (--ga-heat). */
         ga-heating-card .slot input.changed { border-color: var(--ga-heat,#ff8a3d);
           box-shadow: inset 0 0 0 1px var(--ga-heat,#ff8a3d); }
+        /* The reachability note. It wraps onto its own line on a phone rather
+           than squeezing the two inputs, which are what a resident presses. */
+        ga-heating-card .slot .reach { font-size:.8em; white-space:nowrap;
+          margin-left:auto; display:inline-flex; align-items:center; gap:3px; }
+        ga-heating-card .slot .reach.ok { opacity:.65; }
+        ga-heating-card .slot .reach.unknown { opacity:.45; font-style:italic; }
+        /* A provisional note is readable but visibly not a measurement: the
+           tilde carries it in text, this carries it at a glance. */
+        ga-heating-card .slot .reach .prov { font-style:italic; opacity:.75;
+          font-size:.9em; margin-left:4px; font-weight:400; }
+        ga-heating-card .slot .reach.ok.prov { opacity:.5; }
+        /* The one state a resident has to act on, so it is the one with colour. */
+        ga-heating-card .slot .reach.tight { color:var(--error-color,#c62828); opacity:1; }
+        ga-heating-card .slot .reach ha-icon { --mdc-icon-size:16px; }
+        @media (max-width:420px) {
+          ga-heating-card .slot { flex-wrap:wrap; }
+          ga-heating-card .slot .reach { margin-left:0; flex-basis:100%; }
+        }
         ga-heating-card .slot .was { font-size:.8em; opacity:.65; white-space:nowrap;
+
           flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
         ga-heating-card .pending { display:none; font-size:.85em; margin-bottom:10px;
           padding:6px 10px; border-radius:8px; background: rgba(255,138,61,.14);
@@ -670,6 +909,9 @@ class GaHeatingCard extends HTMLElement {
     // thermostat — "jetzt 18,0". Without it a resident editing a plan is asked
     // to remember the number they just overwrote (asked for 2026-10-02).
     const diff = dayDiff(list, (this._saved || {})[this._day]);
+    const rate = this._rate();                 // {value, provisional}
+    const samples = this._rateSamples();
+
     slots.innerHTML = list.length
       ? list.map((s, i) => {
           const d = diff.rows[i] || {};
@@ -687,7 +929,7 @@ class GaHeatingCard extends HTMLElement {
           <div class="slot${d.added || parts.length ? " edited" : ""}">
             <input type="time" step="${SNAP_MINUTES * 60}" class="t${mark("time")}" value="${esc(s.time)}" data-i="${i}" data-f="time">
             <input type="number" class="v${mark("temp")}" min="${TMIN}" max="${TMAX}" step="0.5" value="${esc(s.temp)}" data-i="${i}" data-f="temp">
-            <span class="unit">°C</span>${was}
+            <span class="unit">°C</span>${was}${reachHtml(list, i, rate, samples)}
           </div>`;
         }).join("")
       : '<div class="empty">Dieser Tag hat noch keinen Plan, und das Thermostat meldet gerade keine Zieltemperatur — '
