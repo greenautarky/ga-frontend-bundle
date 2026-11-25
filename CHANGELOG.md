@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.28.0 — 2026-11-25
+
+**Every heat-up slot in the weekly plan says when pre-heating starts, and warns when the time is too tight** (asked for 2026-11-20).
+
+A plan can ask for something the room cannot do. Six degrees by 06:00 is a wish if the previous slot ends at 05:00 and the room climbs a degree every two hours — and nothing on the screen said so, so the resident found out by being cold. Each slot whose target *rises* now carries the two facts that decide it.
+
+- **`ab ca. 00:20 vorheizen`** on a slot that fits, inline in the row. Not a badge that only appears when something is wrong: a resident who can see the pre-heat start on the slots that work can also see *why* the warning appears on the one that does not.
+- **`zu knapp — frühestens ca. 13:00`**, in the error colour with an icon, on a slot that cannot be reached — and it names the earliest time that *would* work rather than only objecting. Warn-only: the plan is still saved as typed. Telling a resident their 06:00 is unreachable and then moving it for them is two different products.
+- **The suggested time lands on the grid the input can actually set.** The time field ships `step=1800`, so a suggestion of `12:45` is a time the resident cannot select; the earliest workable time is rounded **up** onto the 30-minute grid.
+- **Both roundings err away from a broken promise.** The pre-heat start rounds **down** (start earlier than strictly needed) and the earliest workable time rounds **up** (ask for later than strictly needed). A rounding that went the other way would print a time that misses.
+- **Approximate on its face** — `ca.`, 5-minute increments on `vorheizen`, 30 on `frühestens`. The underlying rate is a measurement with scatter; minute precision would claim an accuracy nothing here has.
+- **Nothing under 15 minutes of pre-heat is annotated.** A slot needing four minutes does not need a line of text on a phone.
+- The arithmetic is **copied from the add-on that actually pre-heats**, including its quirks: `(target − previous − 0.1) × hours_per_degree`, start at `slot − need + 10 min`. The 0.1 and the 10 minutes are its `extra_preheating_factor` and the slack in its `latest_start_time`. Agreeing with the thing that does the work matters more than tidying the formula.
+- Measured **from the previous slot's target**, not from the room's temperature right now. Only the next slot could use a live reading, and a note meaning one thing on one row and something else on the other four is worse than one that means the same everywhere: "starting from where the plan says this room should be".
+- It wraps midnight — the slot before the first one of the day is the **last** one.
+
+### Where the rate comes from, and what it says while there isn't one
+
+`heating_rate.hours_per_degree` on the room's own `climate` entity, published by **ga-heating from the room's own measured heat-ups**. A room that has not measured enough of them yet is shown against a stand-in, and the note says so on its face: a `~` before the time and *wird noch gelernt* beside it, with a tooltip naming the estimate as an estimate.
+
+The stand-in is the **median of the other rooms in the same home**, falling back to a constant of 2.2 h/K. Deliberately **not** 0.5, which is the add-on's own fallback: it is optimistic by roughly four times against measured reality, so a slot that cannot be reached would read as comfortable — the one error this whole feature exists to prevent. A provisional number has to fail towards *zu knapp*; a false warning can be looked at, false comfort is found out about by being cold. Sibling rooms first because rates do **not** generalise across flats (one Potsdam flat measured about twice as slow as everywhere else, 5-flat check 2026-11-09), but rooms inside one home share a boiler, a flow temperature and a building.
+
+A published rate that is `0`, negative or not a number is treated as **no measurement**, not as an infinitely fast room.
+
+> **Needs ga-heating >= 0.17.3** for a room's *own* measured rate. Against an older engine every room falls back to the sibling median and then the constant, marked provisional — the feature works, it is just not yet measuring this building.
+
+### Tests
+
+23 cases in `tests/test_schedule_reachability.py`, running the shipped bytes in a VM. Every guard verified red against a mutation of the thing it guards (17 mutations): every slot annotated rather than only the rises, the noise floor removed, each of the add-on's two quirks tidied away, the stand-in dropped, the earliest time not offered, midnight not wrapping, the warning indistinguishable from the calm case, the note never reaching the rendered row, a zero rate taken as a measurement, the stand-in drifting back to 0.5, a borrowed rate presented as a measurement, the sibling lookup skipped, each rounding reversed, and minute precision claimed again.
+
+Two of them caught defects before this ran anywhere: the first version suggested `frühestens ca. 12:45` on a 30-minute slot grid — a time the resident cannot type — and an earlier one printed *Aufheizdauer noch unbekannt* on every falling slot in a flat with no measurements.
+
 ## 1.25.0 — 2026-11-25
 
 - Zigbee list (Odoo #1905): a device with a GA sticker reads "Thermostat (TRV-SON-12)" instead of "Thermostat 1". Only in this list; HA names are unchanged. When the device has no label file, the list says so. Needs the greenautarky_site version that sends `label`; against an older one the list looks as before.
